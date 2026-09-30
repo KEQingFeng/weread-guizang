@@ -18,6 +18,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -31,11 +32,38 @@ from urllib.parse import urlparse, parse_qs
 import platform_compat as pc
 
 REPO = os.path.dirname(os.path.abspath(__file__))
-# 解释器按平台解析：Windows 的虚拟环境在 Scripts 子目录（python.exe），
-# 原来写死 POSIX 的 .venv/bin/python，Windows 上所有「起子进程」的功能都是一点就哑火。
-PY = pc.venv_python(REPO)
-OUT_DIR = os.path.join(REPO, "output")
-CACHE_DIR = os.path.join(REPO, "cache")
+
+
+def py():
+    """该用哪个解释器 —— 每次现算，不在导入时定死。
+
+    解释器按平台解析：Windows 的虚拟环境在 Scripts 子目录（python.exe），原来写死
+    POSIX 的 .venv/bin/python，Windows 上所有「起子进程」的功能都是一点就哑火。
+
+    之所以是个函数而不是常量：首次运行时虚拟环境还不存在，此刻只能用系统 Python；
+    等「我思故我在」把 .venv 建好，后面起的任务必须立刻换成 .venv 里的解释器 ——
+    导入时算一次的话，会一直攥着那个「还没装依赖的系统 Python」去跑引擎，
+    表现为配好环境后第一次取书仍然报「找不到 playwright」。
+    """
+    return pc.venv_python(REPO)
+
+
+def script(name):
+    """项目脚本的绝对路径。
+
+    子进程的工作目录是数据目录，不是源码目录 —— 引擎与登录脚本里的
+    `output/`、`cache/` 都是相对路径（见 export_precise.py:1248、login.py:31），
+    让 cwd 落在数据那头，它们就自己写对了地方，一行都不用改。
+    代价是脚本名不能再靠 cwd 去找，必须给全路径。
+    """
+    return os.path.join(REPO, name)
+
+
+# 数据落在哪由 platform_compat 一处说了算：源码直接跑 = 项目目录本身，
+# 装成 app = 壳通过 GUIZANG_DATA 指到用户目录（包体不写东西）。
+DATA_DIR = pc.data_dir(REPO)
+OUT_DIR = os.path.join(DATA_DIR, "output")
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
 LOGIN_STATE = os.path.join(CACHE_DIR, "login_state.json")
 DOWNLOAD_DIR = os.path.join(CACHE_DIR, "downloads")
 LIB_PATH = os.path.join(CACHE_DIR, "library.json")
@@ -584,7 +612,7 @@ def shelf_add(book_ids):
         return {"ok": False, "msg": "上一次加书架还没结束，稍等一下再点"}
     try:
         proc = subprocess.run(
-            [PY, "shelf_add.py", *ids], cwd=REPO,
+            [py(), script("shelf_add.py"), *ids], cwd=DATA_DIR,
             capture_output=True, text=True, timeout=110)
         out = (proc.stdout or "").strip().splitlines()
         payload = None
@@ -964,18 +992,21 @@ def _reader(proc):
     log(f"--- 任务结束（退出码 {proc.returncode}）---")
 
 
-def start_task(kind, argv, book=None):
+def start_task(kind, argv, book=None, env_extra=None):
     with _lock:
         if TASK["running"]:
             return False, "已有任务在运行"
         TASK.update({"running": True, "kind": kind, "book": book,
                      "started_at": time.time(), "exit_code": None})
     log(f"--- 启动 {kind}" + (f" · {book}" if book else "") + " ---")
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    if env_extra:
+        env.update(env_extra)
     try:
         proc = subprocess.Popen(
-            argv, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            argv, cwd=DATA_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, errors="replace",
-            env={**os.environ, "PYTHONUNBUFFERED": "1"}, **pc.spawn_kwargs())
+            env=env, **pc.spawn_kwargs())
     except Exception as e:
         # 起不来就把状态回滚。原来这里直接抛异常：请求线程带着「running=True」一起死掉，
         # 于是第一次点击毫无反应（连接被掐断），之后每次点击都只回「已有任务在运行」。
@@ -1431,25 +1462,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(clear_log())
 
         if action == "install":
-            ok, msg = start_task("install", [PY, "-m", "playwright", "install", "chromium"])
+            # 只有这一步需要把系统代理翻成环境变量：playwright 的下载器是 Node，
+            # 不读系统代理设置，只认 HTTP_PROXY / HTTPS_PROXY。
+            # 取书任务不能带这个 —— 那是浏览器的流量，走代理反而可能把
+            # weread.qq.com 绕远甚至绕坏，浏览器有自己的代理配置。
+            notes = []
+            env_extra = pc.proxy_env(note=notes)
+            for n in notes:
+                log(f"      · {n}")
+            ok, msg = start_task("install", [py(), "-m", "playwright", "install", "chromium"],
+                                 env_extra=env_extra)
             return self._json({"ok": ok, "msg": msg})
 
         if action == "login":
-            ok, msg = start_task("login", [PY, "login.py"])
+            ok, msg = start_task("login", [py(), script("login.py")])
             return self._json({"ok": ok, "msg": msg})
 
         if action == "export":
             book_id = extract_book_id(book)
             if not book_id:
                 return self._json({"ok": False, "msg": "没能从里面认出书籍编号，看看是不是粘错了"})
-            ok, msg = start_task("export", [PY, "export_precise.py", book_id], book=book_id)
+            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id], book=book_id)
             return self._json({"ok": ok, "msg": msg, "id": book_id})
 
         if action == "images":
             book_id = (book or "").strip()
             if not safe_book_dir(book_id):
                 return self._json({"ok": False, "msg": "找不到这本书的导出目录"})
-            ok, msg = start_task("images", [PY, "download_images.py", book_id], book=book_id)
+            ok, msg = start_task("images", [py(), script("download_images.py"), book_id], book=book_id)
             return self._json({"ok": ok, "msg": msg})
 
         if action == "reveal":
@@ -1565,7 +1605,7 @@ def main():
     args = ap.parse_args()
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     # 先把这两行打出来：平台不对时，一眼就能看出用的是哪个解释器、浏览器装在哪
-    print(f"  解释器  : {PY}", flush=True)
+    print(f"  解释器  : {py()}", flush=True)
     print(f"  浏览器  : {MS_PLAYWRIGHT}", flush=True)
     for p in range(args.port, args.port + 20):
         try:

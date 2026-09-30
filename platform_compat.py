@@ -12,29 +12,60 @@
 """
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
+from urllib.request import getproxies
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 
 
+def data_dir(repo):
+    """数据（导出的书、缓存、虚拟环境）该放哪。
+
+    源码直接跑时就是项目目录本身，行为和以前一模一样。装成 app 之后源码在应用包
+    里面 —— 那儿不该被写，放进 /Applications 后还可能真的只读。所以壳会把
+    GUIZANG_DATA 指到用户目录，需要写的东西全都跟着它走，包体自始至终是干净的。
+    """
+    d = (os.environ.get("GUIZANG_DATA") or "").strip()
+    return os.path.expanduser(d) if d else repo
+
+
+def venv_dir(repo):
+    """虚拟环境的位置。跟 data_dir 走，不跟源码走。"""
+    return os.path.join(data_dir(repo), ".venv")
+
+
+def venv_python_only(repo):
+    """虚拟环境里的解释器；还没建就是 None。
+
+    Windows 的虚拟环境在 `.venv\\Scripts\\python.exe`，其余平台在 `bin/python`。
+    只认 `.venv/bin/python` 会让 Windows 上所有「起子进程」的功能一点就哑火。
+
+    与 venv_python 分开，是因为「建环境」那一步想知道的是「有没有」，
+    而不是「没有的话拿谁顶上」—— 后者会把 sys.executable 混进来，
+    让人误以为环境已经就绪。
+    """
+    base = venv_dir(repo)
+    for parts in (("Scripts", "python.exe"), ("bin", "python")):
+        p = os.path.join(base, *parts)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def venv_python(repo):
-    """项目虚拟环境里的解释器；没有虚拟环境就退回当前解释器。
+    """该用哪个解释器跑项目脚本：虚拟环境优先，没有就退回当前解释器。
 
     环境变量 GUIZANG_PYTHON 最优先（想指定别的解释器时用）。
-    Windows 的虚拟环境在 `.venv\\Scripts\\python.exe`，只认 `.venv/bin/python`
-    就会让「连接账号 / 取书 / 修复组件」全部起不来子进程。
     """
     override = (os.environ.get("GUIZANG_PYTHON") or "").strip()
     if override and os.path.isfile(override):
         return override
-    for parts in (("Scripts", "python.exe"), ("bin", "python")):
-        p = os.path.join(repo, ".venv", *parts)
-        if os.path.isfile(p):
-            return p
-    return sys.executable
+    return venv_python_only(repo) or sys.executable
 
 
 def ms_playwright_dir():
@@ -48,6 +79,62 @@ def ms_playwright_dir():
     if IS_MAC:
         return os.path.expanduser("~/Library/Caches/ms-playwright")
     return os.path.expanduser("~/.cache/ms-playwright")
+
+
+def _proxy_alive(url, timeout=0.7):
+    """代理地址的端口现在通不通。"""
+    try:
+        u = urlparse(url if "://" in url else "http://" + url)
+        host = u.hostname
+        port = u.port or (443 if u.scheme == "https" else 80)
+        if not host:
+            return False
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def proxy_env(base=None, note=None):
+    """把系统代理翻成 HTTP(S)_PROXY 环境变量，交给子进程。
+
+    为什么非要做这一步：pip 走 requests，在 macOS / Windows 上会自己去读系统代理；
+    可 playwright 下载 Chromium 是它自带的 Node 在干活，只认 HTTP_PROXY /
+    HTTPS_PROXY 这两个环境变量，压根不看系统设置。于是「浏览器能上网、命令行
+    不挂代理」的机器上，pip 装得好好的，轮到 Chromium 就下不动 —— 而这恰好是
+    国内最常见的配置（Clash 只开系统代理，不往 shell 里写 export）。
+
+    两个保险：
+      · 环境里已经有 HTTP(S)_PROXY 就原样尊重，不覆盖（CI 或用户显式指定时别添乱）；
+      · 探一下代理端口通不通，不通就不写。否则用户关了代理却留着系统设置，
+        本来直连能下成的东西，会被我们注入的死地址连累到全失败。
+    """
+    env = dict(os.environ if base is None else base)
+    if any((env.get(k) or "").strip()
+           for k in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")):
+        return env
+    try:
+        p = getproxies()
+    except Exception:
+        return env
+    # 只认 http/https。socks 代理 pip 要额外装 PySocks，playwright 更是不支持 ——
+    # 塞进去只会把本来能走通的直连也搞坏。
+    http = (p.get("http") or "").strip()
+    https = (p.get("https") or "").strip()
+    if not http and not https:
+        return env
+    probe = https or http
+    if not _proxy_alive(probe):
+        if note is not None:
+            note.append(f"系统里配了代理 {probe}，但它现在连不上，本次不用它")
+        return env
+    if http:
+        env["HTTP_PROXY"] = http
+    if https:
+        env["HTTPS_PROXY"] = https
+    if note is not None:
+        note.append(f"已顺带把系统代理 {probe} 传给下载步骤")
+    return env
 
 
 def spawn_kwargs():

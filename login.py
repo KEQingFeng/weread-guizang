@@ -66,21 +66,44 @@ async def main():
         await asyncio.sleep(2)
         print("  📱 请用微信扫窗口里的二维码（最长等 5 分钟）", flush=True)
 
+        # 收场时要写进 state 的那个地址：页面关掉之后 page.url 就不一定还在了，
+        # 所以在开等之前先记下来。
+        try:
+            last_url = page.url
+        except Exception:
+            last_url = SHELF_URL
+
         deadline = time.time() + SCAN_TIMEOUT
         logged = False
+        gone = False
         while time.time() < deadline:
             await asyncio.sleep(3)
-            if await is_logged_in(ctx):
-                logged = True
+            # 用户把扫码窗口关掉了 / 浏览器没了：再等满 5 分钟只是让他对着一个
+            # 不动的转圈发呆。认出来就立刻收工，由调用方决定下一步。
+            if page.is_closed():
+                gone = True
+                break
+            try:
+                if await is_logged_in(ctx):
+                    logged = True
+                    break
+            except Exception:
+                gone = True
                 break
         if logged:
             print("  ✅ 登录成功，会话已保存到 cache/browser_profile", flush=True)
-            write_state(True, page.url, "扫码登录成功")
+            write_state(True, last_url, "扫码登录成功")
+        elif gone:
+            print("  ⚠️  扫码窗口已关闭，不再等待", flush=True)
+            write_state(False, last_url, "窗口已关闭")
         else:
             print("  ❌ 等待扫码超时（5 分钟）", flush=True)
-            write_state(False, page.url, "扫码超时")
+            write_state(False, last_url, "扫码超时")
         await asyncio.sleep(1)
-        await ctx.close()
+        try:
+            await ctx.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
