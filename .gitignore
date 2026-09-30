@@ -4,3 +4,4 @@ cache/
 output/
 *.log
 .DS_Store
+dist/

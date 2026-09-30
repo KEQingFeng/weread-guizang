@@ -35,9 +35,33 @@
 
 ## 快速开始
 
+两条路选一条：**直接下载 Mac 程序**（不碰命令行），或者**自己从源码跑**（要改代码、或者用 Windows）。
+
+### 一、直接下载 Mac 程序
+
+[**下载 归藏-1.0.0.dmg**](安装包/归藏-1.0.0.dmg)（2 MB，macOS 13 以上，Intel 与 Apple 芯片都行）
+
+1. 双击 dmg，把里面的 **归藏.app** 拖进「应用程序」。
+
+2. **第一次打开**：在「应用程序」里按住 `Control` 点一下 归藏.app → 选「打开」→ 再点一次「打开」。
+
+   如果它不给「打开」这个选项，而是直接弹 **「归藏」已损坏，无法打开。你应该将它移到废纸篓。** —— 那不是文件坏了，是 macOS 对没签名应用的默认说辞（这个包是 ad-hoc 自签、没送公证）。打开「终端」，粘这一行，回车，再打开就正常：
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/归藏.app
+   ```
+
+   装在别的位置就把路径换成实际位置；提示 `Operation not permitted` 就在最前面加 `sudo`。不想开终端的话，去 **系统设置 → 隐私与安全性**，往下滚到「安全性」，找到刚被拦下的那条，点「仍要打开」。
+
+3. 第一次进去是首启页，点一下「我思故我在」。它会自己建虚拟环境、装依赖、下 Chromium（约 370MB，需要能连外网；用代理的机器请在代理软件里打开「系统代理」，它会自动继承），然后弹出浏览器扫码登录。之后每次打开都是一秒进。
+
+机器上要有 Python 3.9+，没有的话去 <https://www.python.org/downloads/> 装一个官方版，**装完不用重启**，回来再点一次就行。包内另有一份《首次打开必读.txt》；细节与替代做法在 [部署说明.md](部署说明.md) 第二节。
+
+### 二、自己从源码跑
+
 需要 Python 3.10+；要用 MCP 的话另需 Node（`node -v` 能出版本号即可）。
 
-### macOS / Linux
+#### macOS / Linux
 
 ```bash
 git clone https://github.com/KEQingFeng/weread-guizang.git
@@ -50,7 +74,29 @@ python3 -m venv .venv
 
 也可以双击 `启动归藏.command`（自己认目录，缺虚拟环境就自动建、自动装依赖；已在跑则直接开界面）。
 
-### Windows
+**或者让它变成一个真正的 Mac 程序**（双击就用，不开终端）：
+
+```bash
+./shell/build_macos.sh          # 产出 dist/归藏.app
+```
+
+把 `dist/归藏.app` 拖进「应用程序」即可。外壳是 Swift + WKWebView 写的原生应用 ——
+界面还是上面这套 `ui.html`，一行没改。第一次打开是首启页：点一下「我思故我在」，
+它自己把缺的（虚拟环境、依赖、Chromium）补齐，扫码登录后直接进界面；之后每次打开
+都是一秒进。不需要完整 Xcode，CommandLineTools 就够了。
+
+数据落在 `~/Library/Application Support/归藏/`（虚拟环境、导出的书、缓存、登录态），
+所以应用包本身保持只读、随便挪位置。
+
+想直接发给别人用，打成 dmg：
+
+```bash
+./shell/make_dmg.sh             # 产出 ~/Desktop/归藏-<版本>.dmg
+```
+
+就是上面「一、直接下载 Mac 程序」里那份东西，包里带着《首次打开必读.txt》。
+
+#### Windows
 
 ```bat
 git clone https://github.com/KEQingFeng/weread-guizang.git

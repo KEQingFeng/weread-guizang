@@ -7,12 +7,13 @@ import datetime, pathlib, re, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INCLUDE = ["ui.html", "ui_server.py", "export_precise.py", "download_images.py",
-           "platform_compat.py", "login.py", "shelf_add.py",
-           "启动归藏.command", "启动归藏.bat",
+           "platform_compat.py", "login.py", "shelf_add.py", "bootstrap.py",
+           "ui_check.py", "启动归藏.command", "启动归藏.bat",
            "README.md", "部署说明.md", "requirements.txt"]
-EXTRA_DIRS = ["tools", "mcp", "skills"]
+# shell/ 必须整份带上：光有 Python 源码，收到的人打不出那个 .app。
+EXTRA_DIRS = ["tools", "mcp", "skills", "shell"]
 SKIP_SUFFIX = {".pyc"}
-SKIP_PARTS = {"__pycache__", ".git", ".venv", "cache", "output"}
+SKIP_PARTS = {"__pycache__", ".git", ".venv", "cache", "output", "dist", "build"}
 
 # 内容体检规则：模式 → 说明。全是通用形状，不写具体值，免得规则本身带信息。
 PATTERNS = [

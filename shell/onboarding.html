@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>归藏</title>
+<style>
+  /* 色板与 ui.html 完全一致 —— 首启页和正式界面必须是同一个东西的两面，
+     不是两个软件。改这边的时候记得那边一起改。 */
+  :root{
+    --ink:#1a1e26;
+    --ink-2:#5b6373;
+    --ink-3:#8b93a3;
+    --line:rgba(20,24,32,.075);
+    --line-2:rgba(20,24,32,.13);
+    --glass-rgb:255,255,255;
+    --frost:.68;
+    --glass:rgba(var(--glass-rgb), var(--frost));
+    --solid:#fff;
+    --accent:#2f7ff0;
+    --accent-soft:rgba(47,127,240,.11);
+    --mint:#1f9e85;
+    --warn:#a97c22;
+    --err:#c8554a;
+    --shadow:0 1px 2px rgba(20,24,32,.04), 0 20px 44px -22px rgba(20,24,32,.24);
+    --sheen:inset 0 .5px 0 rgba(255,255,255,.72);
+    --r:20px; --r-sm:10px;
+    --spring:cubic-bezier(.32,.72,0,1);
+    --pop:cubic-bezier(.34,1.56,.64,1);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ink:#eceef3;
+      --ink-2:#a8b0c0;
+      --ink-3:#7c8598;
+      --line:rgba(255,255,255,.09);
+      --line-2:rgba(255,255,255,.15);
+      --glass-rgb:28,31,38;
+      --frost:.62;
+      --solid:#1e2128;
+      --accent:#5fa4f7;
+      --accent-soft:rgba(95,164,247,.15);
+      --mint:#3ec7a8;
+      --warn:#d4a24e;
+      --err:#e87a70;
+      --shadow:0 1px 2px rgba(0,0,0,.32), 0 20px 44px -22px rgba(0,0,0,.6);
+      --sheen:inset 0 .5px 0 rgba(255,255,255,.06);
+    }
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; display:grid; place-items:center; padding:28px;
+    font:13.5px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Helvetica Neue",sans-serif;
+    color:var(--ink); background:#eef1f6; -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  @media (prefers-color-scheme:dark){ body{background:#14171d} }
+
+  /* 背景：两团很淡的光晕，别让它抢戏 */
+  .halo{position:fixed; inset:0; pointer-events:none; overflow:hidden}
+  .halo i{
+    position:absolute; display:block; border-radius:50%;
+    filter:blur(70px); opacity:.5;
+    animation:drift 22s var(--spring) infinite alternate;
+  }
+  .halo i:nth-child(1){width:46vw; height:46vw; left:-12vw; top:-14vw; background:rgba(47,127,240,.22)}
+  .halo i:nth-child(2){width:38vw; height:38vw; right:-10vw; bottom:-12vw; background:rgba(31,158,133,.16); animation-delay:-8s}
+  @media (prefers-color-scheme:dark){
+    .halo i:nth-child(1){background:rgba(95,164,247,.16)}
+    .halo i:nth-child(2){background:rgba(62,199,168,.1)}
+  }
+  @keyframes drift{from{transform:translate3d(0,0,0) scale(1)} to{transform:translate3d(3vw,2vw,0) scale(1.12)}}
+
+  .stage{width:min(430px,100%); text-align:center; position:relative; z-index:1}
+
+  /* 进场：一列东西依次浮上来，别一起蹦出来 */
+  .rise{opacity:0; transform:translateY(9px); animation:rise .62s var(--spring) forwards}
+  @keyframes rise{to{opacity:1; transform:none}}
+
+  .seal{
+    width:62px; height:62px; margin:0 auto 15px; border-radius:19px; color:#fff;
+    background:linear-gradient(155deg,#4b93f2,#2568cc);
+    box-shadow:0 10px 26px -12px rgba(47,127,240,.8), inset 0 .5px 0 rgba(255,255,255,.5);
+    display:grid; place-items:center;
+  }
+  .seal svg{width:34px; height:34px; display:block}
+
+  h1{margin:0; font-size:25px; font-weight:600; letter-spacing:.13em; text-indent:.13em}
+  .sub{margin:9px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.75}
+
+  .card{
+    margin-top:26px; padding:6px 4px; border-radius:var(--r); text-align:left;
+    background:var(--glass); border:1px solid var(--line);
+    -webkit-backdrop-filter:blur(20px) saturate(1.6); backdrop-filter:blur(20px) saturate(1.6);
+    box-shadow:var(--shadow), var(--sheen);
+  }
+
+  .step{display:flex; align-items:center; gap:11px; padding:11px 14px; position:relative}
+  .step + .step{border-top:1px solid var(--line)}
+  .dot{
+    width:17px; height:17px; flex:none; border-radius:50%;
+    border:1.5px solid var(--line-2); display:grid; place-items:center;
+    transition:border-color .3s var(--spring), background .3s var(--spring);
+  }
+  .dot svg{width:10px; height:10px; opacity:0; transform:scale(.5);
+           transition:opacity .3s var(--spring), transform .38s var(--pop)}
+  .step[data-s="run"] .dot{border-color:var(--accent); border-style:dashed; animation:spin 1.1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .step[data-s="ok"] .dot{background:var(--mint); border-color:var(--mint)}
+  .step[data-s="ok"] .dot svg{opacity:1; transform:none; color:#fff}
+  .step[data-s="fail"] .dot{background:var(--err); border-color:var(--err)}
+  .step[data-s="fail"] .dot svg{opacity:1; transform:none; color:#fff}
+
+  .stx{flex:1; min-width:0}
+  .stx b{display:block; font-size:12.5px; font-weight:500; letter-spacing:.01em}
+  .stx span{display:block; font-size:11px; color:var(--ink-3); margin-top:1px;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .step[data-s="ok"] .stx span{color:var(--mint)}
+  .step[data-s="fail"] .stx span{color:var(--err)}
+
+  /* 下载几百兆的时候，有一条会动的东西比一个不动的转圈诚实 */
+  .bar{position:absolute; left:14px; right:14px; bottom:0; height:1.5px; overflow:hidden; opacity:0;
+       transition:opacity .3s ease}
+  .step[data-s="run"] .bar{opacity:1}
+  .bar i{display:block; width:34%; height:100%; border-radius:2px;
+         background:linear-gradient(90deg,transparent,var(--accent),transparent);
+         animation:sweep 1.35s var(--spring) infinite}
+  @keyframes sweep{from{transform:translateX(-120%)} to{transform:translateX(400%)}}
+
+  .logwrap{
+    overflow:hidden; max-height:0; opacity:0;
+    transition:max-height .5s var(--spring), opacity .35s ease;
+  }
+  .logwrap.on{max-height:148px; opacity:1}
+  .log{
+    margin:0 14px 13px; padding:10px 12px; border-radius:var(--r-sm);
+    background:rgba(127,140,160,.09); border:1px solid var(--line);
+    font:10.5px/1.62 ui-monospace,"SF Mono",Menlo,monospace; color:var(--ink-2);
+    height:112px; overflow:auto; white-space:pre-wrap; word-break:break-all;
+  }
+  @media (prefers-color-scheme:dark){ .log{background:rgba(255,255,255,.035)} }
+
+  .go{
+    margin-top:22px; width:100%; height:46px; border:0; cursor:pointer; border-radius:14px;
+    font:inherit; font-size:14px; font-weight:500; letter-spacing:.22em; text-indent:.22em;
+    color:#fff; background:linear-gradient(155deg,#4b93f2,#2568cc);
+    box-shadow:0 12px 28px -14px rgba(47,127,240,.95), inset 0 .5px 0 rgba(255,255,255,.42);
+    transition:transform .18s var(--spring), box-shadow .24s ease, opacity .24s ease;
+  }
+  .go:hover{transform:translateY(-1.5px); box-shadow:0 18px 34px -15px rgba(47,127,240,1), inset 0 .5px 0 rgba(255,255,255,.42)}
+  .go:active{transform:translateY(0) scale(.985)}
+  .go:disabled{cursor:default; opacity:.55; transform:none; box-shadow:0 8px 20px -16px rgba(47,127,240,.8)}
+
+  .note{margin:13px 0 0; font-size:11px; color:var(--ink-3); line-height:1.75}
+  .off{margin-top:9px; font-size:11px; color:var(--ink-3)}
+  .off button{
+    background:none; border:0; padding:0; cursor:pointer; font:inherit; color:var(--ink-3);
+    border-bottom:1px solid var(--line-2); transition:color .16s ease, border-color .16s ease;
+  }
+  .off button:hover{color:var(--ink-2); border-color:var(--line-2)}
+
+  .oops{
+    margin:13px 0 0; padding:9px 12px; border-radius:var(--r-sm); text-align:left;
+    font-size:11.5px; line-height:1.7; color:var(--err);
+    background:rgba(200,85,74,.09); border:1px solid rgba(200,85,74,.22);
+    display:none;
+  }
+  .oops.on{display:block; animation:rise .3s var(--spring) forwards; opacity:0; transform:translateY(5px)}
+
+  /* 收场：整块往下轻轻沉一下再淡出，交给壳切到主界面 */
+  .stage.bye{transition:opacity .44s ease, transform .44s var(--spring);
+             opacity:0; transform:translateY(-14px) scale(.985)}
+
+  @media (max-height:640px){
+    .seal{width:52px; height:52px; border-radius:16px; margin-bottom:11px}
+    .seal svg{width:28px; height:28px}
+    h1{font-size:22px}
+    .card{margin-top:18px}
+    .go{margin-top:16px; height:42px}
+    .log{height:84px}
+    .logwrap.on{max-height:120px}
+  }
+</style>
+</head>
+<body>
+
+<div class="halo"><i></i><i></i></div>
+
+<div class="stage" id="stage">
+
+  <div class="seal rise" style="animation-delay:.02s">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 4.6C8.4 3.4 6.3 3.1 3.6 3.4v11.3c2.7-.3 4.8 0 6.4 1.2 1.6-1.2 3.7-1.5 6.4-1.2V3.4c-2.7-.3-4.8 0-6.4 1.2z"/>
+      <path d="M10 4.6v11.3"/>
+    </svg>
+  </div>
+
+  <h1 class="rise" style="animation-delay:.07s">归藏</h1>
+  <p class="sub rise" style="animation-delay:.12s">把微信读书的书，收进你自己的书柜</p>
+
+  <div class="card rise" style="animation-delay:.17s">
+    <div class="step" id="s0" data-s="idle">
+      <div class="dot"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.1"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 6.3 4.9 8.8 9.6 3.6"/></svg></div>
+      <div class="stx"><b>运行环境</b><span id="n0">待检视</span></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="step" id="s1" data-s="idle">
+      <div class="dot"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.1"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 6.3 4.9 8.8 9.6 3.6"/></svg></div>
+      <div class="stx"><b>取书浏览器</b><span id="n1">待检视</span></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="step" id="s2" data-s="idle">
+      <div class="dot"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.1"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 6.3 4.9 8.8 9.6 3.6"/></svg></div>
+      <div class="stx"><b>微信读书账号</b><span id="n2">待检视</span></div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="logwrap" id="logwrap"><pre class="log" id="log"></pre></div>
+  </div>
+
+  <button class="go rise" id="go" style="animation-delay:.22s">我思故我在</button>
+
+  <p class="note rise" style="animation-delay:.27s">点一下，缺什么它自己装。全部在本机完成，不上传任何东西。</p>
+  <div class="off rise" style="animation-delay:.31s" id="offwrap">
+    <button id="off">先不配置，直接进去</button>
+  </div>
+
+  <div class="oops" id="oops"></div>
+</div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const NATIVE = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.guizang);
+
+let busy = false;
+
+/* 步骤文字：左列是短暂状态，右列是长期说明。跑完把说明换成结果，
+   免得用户只看到一个转圈停下、不知道到底成了没有。 */
+const DONE_NOTE = ['依赖已装齐', 'Chromium 已就绪', '账号已连接'];
+const FAIL_NOTE = ['环境没装成', '浏览器没装成', '账号没连上'];
+
+function setStep(i, state, note) {
+  const el = $('#s' + i);
+  if (!el) return;
+  el.dataset.s = state;
+  if (note !== undefined) $('#n' + i).textContent = note;
+}
+
+function pushLog(line) {
+  const box = $('#log');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  box.textContent += (box.textContent ? '\n' : '') + line;
+  const lines = box.textContent.split('\n');
+  if (lines.length > 400) box.textContent = lines.slice(-400).join('\n');
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+/* 壳在加载页面时会先把已知的状态推一次：已经装好的步骤直接就位，
+   不让用户对着一个其实早就好了的条目再等一遍。 */
+window.gz = {
+  init(state) {
+    const map = [
+      ['env',     0, '运行环境',     '依赖已装齐'],
+      ['browser', 1, '取书浏览器',   'Chromium 已就绪'],
+      ['account', 2, '微信读书账号', '账号已连接'],
+    ];
+    map.forEach(([key, i, , ok]) => {
+      setStep(i, state[key] ? 'ok' : 'idle', state[key] ? ok : '待配置');
+    });
+  },
+  step(i, state, note) { setStep(i, state, note); },
+  log(line) { $('#logwrap').classList.add('on'); pushLog(line); },
+  showLog() { $('#logwrap').classList.add('on'); },
+  fail(msg) {
+    busy = false;
+    const b = $('#go');
+    b.disabled = false;
+    b.textContent = '再试一次';
+    const o = $('#oops');
+    o.textContent = msg || '配置没走完，上面的记录里有原因。';
+    o.classList.add('on');
+  },
+  done() {
+    busy = false;
+    const b = $('#go');
+    b.disabled = true;
+    b.textContent = '配置完成，正在进入';
+    $('#offwrap').style.display = 'none';
+    $('#oops').classList.remove('on');
+    $('#stage').classList.add('bye');
+  },
+  ready() {
+    const b = $('#go');
+    b.disabled = false;
+    b.textContent = '进去';
+    b.onclick = () => { try { window.webkit.messageHandlers.guizang.postMessage({cmd: 'enter'}); } catch (e) {} };
+  }
+};
+
+function start() {
+  if (busy) return;
+  busy = true;
+  const b = $('#go');
+  b.disabled = true;
+  b.textContent = '正在配置';
+  $('#oops').classList.remove('on');
+  $('#logwrap').classList.add('on');
+  pushLog('—— 开始配置 ——');
+  setStep(0, 'run', '正在检查');
+  try {
+    window.webkit.messageHandlers.guizang.postMessage({cmd: 'start'});
+  } catch (e) {
+    // 不在套壳里（比如直接拿浏览器打开这个文件）：不装死，说清楚
+    busy = false;
+    b.disabled = false;
+    b.textContent = '我思故我在';
+    window.gz.fail('这个页面要在归藏软件里打开才能配置。');
+  }
+}
+
+$('#go').onclick = start;
+$('#off').onclick = () => {
+  try { window.webkit.messageHandlers.guizang.postMessage({cmd: 'enter'}); } catch (e) {}
+};
+
+/* 没等到壳推状态就自己亮一下，避免出现「一片灰、像是坏了」 */
+setTimeout(() => {
+  if (!busy && $('#n0').textContent === '待检视') {
+    setStep(0, 'idle', '待检视');
+    try { window.webkit.messageHandlers.guizang.postMessage({cmd: 'probe'}); } catch (e) {}
+  }
+}, 220);
+</script>
+</body>
+</html>

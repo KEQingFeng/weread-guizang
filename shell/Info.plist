@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>归藏</string>
+	<key>CFBundleDisplayName</key>
+	<string>归藏</string>
+	<key>CFBundleExecutable</key>
+	<string>归藏</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.keqingfeng.guizang</string>
+	<key>CFBundleIconFile</key>
+	<string>appicon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<!-- 界面跑在 http://127.0.0.1:8770。没有这一条，ATS 会拦掉对本机回环地址的
+	     明文 HTTP 请求，表现是外壳起来了但窗口一直白屏。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- 首启页与主界面都用简体中文 -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+</dict>
+</plist>
