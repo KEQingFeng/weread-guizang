@@ -356,8 +356,51 @@ def render_chapter_md(ch_title, blocks, ch_idx):
     return body, img_records
 
 
+# 一次往返取回这一屏的全部原料（文字 / 画布位置 / 插图）。
+# 原来这是三次 page.evaluate：每一趟都要跨进程来回一次，一页三次、一本书几百页
+# 就是几千趟白跑的往返。合成一条，语义完全不变。
+SNAPSHOT_JS = ("() => ({chars: window.__wr_chars,"
+               " rects: (" + CANVAS_RECTS_JS.strip() + ")(),"
+               " imgs: (" + VIEWPORT_IMGS_JS.strip() + ")()})")
+
+
+async def snapshot(page, seen_imgs):
+    d = await page.evaluate(SNAPSHOT_JS) or {}
+    return build_page_blocks(d.get("chars") or [], d.get("imgs") or [],
+                             d.get("rects") or [], seen_imgs)
+
+
+async def wait_settled(page, step=0.09, quiet=0.30, max_wait=2.6, blank_ok=1.1):
+    """等这一屏画完，返回画出来的字数。
+
+    判据是「距上一次字数变化已经过了 quiet 秒」，而不是「先无条件睡一秒再比两次」。
+    后者是这一整场导出最大的时间黑洞：一屏正文实测两三百毫秒就画完，而原来的
+    one_turn 每页固定要睡 1.0s + 0.5s 起跳的稳定判定 + capture 里再 0.3s——
+    一页白等一秒八，一本几百页的书里就是几十分钟。采样从按下方向键那一刻就开始，
+    画完立刻走；真慢的页面也只会等到 max_wait，不会比以前更久。
+
+    纯图页（一个字都没画）不该让这里空等到底：过了 blank_ok 还是空的，
+    就按「这一屏本来就没文字」收下，交回上面的整页指纹去判断。
+    """
+    t0 = time.time()
+    last, changed = -1, t0
+    while True:
+        c = await page.evaluate("() => window.__wr_count()")
+        now = time.time()
+        if c != last:
+            last, changed = c, now
+        elif last > 0 and now - changed >= quiet:
+            return last
+        elif last == 0 and now - t0 >= blank_ok:
+            return 0
+        if now - t0 >= max_wait:
+            return last if last > 0 else 0
+        await asyncio.sleep(step)
+
+
 async def wait_stable(page, prev_count, timeout=8):
-    """等页面渲染稳定，返回稳定后的字符数"""
+    """旧口径的「等两张一样的采样」。翻页主循环已经不用它了（见 wait_settled），
+    保留给还需要「先睡一会儿再确认」的场景。"""
     last = -1
     for _ in range(int(timeout / 0.5)):
         c = await page.evaluate("() => window.__wr_count()")
@@ -771,10 +814,7 @@ async def wait_position_settled(page, timeout=14.0, need=3):
 
 async def hook_blocks(page, seen_imgs):
     """把绘制钩子里现在攒着的内容变成有序块（不翻页、不清空，抓到的就是当下这一屏）。"""
-    chars = await page.evaluate("() => window.__wr_chars")
-    rects = await page.evaluate(CANVAS_RECTS_JS)
-    imgs = await page.evaluate(VIEWPORT_IMGS_JS)
-    return build_page_blocks(chars, imgs, rects, seen_imgs)
+    return await snapshot(page, seen_imgs)
 
 
 def first_catalog_title(catalog_path):
@@ -1017,12 +1057,8 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
         async def capture_current_page(top="", blocks=None):
             """抓当前渲染出的块；返回这一页是否真的带来了新内容"""
             nonlocal cap_chars
-            await asyncio.sleep(0.3)
             if blocks is None:
-                chars = await page.evaluate("() => window.__wr_chars")
-                rects = await page.evaluate(CANVAS_RECTS_JS)
-                imgs = await page.evaluate(VIEWPORT_IMGS_JS)
-                blocks = build_page_blocks(chars, imgs, rects, seen_imgs)
+                blocks = await snapshot(page, seen_imgs)
             # 文字去重：同一页可能重复捕获
             cleaned = []
             for b in blocks:
@@ -1079,8 +1115,8 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
         async def one_turn():
             await page.evaluate("() => window.__wr_reset()")
             await page.keyboard.press("ArrowRight")
-            await asyncio.sleep(1.0)
-            await wait_stable(page, 0)
+            # 按完就盯采样，画完立刻走 —— 不再无条件先睡一秒（速度就出在这儿）
+            await wait_settled(page)
             # 顶栏只在「正文标题还没切出过章」时才要（省一次调用），
             # 一旦正文分章正常工作，就不再拿顶栏参与判定。
             top = await _title(page) if (titles and sp.cuts == 0) else ""
@@ -1103,24 +1139,21 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
                 mark = set(seen_imgs)
                 await page.evaluate("() => window.__wr_reset()")
                 await page.keyboard.press("ArrowRight")
-                await asyncio.sleep(0.8)
-                await wait_stable(page, 0)
-                n_fwd = len(await hook_blocks(page, seen_imgs))
+                await wait_settled(page)
+                n_fwd = len(await snapshot(page, seen_imgs))
                 seen_imgs.clear()
                 seen_imgs.update(mark)        # 那一屏的图稍后还要重新算一次
                 await page.keyboard.press("ArrowLeft")
-                await asyncio.sleep(0.8)
-                await wait_stable(page, 0)
-                blocks = await hook_blocks(page, seen_imgs)
+                await wait_settled(page)
+                blocks = await snapshot(page, seen_imgs)
                 if n_fwd and len(blocks) > n_fwd:
                     blocks = blocks[n_fwd:]
                 elif not blocks:
                     # 连翻带退都榨不出东西：退回用整屏原始钩子，收尾靠目录核对缺章。
                     await page.evaluate("() => window.__wr_reset()")
                     await jump_to_first_item(page)
-                    await asyncio.sleep(0.5)
-                    await wait_stable(page, 0)
-                    blocks = await hook_blocks(page, seen_imgs)
+                    await wait_settled(page)
+                    blocks = await snapshot(page, seen_imgs)
             want = bare(first_catalog_title(catalog_path)) if titles else ""
             at = front_title_index(blocks, want)
             top = await _title(page) if titles else ""

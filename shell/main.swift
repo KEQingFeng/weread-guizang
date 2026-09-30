@@ -585,6 +585,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         case "probe": pushState()
         case "start": bootstrap()
         case "enter": enter()
+        case "pickExportDir": pickExportDir()
         default: dbg("未知指令 \(cmd)")
         }
     }
@@ -760,12 +761,15 @@ extension Shell: WKDownloadDelegate {
                        .replacingOccurrences(of: ":", with: "-")
         let stem = safe.isEmpty ? "归藏导出" : safe
 
-        // 首选「下载」文件夹。但 macOS 对桌面 / 文档 / 下载这些位置有 TCC 保护，
-        // 没被授权的进程往里写会被系统拦下（而且不一定报错，表现就是下载停在那儿
-        // 不动）。所以先真写一个探针文件确认能写，不能写就退到数据目录里。
+        // 首选用户自己挑的那个文件夹，其次「下载」。macOS 对桌面 / 文档 / 下载这些
+        // 位置有 TCC 保护，没被授权的进程往里写会被系统拦下（而且不一定报错，表现
+        // 就是下载停在那儿不动）。所以两处都先真写一个探针文件确认能写，
+        // 不能写就退到数据目录里 —— 宁可存到别处并说明，也不要静悄悄地存不下来。
         let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
         let base: URL
-        if let d = dl, isWritableDir(d) {
+        if let picked = chosenExportDir() {
+            base = picked
+        } else if let d = dl, isWritableDir(d) {
             base = d
         } else {
             base = dataDir.appendingPathComponent("downloads", isDirectory: true)
@@ -784,6 +788,49 @@ extension Shell: WKDownloadDelegate {
             url = base.appendingPathComponent(candidate)
             if !fm.fileExists(atPath: url.path) { return url }
             n += 1
+        }
+    }
+
+    // MARK: 导出位置（设置里由用户挑）
+
+    /// 用户在「设置 → 导出」里挑的那个文件夹。
+    ///
+    /// 存在和后端同一份 `config.json` 里：页面写、这里读，两边不用互相通知，
+    /// 改完下一次下载就生效。文件里那串路径可能已经被删掉或者被换成只读卷，
+    /// 所以每次用之前都验一遍，验不过就当没设过（退回「下载」），不让下载失败。
+    private func chosenExportDir() -> URL? {
+        let p = dataDir.appendingPathComponent("cache/config.json")
+        guard let d = try? Data(contentsOf: p),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let s = (o["export_dir"] as? String)?.trimmingCharacters(in: .whitespaces),
+              !s.isEmpty else { return nil }
+        let u = URL(fileURLWithPath: s, isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir), isDir.boolValue,
+              isWritableDir(u) else {
+            dbg("设定的导出位置用不了，改回「下载」：\(s)")
+            return nil
+        }
+        return u
+    }
+
+    /// 弹一个系统「选文件夹」的框。
+    ///
+    /// 这件事只能在外壳里做 —— 浏览器出于安全拿不到绝对路径
+    /// （`input[webkitdirectory]` 只给相对名）。选完把路径回给页面，
+    /// 页面再交给后端存进 config.json，存的读的才是同一份。
+    private func pickExportDir() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选这里"
+        panel.message = "以后「正文 / 完整包」就存到这个文件夹"
+        if let cur = chosenExportDir() { panel.directoryURL = cur }
+        panel.beginSheetModal(for: window) { [weak self] resp in
+            guard let self, resp == .OK, let u = panel.url else { return }
+            self.js("window.gzExportDir(\(jsString(u.path)))")
         }
     }
 
