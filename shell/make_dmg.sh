@@ -14,10 +14,13 @@ ROOT="$(cd "$HERE/.." && pwd)"
 APP="$ROOT/dist/归藏.app"
 README="$HERE/首次打开必读.txt"
 OUT_DIR="${1:-$HOME/Desktop}"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || echo 1.0.0)"
-DMG="$OUT_DIR/归藏-$VERSION.dmg"
-
 [ -d "$APP" ] || { echo "先跑 shell/build_macos.sh 出成品，再来打 dmg"; exit 1; }
+
+# 版本号从打好的包里读，这样 dmg 的名字一定跟包内一致；读不到就停下，
+# 而不是兜一个「1.0.0」出去 —— 那会做出一个名字对不上内容的包。
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+[ -n "$VERSION" ] || { echo "读不到 $APP 里的版本号（CFBundleShortVersionString）"; exit 1; }
+DMG="$OUT_DIR/归藏-$VERSION.dmg"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

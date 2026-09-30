@@ -18,7 +18,9 @@ ROOT="$(pwd)"
 
 APP_NAME="归藏"
 BUNDLE_ID="com.keqingfeng.guizang"
-VERSION="1.0.0"
+# 版本号从 ui_server.py 里读（那里是界面上显示的那个数），不再两处各写一份 ——
+# 之前写过界面 1.1.0、访达 1.0.0 的对不上。读不到就在下一步报错停下。
+VERSION="$(sed -n 's/^VERSION *= *"\([^"]*\)".*/\1/p' "$ROOT/ui_server.py" | head -1)"
 MIN_MACOS="13.0"
 
 DIST="$ROOT/dist"
@@ -144,7 +146,10 @@ say "源码  $(find "$SRC_DIR" -type f | wc -l | xargs) 个文件"
 
 echo
 echo "  [3/5] 写 Info.plist"
+[ -n "$VERSION" ] || die "读不到版本号：ui_server.py 里那行 VERSION 得是 VERSION = \"x.y.z\""
 cp "$ROOT/shell/Info.plist" "$CONTENTS/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$CONTENTS/Info.plist" \
+  || die "写不进版本号（plutil）"
 plutil -lint "$CONTENTS/Info.plist" >/dev/null || die "Info.plist 不合法"
 say "bundle id  $BUNDLE_ID"
 say "版本       $VERSION（最低 macOS $MIN_MACOS）"

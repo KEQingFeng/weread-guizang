@@ -25,6 +25,10 @@
     --glass:rgba(var(--glass-rgb), var(--frost));
     --glass-2:rgba(var(--glass-rgb), calc(var(--frost) * .66));
     --solid:#fff;
+    /* 字段底色：输入框、下拉、统计格共用的一层极淡的凹面。
+       之前代码里一直在引用 --surface-2，但这个变量从没定义过 ——
+       引用未定义的变量会整条声明失效，那些框其实是透明地裸在玻璃上。 */
+    --surface-2:rgba(20,24,32,.045);
     --accent:#2f7ff0;
     --accent-soft:rgba(47,127,240,.11);
     --mint:#1f9e85;
@@ -48,6 +52,7 @@
       --glass-rgb:28,31,38;
       --frost:.62;
       --solid:#1e2128;
+      --surface-2:rgba(255,255,255,.055);
       --accent:#5fa4f7;
       --accent-soft:rgba(95,164,247,.15);
       --mint:#3ec7a8;
@@ -67,6 +72,7 @@
     --glass-rgb:28,31,38;
     --frost:.62;
     --solid:#1e2128;
+    --surface-2:rgba(255,255,255,.055);
     --accent:#5fa4f7;
     --accent-soft:rgba(95,164,247,.15);
     --mint:#3ec7a8;
@@ -148,6 +154,10 @@
   .iconbtn:active{transform:scale(.94)}
   .iconbtn svg{width:16px; height:16px; display:block}
   .iconbtn[aria-expanded="true"]{background:var(--accent-soft); color:var(--accent)}
+  /* 刷新那颗：转起来表示「在拉」，拉完停手。转的是 svg，按钮盒子不跟着扭 */
+  .iconbtn.spin{color:var(--accent)}
+  .iconbtn.spin svg{animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
   .live{
     display:inline-flex; align-items:center; gap:7px;
@@ -163,16 +173,60 @@
   .live.bad b{background:var(--err)}
   @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 
-  /* ── 设置弹层 ────────────────────────── */
-  .pop{
-    position:fixed; z-index:40; top:56px; left:20px; width:322px;
-    border-radius:var(--r); padding:6px;
-    transform-origin:14px -8px;
-    opacity:0; transform:scale(.96) translateY(-4px); pointer-events:none;
-    transition:opacity .2s ease, transform .24s cubic-bezier(.2,.9,.28,1);
+  /* ── 设置弹窗 ──────────────────────────
+     功能变多以后，一条下拉列表已经装不下：壁纸、磨砂、导出位置、索引、小 Agent
+     全挤在一起，翻半天找不到。改成分类弹窗 —— 左边选分类，右边只显示这一类，
+     每类各自成组，改哪一项去哪个分类找是确定的。 */
+  /* 层序（从下往上）：内容 1 → 顶栏 30 → 任务抽屉 40 → 批量条 45 → 气泡与小助手 50
+     → 设置遮罩与弹窗 54/55 → 确认弹层 60 → 轻语提示 70。
+     设置弹窗是「拿到焦点」的那一层，必须盖住右下角这些常驻玻璃；
+     轻语提示在最顶上，是因为在弹窗里点保存，回执不能被弹窗自己挡掉。 */
+  .popmask{
+    position:fixed; inset:0; z-index:54; background:rgba(14,19,28,.36);
+    -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+    opacity:0; pointer-events:none; transition:opacity .22s ease;
   }
-  .pop.open{opacity:1; transform:none; pointer-events:auto}
-  .pop .head{padding:11px 12px 7px; font-size:11.5px; color:var(--ink-3)}
+  .popmask.open{opacity:1; pointer-events:auto}
+  .pop{
+    position:fixed; z-index:55; top:50%; left:50%;
+    width:min(94vw, 700px); height:min(78vh, 540px);
+    display:grid; grid-template-columns:168px minmax(0,1fr);
+    padding:0; border-radius:16px; overflow:hidden;
+    transform:translate(-50%,-50%) scale(.96);
+    opacity:0; pointer-events:none;
+    box-shadow:0 40px 90px -34px rgba(10,15,24,.6), var(--sheen);
+    transition:opacity .2s ease, transform .3s cubic-bezier(.2,.9,.28,1);
+  }
+  .pop.open{opacity:1; transform:translate(-50%,-50%); pointer-events:auto}
+  .popnav{
+    display:flex; flex-direction:column; gap:2px; padding:12px 10px;
+    border-right:1px solid var(--line);
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .34));
+  }
+  .popnav .head{padding:6px 10px 11px; font-size:13.5px; font-weight:650}
+  .pcat{
+    height:32px; padding:0 11px; border:0; border-radius:9px; cursor:pointer; text-align:left;
+    background:transparent; font:inherit; font-size:12.5px; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, transform .12s var(--spring);
+  }
+  .pcat:hover{background:rgba(127,140,160,.13); color:var(--ink)}
+  .pcat:active{transform:scale(.98)}
+  .pcat.on{background:var(--solid); color:var(--ink); font-weight:600; box-shadow:var(--sheen)}
+  .popbody{overflow:auto; padding:8px 4px 18px; overscroll-behavior:contain}
+  .popcat{display:none}
+  .popcat.on{display:block; animation:popcat .26s cubic-bezier(.2,.9,.28,1)}
+  @keyframes popcat{from{opacity:0; transform:translateY(5px)}to{opacity:1; transform:none}}
+  .popcat > .sechd{padding:14px 12px 5px; font-size:10.5px; letter-spacing:.09em; color:var(--ink-3)}
+  .popcat > .sechd:first-child{padding-top:8px}
+  /* 导出位置是条绝对路径，长了就省略，别把两个按钮挤出弹窗 */
+  #v-export{max-width:44%; font-size:11px; font-weight:400; color:var(--ink-2)}
+  .popx{
+    position:absolute; top:9px; right:9px; width:27px; height:27px; padding:0;
+    display:grid; place-items:center; cursor:pointer; border:0; border-radius:8px;
+    background:transparent; color:var(--ink-3);
+    transition:background .15s ease, color .15s ease;
+  }
+  .popx:hover{background:rgba(127,140,160,.16); color:var(--ink)}
   .row{display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:10px}
   .row:hover{background:rgba(127,140,160,.09)}
   .row .k{font-size:12px; color:var(--ink-3); width:70px; flex:none}
@@ -181,6 +235,33 @@
   .row .grow{flex:1}
   .row.path .v{font-size:11px; font-weight:400; color:var(--ink-2)}
   .hint{padding:8px 12px 10px; font-size:11.5px; color:var(--ink-3); line-height:1.5}
+
+  /* ── 「关于」：先说清这是什么，再列本机的事实 ───────── */
+  .ablead{
+    margin:10px 12px 2px; padding:14px 15px;
+    border-radius:14px; border:1px solid var(--line);
+    background:linear-gradient(150deg, var(--accent-soft), transparent 62%);
+  }
+  .abname{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap}
+  .abname b{font-size:17px; font-weight:650; letter-spacing:-.01em}
+  /* 版本号自 0.9.1 起标在界面上：报问题时先问「你装的哪一版」，这里能直接看到 */
+  .abver{
+    font-size:10.5px; font-weight:600; letter-spacing:.03em;
+    padding:2.5px 7px; border-radius:999px;
+    background:var(--solid); color:var(--accent);
+    box-shadow:var(--sheen), inset 0 0 0 1px var(--line-2);
+  }
+  .absay{margin-top:7px; font-size:11.5px; line-height:1.65; color:var(--ink-2)}
+  .ablist{display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:4px 12px 2px}
+  @media (max-width:560px){ .ablist{grid-template-columns:1fr} }
+  .abitem{
+    padding:9px 11px; border-radius:12px;
+    border:1px solid var(--line); background:rgba(127,140,160,.05);
+    transition:border-color .18s var(--spring), background .18s var(--spring), transform .18s var(--spring);
+  }
+  .abitem:hover{border-color:var(--line-2); background:rgba(127,140,160,.09); transform:translateY(-1px)}
+  .abitem b{display:block; font-size:11.5px; font-weight:600; margin-bottom:2px}
+  .abitem span{display:block; font-size:11px; line-height:1.5; color:var(--ink-3)}
 
   /* ── 主体 ───────────────────────────── */
   main{position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:22px 20px 80px}
@@ -413,7 +494,7 @@
   .tabs{display:inline-flex; gap:3px; padding:3px; border-radius:9px; background:rgba(127,140,160,.14)}
   .tabs button{
     height:24px; padding:0 11px; border:0; border-radius:7px; cursor:pointer; background:transparent;
-    font:inherit; font-size:12px; color:var(--ink-2); transition:background .16s ease, color .16s ease;
+    font:inherit; font-size:12px; color:var(--ink-2); transition:background .16s ease, color .16s ease, transform .1s ease;
   }
   .tabs button:hover{color:var(--ink)}
   .tabs button.on{background:var(--solid); color:var(--ink); box-shadow:0 1px 3px rgba(28,37,54,.13)}
@@ -564,7 +645,7 @@
 
   /* ── 右下角任务记录 ───────────────────── */
   .dock{
-    position:fixed; right:20px; bottom:20px; z-index:40; width:272px; border-radius:12px; overflow:hidden;
+    position:fixed; right:20px; bottom:78px; z-index:40; width:272px; border-radius:12px; overflow:hidden;
     background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
     backdrop-filter:blur(var(--blur)) saturate(180%);
     border:1px solid var(--line); box-shadow:var(--shadow);
@@ -594,7 +675,107 @@
   .drow .st.bad{color:var(--err)}
   .dempty{padding:16px 12px; text-align:center; font-size:11.5px; color:var(--ink-3)}
   @media (max-width:640px){
-    .dock{right:12px; bottom:12px; width:calc(100vw - 24px)}
+    .dock{right:12px; bottom:70px; width:calc(100vw - 24px)}
+  }
+
+  /* ── 右下角小 Agent ──────────────────────
+     一颗常驻气泡。「已经配好」是常态、「还没配」才是要留意的事，所以红点只在
+     没配的时候亮 —— 界面右上角那颗连接状态灯用的是同一套语义。 */
+  .agent{
+    position:fixed; right:20px; bottom:20px; z-index:50;
+    width:46px; height:46px; border-radius:50%; cursor:pointer; padding:0;
+    display:grid; place-items:center; color:var(--ink-2);
+    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%);
+    border:1px solid var(--line); box-shadow:var(--shadow);
+    transition:transform .2s var(--spring), color .16s ease, box-shadow .2s ease;
+  }
+  .agent svg{width:21px; height:21px}
+  .agent:hover{transform:translateY(-2px); color:var(--accent)}
+  .agent:active{transform:scale(.94)}
+  .agent.on{color:var(--accent)}
+  .agent .dot{
+    position:absolute; right:8px; top:8px; width:7px; height:7px; border-radius:50%;
+    background:transparent; transition:background .2s ease;
+  }
+  .agent.none .dot{background:var(--err)}
+
+  /* 右下角这一条竖向的队：气泡（20）→ 任务抽屉（78）→ 小助手面板。
+     面板的落脚点跟着抽屉的实测高度走（--dock-h 由脚本写），所以抽屉展开也不会被压住。
+     之前两个都写死 bottom:78px，矩形完全重合 —— 一开小助手就整块盖在任务列表上。 */
+  .agentpane{
+    position:fixed; right:20px; z-index:50;
+    bottom:calc(78px + var(--dock-h, 36px) + 10px);
+    width:min(360px, calc(100vw - 40px));
+    height:min(482px, calc(100vh - 150px - var(--dock-h, 36px)));
+    display:flex; flex-direction:column; border-radius:16px; overflow:hidden;
+    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
+    backdrop-filter:blur(var(--blur)) saturate(190%);
+    border:1px solid var(--line); box-shadow:var(--shadow), var(--sheen);
+    opacity:0; pointer-events:none; transform:translateY(10px) scale(.985);
+    transform-origin:bottom right;
+    transition:opacity .2s ease, transform .26s cubic-bezier(.2,.9,.28,1);
+  }
+  .agentpane.open{opacity:1; pointer-events:auto; transform:none}
+  .aghead{display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line)}
+  .aghead .t{font-size:12.5px; font-weight:600}
+  .aghead .s{font-size:10.5px; color:var(--ink-3)}
+  .aghead .grow{flex:1}
+  .aghead button{
+    height:24px; padding:0 9px; border-radius:7px; cursor:pointer;
+    border:1px solid var(--line-2); background:transparent;
+    font:inherit; font-size:10.5px; color:var(--ink-3);
+    transition:color .15s ease, border-color .15s ease;
+  }
+  .aghead button:hover{color:var(--accent); border-color:rgba(47,127,240,.32)}
+  .agbody{flex:1; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:9px}
+  .agmsg{
+    max-width:87%; padding:8px 11px; border-radius:13px;
+    font-size:12.5px; line-height:1.62; white-space:pre-wrap; word-break:break-word;
+  }
+  .agmsg.me{align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px}
+  .agmsg.ai{align-self:flex-start; background:var(--solid); border:1px solid var(--line); border-bottom-left-radius:4px}
+  .agmsg.err{align-self:stretch; max-width:none; background:transparent;
+    border:1px dashed var(--line-2); color:var(--err); font-size:11.5px}
+  .agmsg.wait{display:flex; gap:4px; align-items:center}
+  .agmsg.wait i{width:5px; height:5px; border-radius:50%; background:var(--ink-3);
+    animation:agwait 1.1s ease-in-out infinite}
+  .agmsg.wait i:nth-child(2){animation-delay:.16s}
+  .agmsg.wait i:nth-child(3){animation-delay:.32s}
+  @keyframes agwait{0%,100%{opacity:.3; transform:translateY(0)}50%{opacity:1; transform:translateY(-2px)}}
+  .agtip{align-self:center; text-align:center; font-size:11px; color:var(--ink-3); line-height:1.75; padding:2px 8px}
+  /* 输入栏留了空白，按键提示就搬到这里来说 —— 光标落在一颗空字段上时，人才需要知道怎么发送 */
+  .agtip em{display:block; margin-top:4px; font-style:normal; font-size:10.5px; letter-spacing:.02em; opacity:.7}
+  .agchips{display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 10px}
+  .agchips button{
+    height:26px; padding:0 10px; border-radius:99px; cursor:pointer;
+    border:1px solid var(--line-2);
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .5));
+    font:inherit; font-size:11.5px; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .agchips button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .agfoot{display:flex; align-items:flex-end; gap:8px; padding:10px 12px; border-top:1px solid var(--line)}
+  .agfoot textarea{
+    flex:1; min-width:0; height:36px; max-height:104px; resize:none; overflow:auto;
+    padding:9px 11px; border-radius:10px; border:1px solid var(--line-2);
+    background:var(--surface-2); font:inherit; font-size:12.5px;
+    color:var(--ink); outline:none; line-height:1.5;
+  }
+  .agfoot textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .agfoot button{
+    flex:none; height:36px; padding:0 14px; border:0; border-radius:10px; cursor:pointer;
+    font:inherit; font-size:12.5px; font-weight:550; color:#fff;
+    background:linear-gradient(150deg,#4b93f2,#1f7ce0);
+    transition:filter .15s ease, transform .1s ease, opacity .15s ease;
+  }
+  .agfoot button:hover{filter:brightness(1.07)}
+  .agfoot button:active{transform:scale(.96)}
+  .agfoot button:disabled{opacity:.45; cursor:default}
+  @media (max-width:640px){
+    .agent{right:12px; bottom:12px}
+    .agentpane{right:12px; left:12px; width:auto;
+      bottom:calc(70px + var(--dock-h, 36px) + 8px)}
   }
 
   /* ── 顶栏：主题切换 ───────────────────── */
@@ -657,9 +838,9 @@
     to{opacity:1; transform:none; transform-origin:top center}
   }
   .wcard.unfurl{animation:unfurl .52s var(--spring) backwards}
-  .wcard.pre{opacity:0; animation:none}   /* 还没滚到视口里：先隐身，等「摊开」那一下 */
-  /* 摊开过一次就永久「已展开」：DOM 里挪动位置（筛选、加载更多）不会再重放动画。
-     CSS 动画在节点被重新插入时会重跑，所以看过的卡必须把 animation 关掉。 */
+  .wcard.pre{opacity:0; animation:none}   /* 还在视口外：先隐身，等滚到眼前再摊 */
+  /* 摊开着的时候：把 animation 关掉。CSS 动画在节点被重新插入 DOM 时会重跑，
+     不关的话点一下筛选（节点换位）整墙卡会一起重放一遍。 */
   .wcard.rev{animation:none; opacity:1}
   /* 侧边栏切换的整块交接改走 Web Animations API，见 slideView() */
   .bar{animation:arrive .5s cubic-bezier(.2,.9,.28,1) both}
@@ -727,10 +908,7 @@
     background:linear-gradient(100deg, rgba(127,140,160,.10) 32%, rgba(127,140,160,.21) 50%, rgba(127,140,160,.10) 68%);
     background-size:220% 100%; animation:shimmer 1.6s linear infinite}
 
-  /* 设置弹层：从齿轮那颗按钮的位置长出来，而不是整块凭空出现 */
-  .pop{transform-origin:calc(100% - 26px) 8px; transform:translate3d(0,-8px,0) scale(.96);
-    transition:opacity .2s ease, transform .34s var(--spring)}
-  .pop.open{transform:none}
+  /* 设置弹窗的进出交给上面那组规则（居中缩放），这里不再从齿轮位置长出来 */
 
   /* 任务栏展开/收起用高度过渡，不再「啪」地出现 */
   .dockbody{transition:max-height .34s var(--spring), opacity .2s ease}
@@ -948,6 +1126,48 @@
   .qcard .t{font-size:13px; line-height:1.78; white-space:pre-wrap}
   .qcard .m{font-size:11px; color:var(--ink-3); margin-top:9px; display:flex; gap:8px; flex-wrap:wrap}
   .qcard .m .k{color:var(--ink-2)}
+
+  /* ═══ 流畅度：少算一点、少画一点 ═══
+
+     · contain:layout paint —— 一张卡里的文字改一个字，浏览器原来要顺着整条
+       网格往上重算布局。声明「里面的排版跟外面无关」之后，这一趟就砍掉了；
+       顺带屏外的卡连绘制都能跳过。（paint 会把溢出裁在 padding 盒里，
+       卡片本来就是 overflow:hidden + 相对定位，视觉一模一样。）
+     · will-change 只给真正在动的两样东西：操作条是 translateX 滑进来的，
+       胶囊是别人帮它位移的。写在常驻元素上会白占一层合成层，所以只点这两处。
+     · 点按不要 300ms 延迟：触控板/触屏把点击判定成手势之前会先等一下。 */
+  .wcard{contain:layout paint}
+  .strip{will-change:transform}
+  .navpill{will-change:transform}
+  button, input, select, textarea, label, .wcard, nav{touch-action:manipulation}
+  body{-webkit-tap-highlight-color:transparent}
+
+  /* ═══ 打磨：键盘焦点、选中色、环境光的呼吸 ═══
+
+     · 焦点环。按钮和输入框都被换成了无边框的玻璃件，系统那圈高亮在深色玻璃上
+       几乎看不见 —— 键盘走到哪得有一圈清楚的光环跟着。用 :focus-visible：
+       只有「键盘/Tab 过来的」才亮，鼠标点一下不会留个框。
+     · 选中的文字换成主题色的浅蓝，不是系统那块生硬的实蓝。
+     · 环境光很慢地游动（一轮 46 秒起）。玻璃要有东西可透，静止的色晕看着像贴图；
+       幅度只有几个百分点，注意力不在它身上。上面那条 prefers-reduced-motion
+       的全局规则会把它一起关掉。
+     · 分段/标签按钮原来只有 hover，没有按下的反馈 —— 补上，跟其他控件一致。 */
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .wcard:focus-visible{outline-offset:3px}
+  ::selection{background:rgba(47,127,240,.24); color:var(--ink)}
+  html[data-theme="dark"] ::selection{background:rgba(95,164,247,.32)}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) ::selection{background:rgba(95,164,247,.32)}
+  }
+  @keyframes drift{
+    0%{transform:translate3d(0,0,0)}
+    50%{transform:translate3d(3.2vw,-2.6vh,0)}
+    100%{transform:translate3d(0,0,0)}
+  }
+  .ambient i{animation:drift 46s ease-in-out infinite}
+  .ambient i:nth-child(2){animation-duration:58s; animation-delay:-13s}
+  .ambient i:nth-child(3){animation-duration:66s; animation-delay:-27s}
+  .tabs button:active, .seg button:active{transform:scale(.96)}
 </style>
 </head>
 <body>
@@ -972,6 +1192,13 @@
   </div>
   <div class="name">归藏</div>
   <div class="spacer"></div>
+  <button class="iconbtn" id="refresh" title="刷新（换过接口 Key 之后点一下就能拿到新书架）">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20.5 12a8.5 8.5 0 1 1-2.7-6.2"/>
+      <path d="M21 4v5h-5"/>
+    </svg>
+  </button>
   <div class="seg" id="themeSeg">
     <button data-t="auto" title="跟随系统">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
@@ -994,68 +1221,179 @@
   <div class="live" id="live"><b></b><span id="liveText">静候</span></div>
 </header>
 
-<div class="pop glass" id="pop">
-  <div class="head">设置</div>
-  <div class="row">
-    <span class="k">运行组件</span>
-    <span class="v" id="v-browser">检视中</span>
-    <span class="grow"></span>
-    <button class="deed" id="fix">修复</button>
-  </div>
-  <div class="row">
-    <span class="k">微信读书</span>
-    <span class="v" id="v-account">未连接</span>
-    <span class="grow"></span>
-    <button class="deed" id="connect">连接</button>
-  </div>
-  <div class="row">
-    <span class="k">接口 Key</span>
-    <input id="keyinput" type="text" spellcheck="false" autocomplete="off" placeholder="wrk-…"
-           style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
-    <button class="deed" id="savekey">保存</button>
-  </div>
-  <div class="hint" id="keyhint">填上官方接口 Key 后，下方就能看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 里复制，形如 wrk-…）。填一次就存在本机，下次打开不用再填。</div>
-  <div class="row">
-    <span class="k">flomo</span>
-    <input id="flomoinput" type="text" spellcheck="false" autocomplete="off" placeholder="https://flomoapp.com/iwh/…"
-           style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
-    <button class="deed" id="saveflomo">保存</button>
-  </div>
-  <div class="hint" id="flomohint">填上你的 flomo 记录 API 地址（在 flomo 网页版「设置 → API」里拿，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。</div>
-  <div class="row">
-    <span class="k">壁纸</span>
-    <span class="v" id="v-wall">默认</span>
-    <span class="grow"></span>
-    <button class="deed" id="pickWall">选图片</button>
-    <button class="deed" id="clearWall" style="margin-left:6px">清除</button>
-  </div>
-  <div class="hint" id="wallhint">选一张横屏图当整页背景。背景固定不动、页面照常往上滑，文字与玻璃颜色会跟着壁纸明暗自动调整。</div>
-  <input type="file" id="wallFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-  <div class="row">
-    <span class="k">磨砂浓度</span>
-    <input type="range" id="frostRange" min="30" max="96" step="2" value="72"
-           style="flex:1;min-width:0;accent-color:var(--accent)">
-    <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
-  </div>
-  <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。</div>
-  <div class="row">
-    <span class="k">模糊强度</span>
-    <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
-           style="flex:1;min-width:0;accent-color:var(--accent)">
-    <span class="v" id="v-blur" style="width:44px;text-align:right">26px</span>
-  </div>
-  <div class="hint" id="idxRow" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span id="idxNote" data-idx-note>笔记索引：—</span>
-    <span class="grow" style="flex:1"></span>
-    <button class="deed" id="idxBuild" data-idx-go style="height:24px">建立</button>
-    <button class="deed" id="idxRebuild" style="height:24px">重建</button>
-  </div>
-  <div style="display:flex;gap:8px;padding:4px 12px 12px">
-    <button class="deed" id="mcp" style="flex:1;height:30px">一键建立 MCP</button>
-  </div>
-  <div class="row path">
-    <span class="k">存放位置</span>
-    <span class="v" id="v-path">—</span>
+<div class="popmask" id="popmask"></div>
+
+<div class="pop glass" id="pop" role="dialog" aria-modal="true" aria-label="设置">
+  <button class="popx" id="popx" title="关闭" aria-label="关闭">
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+  </button>
+  <aside class="popnav" id="popnav">
+    <div class="head">设置</div>
+    <button class="pcat on" data-cat="acct">账号</button>
+    <button class="pcat" data-cat="look">外观</button>
+    <button class="pcat" data-cat="out">导出</button>
+    <button class="pcat" data-cat="notes">笔记</button>
+    <button class="pcat" data-cat="agent">小 Agent</button>
+    <button class="pcat" data-cat="about">关于</button>
+  </aside>
+  <div class="popbody" id="popbody">
+
+    <section class="popcat on" data-cat="acct">
+      <div class="sechd">运行环境</div>
+      <div class="row">
+        <span class="k">运行组件</span>
+        <span class="v" id="v-browser">检视中</span>
+        <span class="grow"></span>
+        <button class="deed" id="fix">修复</button>
+      </div>
+      <div class="sechd">微信读书</div>
+      <div class="row">
+        <span class="k">账号</span>
+        <span class="v" id="v-account">未连接</span>
+        <span class="grow"></span>
+        <button class="deed" id="connect">连接</button>
+      </div>
+      <div class="row">
+        <span class="k">接口 Key</span>
+        <input id="keyinput" type="text" spellcheck="false" autocomplete="off" placeholder="wrk-…"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        <button class="deed" id="savekey">保存</button>
+      </div>
+      <div class="hint" id="keyhint">填上官方接口 Key 后，下方就能看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 里复制，形如 wrk-…）。填一次就存在本机，下次打开不用再填。</div>
+      <div class="sechd">导出到 flomo</div>
+      <div class="row">
+        <span class="k">flomo 地址</span>
+        <input id="flomoinput" type="text" spellcheck="false" autocomplete="off" placeholder="https://flomoapp.com/iwh/…"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        <button class="deed" id="saveflomo">保存</button>
+      </div>
+      <div class="hint" id="flomohint">填上你的 flomo 记录 API 地址（在 flomo 网页版「设置 → API」里拿，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。</div>
+    </section>
+
+    <section class="popcat" data-cat="look">
+      <div class="sechd">背景</div>
+      <div class="row">
+        <span class="k">壁纸</span>
+        <span class="v" id="v-wall">默认</span>
+        <span class="grow"></span>
+        <button class="deed" id="pickWall">选图片</button>
+        <button class="deed" id="clearWall" style="margin-left:6px">清除</button>
+      </div>
+      <div class="hint" id="wallhint">选一张横屏图当整页背景。背景固定不动、页面照常往上滑，文字与玻璃颜色会跟着壁纸明暗自动调整。</div>
+      <input type="file" id="wallFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+      <div class="sechd">玻璃</div>
+      <div class="row">
+        <span class="k">磨砂浓度</span>
+        <input type="range" id="frostRange" min="30" max="96" step="2" value="72"
+               style="flex:1;min-width:0;accent-color:var(--accent)">
+        <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
+      </div>
+      <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。</div>
+      <div class="row">
+        <span class="k">模糊强度</span>
+        <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
+               style="flex:1;min-width:0;accent-color:var(--accent)">
+        <span class="v" id="v-blur" style="width:44px;text-align:right">26px</span>
+      </div>
+    </section>
+
+    <section class="popcat" data-cat="out">
+      <div class="sechd">下载存到哪儿</div>
+      <div class="row">
+        <span class="k">导出位置</span>
+        <span class="v" id="v-export">默认</span>
+        <span class="grow"></span>
+        <button class="deed" id="pickExport">选择…</button>
+        <button class="deed" id="resetExport" style="margin-left:6px">默认</button>
+      </div>
+      <div class="hint" id="exporthint">「正文」「完整包」这些下载存到哪儿。不设就用系统「下载」文件夹。选过之后重名的文件自动加序号，不会互相覆盖。</div>
+    </section>
+
+    <section class="popcat" data-cat="notes">
+      <div class="sechd">本地笔记索引</div>
+      <div class="hint" id="idxRow" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span id="idxNote" data-idx-note>笔记索引：—</span>
+        <span class="grow" style="flex:1"></span>
+        <button class="deed" id="idxBuild" data-idx-go style="height:24px">建立</button>
+        <button class="deed" id="idxRebuild" style="height:24px">重建</button>
+      </div>
+      <div class="hint">把下载到本机的那些书的划线笔记收成一份索引，随机漫步、卡片回顾、搜索笔记都靠它。加过新书就重建一次。</div>
+      <div class="sechd">给别的 AI 用</div>
+      <div style="display:flex;gap:8px;padding:4px 12px 12px">
+        <button class="deed" id="mcp" style="flex:1;height:30px">一键建立 MCP</button>
+      </div>
+      <div class="hint">复制一段提示词，粘到支持 MCP 的 AI 客户端里，它就能直接读你的书架、划线、统计。</div>
+    </section>
+
+    <section class="popcat" data-cat="agent">
+      <div class="sechd">接口</div>
+      <div class="row">
+        <span class="k">地址</span>
+        <input id="agenturl" type="text" spellcheck="false" autocomplete="off" placeholder="https://api.example.com/v1"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">Key</span>
+        <input id="agentkey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">模型</span>
+        <input id="agentmodel" type="text" spellcheck="false" autocomplete="off" placeholder="gpt-4o-mini"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">状态</span>
+        <span class="v" id="v-agent">没配</span>
+        <span class="grow"></span>
+        <button class="deed" id="saveagent">保存</button>
+        <button class="deed" id="agenttest" style="margin-left:6px">测一下</button>
+      </div>
+      <div class="hint" id="agenthint">填一个兼容 OpenAI 的接口（/chat/completions 那一套），右下角那颗气泡就能说话了。地址写到 /v1 为止，Key 只存在本机、不会进界面。</div>
+      <div class="hint">它会看到：你的书架与读到哪里、下载到本机的书的划线笔记、以及阅读统计的汇总。这些都是你本机的东西 —— 问了才会发给上面那个接口，介意的话就别问。</div>
+    </section>
+
+    <section class="popcat" data-cat="about">
+      <div class="ablead">
+        <div class="abname">
+          <b>归藏</b>
+          <span class="abver" id="v-abver">—</span>
+        </div>
+        <div class="absay">把微信读书官方那套只给 AI Agent 用的接口，还原成一个能在本机点的工具：官方有的做成界面，官方没有的自己补上。全程只监听 127.0.0.1，不经第三方服务器。</div>
+      </div>
+
+      <div class="sechd">它能做什么</div>
+      <div class="ablist">
+        <div class="abitem">
+          <b>取书</b>
+          <span>正文 hook 阅读器画布取字，插图按阅读顺序交错；逐章落盘，跑到一半能续。</span>
+        </div>
+        <div class="abitem">
+          <b>看书</b>
+          <span>书架、书城搜索、书籍详情、阅读统计、为我推荐，不开网页版也在本地看得到。</span>
+        </div>
+        <div class="abitem">
+          <b>用笔记</b>
+          <span>全部划线建索引后全文检索，随机漫步翻旧卡，导成 Anki 或直接转 flomo。</span>
+        </div>
+        <div class="abitem">
+          <b>接 Agent</b>
+          <span>20 个 MCP 工具，长任务不阻塞；服务没起时适配器自己把它拉起来。</span>
+        </div>
+      </div>
+
+      <div class="sechd">本机</div>
+      <div class="row path">
+        <span class="k">存放位置</span>
+        <span class="v" id="v-path">—</span>
+      </div>
+      <div class="hint">书、图片、虚拟环境、浏览器配置都在这一个目录里。换机器时把它整个拷走就能接着用。</div>
+
+      <div class="sechd">它从哪来</div>
+      <div class="hint">抓取引擎与图片下载二次开发自 <b>lbq110/weread-exporter</b>（上游未声明许可证，所以本仓库刻意不放根 LICENSE）；界面、官方接口集成、MCP 与 skills 是后加的，按 MIT 使用。源码在 <b>github.com/KEQingFeng/weread-guizang</b>。</div>
+      <div class="hint">版本号从这一版开始标注，初始为 0.9.1：界面显示的、程序包里的、安装包名字里的是同一个数，都取自后端那一处定义。</div>
+    </section>
+
   </div>
 </div>
 
@@ -1066,7 +1404,7 @@
     <aside class="side glass">
       <div class="sidehead">
         <div>
-          <div class="sname">微信读书</div>
+          <div class="sname">读书破万卷</div>
           <div class="ssub" id="wrWho">未连接</div>
         </div>
       </div>
@@ -1155,6 +1493,33 @@
     <p id="sheetText"></p>
     <textarea id="sheetBody" readonly hidden></textarea>
     <div class="acts" id="sheetActs"></div>
+  </div>
+</div>
+
+<!-- 右下角小 Agent：一颗常驻气泡，点开是一块对话面板。
+     面板里不预置任何「示例回答」—— 说话的是你自己在设置里配的接口，没配就先在这儿说清怎么配。 -->
+<button class="agent none" id="agent" type="button" aria-label="读书小助手" title="读书小助手">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M20.6 11.6a8.1 8.1 0 0 1-8.9 8.1 9.4 9.4 0 0 1-2.5-.4L4.2 21l1.5-3.8a8 8 0 0 1-2.0-5.2 8.1 8.1 0 0 1 8.5-8.1 8.1 8.1 0 0 1 8.4 7.7Z"/>
+    <path d="M9.1 11.6h.01M13.2 11.6h.01"/>
+  </svg>
+  <span class="dot"></span>
+</button>
+
+<div class="agentpane" id="agentpane" role="dialog" aria-label="读书小助手">
+  <div class="aghead">
+    <span class="t">读书小助手</span>
+    <span class="s" id="agWho">没配</span>
+    <span class="grow"></span>
+    <button type="button" id="agSet">去设置</button>
+    <button type="button" id="agClear">清空</button>
+  </div>
+  <div class="agbody" id="agBody"></div>
+  <div class="agchips" id="agChips"></div>
+  <div class="agfoot">
+    <textarea id="agQ" rows="1" spellcheck="false" aria-label="说点什么"></textarea>
+    <button type="button" id="agSend">发送</button>
   </div>
 </div>
 
@@ -1507,7 +1872,7 @@ function startTask(book, title) {
 /* ── 书卡：悬停「查看详情」→ 竖排操作栏 ── */
 
 async function beginFetch(id, title) {
-  if (!loggedIn) { whisper('先在左上角设置里连接账号'); setPop(true); return false; }
+  if (!loggedIn) { whisper('先在左上角设置里连接账号'); setPop(true, 'acct'); return false; }
   const r = await post('export', {book: id});
   if (!r.ok) { whisper(r.msg); return false; }
   startTask(id, title);
@@ -1603,8 +1968,6 @@ function cardBits(b) {
     readerId, id, storeId, detailStore, detailReader, mine, busy, stt,
     coverUrl: typeof b.cover === 'string' ? b.cover
       : (b.cover ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
-    // 「摊开过」的卡原位刷新时靠它判要不要重播动画
-    revealed: revealed.has(id),
     // 骨架形状：只有这两件事会让卡片结构变化（进度条、取书↔正文）
     shape: (busy ? 'b' : '-') + (mine ? 'm' : '-'),
     tagText: busy ? '正在取'
@@ -1622,8 +1985,8 @@ function shelfCard(b, bits) {
   el.className = 'wcard';
   el.dataset.id = id;
   el.dataset.shape = t.shape;
-  // 这本书之前已经「摊开」过：直接放好，不再走一遍 opacity:0 → 摊开
-  if (t.revealed) el.classList.add('rev');
+  // 新节点先不表态（不 pre 不 rev），紧接着的 revealOnScroll 会按它落在视口哪儿
+  // 决定「摊开」还是「先藏着」—— 状态归 DOM，不再另存一份 id 表。
 
   // 批量模式下左上角出勾选框
   const pick = document.createElement('label');
@@ -1657,6 +2020,7 @@ function shelfCard(b, bits) {
     const img = document.createElement('img');
     img.alt = '';
     img.loading = 'lazy';
+    img.decoding = 'async';   // 解码放到别的线程，滚动时不被大图卡住主线程
     img.src = coverUrl;
     img.onerror = () => img.replaceWith(ph());
     img.onload = () => img.classList.add('in');   // 到了再淡入，别「啪」地砸出来
@@ -1741,13 +2105,16 @@ function shelfCard(b, bits) {
   cv.addEventListener('pointerdown', () => el.classList.add('tap'));
   ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
     cv.addEventListener(ev, () => el.classList.remove('tap')));
+  // 交互预判：指针在这张卡上停稳，就先把详情那一趟发出去。真点「详情」时
+  // 数据多半已经回来了，界面是「贴上去」而不是「转圈等」。
+  hoverAhead(el, () => preDetail(detailStore, detailReader));
   el.append(cv, strip, mt);
   return el;
 }
 
 /** 原位刷新：只改文本，不动节点 —— 已解码的封面、展开状态、滚动位置全都留着。
- *  只有卡片骨架真的变了（开始/结束取书、空↔已取回）才换节点，且换完直接标记为
- *  「已摊开」，绝不再重播一次动画。 */
+ *  只有卡片骨架真的变了（开始/结束取书、空↔已取回）才换节点；换完当它是「摊开着」
+ *  的（正摆在眼前才会换骨架，重播一次动画反而像闪一下）。 */
 function syncShelfCard(el, b, bits) {
   const t = bits || cardBits(b);
   if (el.dataset.shape !== t.shape) {
@@ -1801,6 +2168,7 @@ function paintProgress() {
 
 /* ── 状态 ─────────────────────────────── */
 let localStamp = '';
+let sideFootStamp = '';
 
 async function drawState(force) {
   let s;
@@ -1862,6 +2230,14 @@ async function drawState(force) {
     acc.textContent = '未检测';
   }
   if (s.out) $('#v-path').textContent = s.out;
+  // 版本号只有一个来源（后端 VERSION），界面上标在「关于」的那颗胶囊里。
+  // 读不到就不写 —— 留一个「—」比兜一个假的数诚实。
+  const abver = $('#v-abver');
+  if (abver) abver.textContent = s.version || '—';
+  const exDir = ((s.export || {}).dir || '');
+  const ve = $('#v-export');
+  if (ve) { ve.textContent = exDir || '默认'; ve.title = exDir || '系统「下载」文件夹'; }
+  paintAgent(s.agent || {});
 
   // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
   const ki = $('#keyinput'), fi = $('#flomoinput');
@@ -1870,8 +2246,11 @@ async function drawState(force) {
 
   $('#wrWho').textContent = loggedIn
     ? (keySet ? '账号与接口已就绪' : '已连接，未填接口 Key') : '未连接';
-  $('#sideFoot').innerHTML = `已取回 <b style="color:var(--ink-2)">${Object.keys(local).length}</b> 本`
+  // 每 2.6s 一次轮询，这行绝大多数时候一个字没变 —— 内容一样就别碰 DOM，
+  // innerHTML 一次就是一次重新解析 + 重排。
+  const foot = `已取回 <b style="color:var(--ink-2)">${Object.keys(local).length}</b> 本`
     + (running ? ' · 有任务在跑' : '');
+  if (sideFootStamp !== foot) { sideFootStamp = foot; $('#sideFoot').innerHTML = foot; }
   $('#keyhint').textContent = keySet
     ? '接口 Key 已保存在本机，下次打开不用再填。'
     : '填上官方接口 Key 后，可看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 复制，形如 wrk-…）。';
@@ -1905,18 +2284,48 @@ async function drawState(force) {
   // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
 }
 
-/* ── 设置弹层 ─────────────────────────── */
-const pop = $('#pop'), gear = $('#gear');
-function setPop(open) {
-  pop.classList.toggle('open', open);
-  gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+/* ── 设置弹层 ───────────────────────────
+   从「齿轮旁边长出来的一条下拉」改成居中弹窗：功能一路加下来，纵向拉太长，
+   在屏幕矮的机器上能拉到窗外去。现在左栏分类、右栏只显示这一类，
+   地址栏旁边那颗齿轮只管开与关，点遮罩、点右上角叉、按 Esc 都能收。 */
+const pop = $('#pop'), gear = $('#gear'), popmask = $('#popmask');
+const POPCAT_KEY = 'guizang_popcat_v1';
+
+function setCat(name) {
+  const nav = $('#popnav'), body = $('#popbody');
+  if (!nav || !body) return;
+  if (!nav.querySelector(`.pcat[data-cat="${name}"]`)) name = 'acct';
+  [...nav.querySelectorAll('.pcat')].forEach(b => b.classList.toggle('on', b.dataset.cat === name));
+  [...body.querySelectorAll('.popcat')].forEach(s => s.classList.toggle('on', s.dataset.cat === name));
+  body.scrollTop = 0;
+  try { localStorage.setItem(POPCAT_KEY, name); } catch (e) {}
 }
+
+function setPop(open, cat) {
+  pop.classList.toggle('open', open);
+  popmask.classList.toggle('open', open);
+  gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+  // 设置弹窗拿到焦点时，右下角那块玻璃先退场 —— 小助手面板比弹窗大、又不要焦点，
+  // 两边同时摊开时它会把弹窗的一角压住（窄窗口下整条左栏都点不到）。
+  if (open) agOpen(false);
+  if (open && cat) setCat(cat);
+}
+
+// 上次看的是哪一类，下次打开就还停在那儿
+try { setCat(localStorage.getItem(POPCAT_KEY) || 'acct'); } catch (e) { setCat('acct'); }
+
+$('#popnav').addEventListener('click', e => {
+  const b = e.target.closest('.pcat');
+  if (b) setCat(b.dataset.cat);
+});
+$('#popx').onclick = () => setPop(false);
+popmask.onclick = () => setPop(false);
 gear.onclick = e => { e.stopPropagation(); setPop(!pop.classList.contains('open')); };
 pop.onclick = e => e.stopPropagation();
 // 点界面任意别处：收掉设置弹层，也收掉摊开的书架卡（用户要求不必再点「收起」）
 document.addEventListener('click', () => { setPop(false); closeAllCards(); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { setPop(false); closeAllCards(); }
+  if (e.key === 'Escape') { setPop(false); agOpen(false); closeAllCards(); }
 });
 
 /* ── 主题 / 设置 / 侧边栏 / 任务栏 交互 ── */
@@ -2016,8 +2425,11 @@ $('#batchbar').addEventListener('click', e => {
 
 $('#dockHead').onclick = () => {
   const d = $('#dock');
+  const was = d.classList.contains('closed');
   d.classList.toggle('closed');
   $('#dockChev').textContent = d.classList.contains('closed') ? '展开' : '收起';
+  // 要摊开任务列表，就把小助手收掉：两块玻璃挤在同一个角上必定互相压。
+  if (was) agOpen(false);
 };
 
 // 清空记录：只清跑完的（成功/未走完），正在抓的那几条得留着看进度
@@ -2095,6 +2507,33 @@ $('#saveflomo').onclick = () => {
   saveCfg({flomo_url: v}, 'flomo 地址').then(() => { $('#flomoinput').value = ''; });
 };
 $('#flomoinput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveflomo').click(); });
+
+/* ── 导出位置 ─────────────────────────────
+   选目录这件事只能在原生外壳里做：浏览器拿不到真实路径（input[webkitdirectory]
+   只给相对名）。所以「选择…」是让外壳弹一个系统选文件夹的框，选完它把绝对路径
+   回传进来，这里再转手交给后端存下 —— 存的位置和外壳落盘时读的是同一份配置。
+   不在外壳里（直接开网页调试）就退回手输路径，功能不至于没有。 */
+const hostBridge = (window.webkit && window.webkit.messageHandlers
+                    && window.webkit.messageHandlers.guizang) || null;
+
+async function setExportDir(dir) {
+  const r = await post('export_dir', {dir});
+  whisper(r.msg || '导出位置已更新');
+  const el = $('#v-export');
+  if (el && r.ok) { el.textContent = r.dir || '默认'; el.title = r.dir || '系统「下载」文件夹'; }
+  return r.ok;
+}
+
+// 外壳选完文件夹从这里回来
+window.gzExportDir = p => { if (!p) return; setExportDir(p); };
+
+$('#pickExport').onclick = () => {
+  if (hostBridge) { hostBridge.postMessage({cmd: 'pickExportDir'}); return; }
+  const cur = ($('#v-export').title || '').trim();
+  const p = prompt('输入导出文件夹的完整路径（留空＝回到系统「下载」）', cur);
+  if (p !== null) setExportDir(p.trim());
+};
+$('#resetExport').onclick = () => setExportDir('');
 
 /* ── 壁纸：整页背景 + 随壁纸明暗自适应 ── */
 
@@ -2252,6 +2691,88 @@ function hrs(sec) {
   return h ? `${h}<small>小时</small>${m ? m + '<small>分</small>' : ''}` : `${m}<small>分</small>`;
 }
 
+/* ── 交互预判 ─────────────────────────────
+   指针停在哪，就先替用户把那一趟请求发出去 —— 从「悬停到位」到「真的点下去」
+   通常有几百毫秒，够本地这一跳跑完。于是点击不再是「开始等」，而是「已经在眼前」。
+
+   两条纪律，缺一个都会变成反效果：
+     · 停留够久才算数：只是路过（pointerenter 立刻 pointerleave）不许发请求，
+       否则一屏 60 张卡横扫过去就是把网关打满；
+     · 请求去重 + 短时缓存：同一个 key 同时在飞的只保一趟，落地的留十秒，
+       来回晃鼠标不会一遍遍重打。 */
+const preCache = new Map();     // key → {at, val}：已经拿到、还没被取走的
+const preBusy = new Map();      // key → Promise：正在飞的那一趟
+const PRE_TTL = 10000;
+const PRE_DWELL = 90;           // 悬停停留阈值（毫秒）
+
+function prefetch(key, fn) {
+  const hit = preCache.get(key);
+  if (hit && Date.now() - hit.at < PRE_TTL) return;
+  if (preBusy.has(key)) return;
+  let p;
+  try { p = Promise.resolve(fn()); }
+  catch (e) { return; }         // 预判失败不算错，安安静静地放弃
+  preBusy.set(key, p);
+  p.then(val => preCache.set(key, {at: Date.now(), val}))
+   .catch(() => {})
+   .then(() => { if (preBusy.get(key) === p) preBusy.delete(key); });
+}
+
+/** 等一份预判结果。三种可能，按代价从低到高：
+ *  已经落地 → 直接给；还在飞 → 搭上这趟便车（不是另发一趟，用户点下去时
+ *  它已经在路上跑了一半，比重发快）；压根没预判过 → null，调用方自己发。 */
+async function preAwait(key) {
+  const hot = preCache.get(key);
+  if (hot) {
+    preCache.delete(key);
+    if (Date.now() - hot.at < PRE_TTL) return hot.val;
+  }
+  const busy = preBusy.get(key);
+  if (busy) {
+    try {
+      const val = await busy;
+      preCache.delete(key);
+      return val;
+    } catch (e) { return null; }      // 预判那趟挂了，退回真发一趟
+  }
+  return null;
+}
+
+/** 悬停预判：停留够久就把 fn 发出去；指针一离开就取消（还没发的）。 */
+function hoverAhead(el, fn) {
+  let timer = null;
+  el.addEventListener('pointerenter', () => {
+    clearTimeout(timer);
+    timer = setTimeout(fn, PRE_DWELL);
+  });
+  el.addEventListener('pointerleave', () => clearTimeout(timer));
+  // 已经按下去就别再等了：这一下多半就是要点它
+  el.addEventListener('pointerdown', () => { clearTimeout(timer); fn(); });
+}
+
+// 详情页那一路：预热与真读走同一个 key，谁先到谁的算
+function detailKey(storeId, readerId) {
+  return 'detail:' + (storeId || '') + ':' + (readerId || '');
+}
+function detailFetch(storeId, readerId) {
+  return fetch('/api/detail?book=' + encodeURIComponent(storeId || '')
+    + '&reader=' + encodeURIComponent(readerId || '')).then(r => r.json())
+    .then(j => j.data || {});
+}
+function preDetail(storeId, readerId) {
+  prefetch(detailKey(storeId, readerId), () => detailFetch(storeId, readerId));
+}
+
+// 划线笔记那一路
+function preNotebooks() {
+  prefetch('notebooks', () => wcall('/user/notebooks', {count: 100}));
+}
+// 阅读统计那一路（跟着当前那一档走，切 tab 就是换 key）
+function preStats() {
+  const mode = window.__mode || 'monthly';
+  prefetch('stats:' + mode, () => wcall('/readdata/detail', {mode, baseTime: 0}));
+}
+
 /* ── 视图常驻 ─────────────────────────────
    每个视图一个节点，建好就一直留在 #view 里，切换只是把 hidden 挪一挪再播一次交接。
    原来每次点侧边栏/每次 drawState(force) 都 `$('#view').innerHTML = …`，整面书架被
@@ -2281,6 +2802,9 @@ function paneEl(name) {
     // 不是从头再滚一遍；新开的视图则回到顶部，不会停在上一页的深度里。
     const y = paneScroll[name] || 0;
     if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
+    // 切回书架：面板藏着的时候 IntersectionObserver 把它们全判成「不在眼前」
+    // 复位掉了，所以进来得补一遍，不然会看见一屏空白卡。
+    if (name === 'shelf') revealInView();
   }
   return p;
 }
@@ -2336,6 +2860,22 @@ function navBtns() {
   return [...$('#nav').querySelectorAll('button[data-v]')];
 }
 
+/** 侧边栏悬停预判：指针停在哪一项上，就把那一屏的数据先拉起来。
+ *  点下去时 renderView() 会发现数据已经在手边 —— 从「点了才开始等」
+ *  变成「点的时候已经到了」。只给前三屏布线：随机漫步与搜索是本地动作/要打字，
+ *  没有「预判」可言。 */
+function wireNavAhead() {
+  const jobs = {
+    shelf: () => { if (keySet) loadShelf(); },
+    notes: () => { if (keySet) preNotebooks(); },
+    stats: () => { if (keySet) preStats(); },
+  };
+  navBtns().forEach(b => {
+    const fn = jobs[b.dataset.v];
+    if (fn) hoverAhead(b, fn);
+  });
+}
+
 /** 让这一次切换按「返回」的方向播（从上面接回来），进去和回来的方向要对得上。 */
 function slideBack(fn) {
   slideDir = 'pu';
@@ -2387,18 +2927,32 @@ function moveNavPill() {
 }
 
 function notReady() {
-  return `<div class="emptyline"><b>还没连上微信读书</b>
+  return `<div class="emptyline"><b>还没连上读书账号</b>
     先连账号才能看自己的书架与笔记；统计、推荐与站内搜索还需要在左上角设置里填官方接口 Key。</div>`;
 }
+
+let shelfLoading = null;
 
 async function loadShelf(force) {
   if (!keySet) return false;
   if (!force && shelfBooks.length && Date.now() - shelfAt < 300000) return true;
-  const d = await wcall('/shelf/sync');
-  shelfBooks = d.books || [];
-  shelfAlbums = d.albums || [];
-  shelfAt = Date.now();
-  return true;
+  // 同一时刻只发一趟：书架屏每次重画都要它，点刷新时又会被调一次 ——
+  // 没有这道闸就会在同一秒里发两份 /shelf/sync（官方网关不便宜，也容易限流）。
+  // 但「强制刷新」必须真去拉：换过 Key 之后如果搭的是上一趟旧车，新书架就白等了。
+  if (shelfLoading) {
+    if (!force) return shelfLoading;
+    await shelfLoading.catch(() => {});
+  }
+  const p = (async () => {
+    const d = await wcall('/shelf/sync');
+    shelfBooks = d.books || [];
+    shelfAlbums = d.albums || [];
+    shelfAt = Date.now();
+    return true;
+  })();
+  shelfLoading = p;
+  try { return await p; }
+  finally { if (shelfLoading === p) shelfLoading = null; }
 }
 
 /* ── 加入书架：全程序唯一会改动微信读书的动作 ───────────────
@@ -2587,35 +3141,80 @@ function refreshShelf(force) {
   });
 }
 
-/** 羊皮卷：书架卡滚进视口才从上往下摊开，同一屏露出的几张错开几十毫秒。
- *  「摊开过」记在数据层 Set 里而不是节点上 —— 视图常驻后卡片节点会被复用、
- *  换位，只要这本书见过就不能再藏起来，否则一筛选就整面空白。
- *  三条腿一起走，缺一条也不会留下看不见的空白卡：
- *    1）画完立刻同步量一遍，已经在眼前的直接展开（不等观察器，后台标签页里
- *       IntersectionObserver 根本不会回调，用户切回来会看见一屏空白）；
- *    2）观察器负责滚进来的；
- *    3）滚动/尺寸变化/标签页切回来/切回书架时各兜一遍。 */
-let revealIO = null;
+/* ── 刷新 ─────────────────────────────────
+   换过接口 Key 之后，旧书架会一直在眼前 —— 以前唯一的出路是关掉应用重开。
+   这颗按钮一次做完三件事：重读状态（Key 换没换、有没有任务在跑）、绕过
+   5 分钟缓存重拉一遍书架、把当前这一屏连同封面一起重画。 */
+const refreshBtn = $('#refresh');
+let refreshing = false;
+
+async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
+  const t0 = Date.now();
+  refreshBtn.classList.add('spin');
+  refreshBtn.disabled = true;
+  try {
+    shelfAt = 0;                         // 破掉 loadShelf 的缓存，逼它真去拉一次
+    await drawState(true);               // 顺带把「Key 换没换、有没有任务在跑」重新读一遍
+    if (v === 'shelf') {
+      if (keySet) await loadShelf(true).catch(() => {});
+      renderShelfGrid();
+    } else {
+      renderView();                      // 别的屏各有各的数据源，各自重画
+    }
+    whisper(keySet ? '已刷新' : '还没填接口 Key，只刷新了本机的内容');
+  } finally {
+    // 转得太快反而像闪了一下，让它至少转够一圈再停
+    const left = 420 - (Date.now() - t0);
+    setTimeout(() => {
+      refreshing = false;
+      refreshBtn.classList.remove('spin');
+      refreshBtn.disabled = false;
+    }, Math.max(left, 0));
+  }
+}
+
+refreshBtn.onclick = e => { e.stopPropagation(); refreshAll(); };
+
+/** 羊皮卷：书架卡滚进视口从上往下摊开，同一屏露出的几张错开几十毫秒。
+ *
+ *  「常驻」= 每次滑回来都再摊一次，不是只认第一回。所以状态不是「这本书见过没」，
+ *  而是「这张卡此刻在不在眼前」：滚远了复位成藏着的样子，再滑回来重新摊一遍。
+ *  状态只存在节点 class 上（pre / unfurl / rev），不再另存一份 id 表 ——
+ *  视图常驻后卡片节点会被复用、换位，另存一份反而要处理两边不同步。
+ *
+ *  两条观察器分工，中间留一段死区，免得在边界上来回抖：
+ *    · 进场那条（视口内缩 4%）负责摊开；
+ *    · 离场那条（视口外扩 260px）负责复位成 pre。
+ *  再配一条同步兜底：画完立刻量一遍眼前这屏（后台标签页里 IntersectionObserver
+ *  根本不回调，只靠观察器的话切回来会看见一屏空白）。 */
+let revealIO = null, restIO = null;
 let revealGrid = null;
-const revealed = new Set();
 
-function isRevealed(card) { return revealed.has(card.dataset.id); }
-
-function revealOne(card, k) {
-  if (revealed.has(card.dataset.id)) { card.classList.remove('pre'); return; }
-  revealed.add(card.dataset.id);
+/** 摊开这一张。已经在摊/已摊开着就别再动它（重设 animation-delay 会把动画顶回去）。 */
+function unfurl(card, k) {
+  if (card.classList.contains('unfurl') || card.classList.contains('rev')) return;
   card.style.animationDelay = (k % 6) * 50 + 'ms';
   card.classList.remove('pre');
   card.classList.add('unfurl');
 }
 
-// 任何一张卡放完它那一下动画，就永久标记「已展开」：之后这张卡再怎么挪位置、
-// 被重新插入 DOM 都不会重播（CSS 动画在节点重新插入时是一定会重跑的）。
+/** 复位成「藏着」：等下次滑回来再摊。正在摊的那一下不打断，等它放完再复位。 */
+function conceal(card) {
+  if (!card.classList.contains('rev')) return;
+  card.classList.remove('rev');
+  card.classList.remove('unfurl');
+  card.classList.add('pre');
+}
+
+// 摊完了打个 rev 记号（同时把这一下的动画关掉）。之后它挪位置、被重新插入
+// DOM 都不会自己重跑 —— 重播只由「滚出视野再滚回来」触发。
 $('#view').addEventListener('animationend', e => {
   const c = e.target;
   if (!c.classList || !c.classList.contains('wcard')) return;
+  if (e.animationName !== 'unfurl') return;
   c.classList.add('rev');
-  if (e.animationName === 'unfurl') revealed.add(c.dataset.id);
 });
 
 /** pane 藏着（hidden → 没有布局盒）时不要白量，等切回来看。 */
@@ -2624,48 +3223,47 @@ function paneVisible(name) {
   return !!p && p.offsetParent !== null;
 }
 
-/** 把当前正好落在视口里、还藏着没展开的卡片摊开。
- *  这是观察器的替补：滚动、改窗口大小、标签页切回来时各兜一遍，
- *  保证「看不见的空白卡」不会出现（观察器在后台标签页里根本不回调）。 */
+/** 把此刻落在视口里的卡摊开。这是观察器的替补：滚动、改窗口大小、
+ *  标签页切回来、切回书架时各兜一遍（观察器在后台标签页里根本不回调）。 */
 function revealInView() {
   if (!revealGrid || !revealGrid.isConnected || !paneVisible('shelf')) return 0;
   const h = window.innerHeight || document.documentElement.clientHeight;
   let k = 0;
-  for (const c of revealGrid.querySelectorAll('.wcard.pre')) {
+  for (const c of revealGrid.querySelectorAll('.wcard')) {
+    if (c.classList.contains('unfurl') || c.classList.contains('rev')) continue;
     const r = c.getBoundingClientRect();
-    if (r.top >= h) continue;   // 还在下面，等滚到眼前再摊
-    revealOne(c, k++);          // 已经滚过去的也一并放开（快速拖动/跳转时不能留空白卡）
+    if (r.top >= h * .96 || r.bottom <= 0) continue;   // 还没滚到 / 已经滚出上面
+    unfurl(c, k++);
   }
   return k;
 }
 
 function revealOnScroll(grid) {
   revealGrid = grid;
-  const hidden = !paneVisible('shelf');
-  // 先把眼前这一屏摊开（同步、不依赖任何异步回调）
-  if (!hidden) {
-    const inView = [...grid.querySelectorAll('.wcard')].filter(c => {
-      if (isRevealed(c)) return false;
-      const r = c.getBoundingClientRect();
-      return r.top < (window.innerHeight || 800) * .92;
-    });
-    inView.forEach((c, i) => revealOne(c, i));
+  if (revealIO) { revealIO.disconnect(); revealIO = null; }
+  if (restIO) { restIO.disconnect(); restIO = null; }
+
+  // 先同步过一遍：刚好露在眼前的摊开，还在下面的藏好。
+  const h = window.innerHeight || 800;
+  const visible = paneVisible('shelf');
+  let k = 0;
+  for (const c of grid.querySelectorAll('.wcard')) {
+    if (c.classList.contains('unfurl') || c.classList.contains('rev')) continue;
+    if (visible && c.getBoundingClientRect().top < h * .92) unfurl(c, k++);
+    else c.classList.add('pre');
   }
-  // 剩下的先藏起来，等滚进来
-  grid.querySelectorAll('.wcard').forEach(c => {
-    if (!isRevealed(c)) c.classList.add('pre');
-  });
-  if ('IntersectionObserver' in window) {
-    if (revealIO) revealIO.disconnect();
-    revealIO = new IntersectionObserver(entries => {
-      let k = 0;
-      for (const en of entries) {
-        if (!en.isIntersecting) continue;
-        revealIO.unobserve(en.target);
-        revealOne(en.target, k++);
-      }
-    }, {rootMargin: '0px 0px -4% 0px', threshold: .06});
-    grid.querySelectorAll('.wcard.pre').forEach(c => revealIO.observe(c));
+
+  if (!('IntersectionObserver' in window)) return;
+  revealIO = new IntersectionObserver(entries => {
+    let k = 0;
+    for (const en of entries) if (en.isIntersecting) unfurl(en.target, k++);
+  }, {rootMargin: '0px 0px -4% 0px', threshold: .06});
+  restIO = new IntersectionObserver(entries => {
+    for (const en of entries) if (!en.isIntersecting) conceal(en.target);
+  }, {rootMargin: '260px 0px 260px 0px', threshold: 0});
+  for (const c of grid.querySelectorAll('.wcard')) {
+    revealIO.observe(c);
+    restIO.observe(c);
   }
 }
 
@@ -2793,7 +3391,10 @@ async function renderNotebooks() {
   // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白
   if (!nbBooks.length) setHtml(body, '<div class="emptyline">读取中…</div>');
   try {
-    const d = await wcall('/user/notebooks', {count: 100});
+    // 侧边栏悬停时预取的那份就在手边（见 wireNavAhead）：已经落地的直接用，
+    // 还在飞的搭上它那一趟，只有压根没预判过才自己发。
+    const hot = await preAwait('notebooks');
+    const d = hot != null ? hot : await wcall('/user/notebooks', {count: 100});
     nbBooks = d.books || [];
     setNote('notes', nbBooks.length
       ? `${d.totalBookCount || nbBooks.length} 本 · 共 ${d.totalNoteCount || 0} 条` : '');
@@ -2930,7 +3531,7 @@ function paintNbCnt() {
 async function importToFlomo(title) {
   if (!flomoSet) {
     whisper('先在左上角设置里填 flomo 地址');
-    setPop(true);
+    setPop(true, 'acct');
     return;
   }
   if (!nbSel.size) { whisper('先勾选要导入的条目'); return; }
@@ -2969,6 +3570,11 @@ async function renderStatsView() {
     b.classList.toggle('on', b.dataset.m === (window.__mode || 'monthly')));
   if (fresh) tabs.forEach(b => {
     b.onclick = () => { window.__mode = b.dataset.m; paintTabs(); renderStatsView(); };
+    // 指针搭到某一档上，先替它把那一档的数据拉起来
+    hoverAhead(b, () => {
+      const m = b.dataset.m;
+      prefetch('stats:' + m, () => wcall('/readdata/detail', {mode: m, baseTime: 0}));
+    });
   });
   paintTabs();
   const mode = window.__mode || 'monthly';
@@ -2977,7 +3583,11 @@ async function renderStatsView() {
   if (statsCache[mode]) setHtml(body, statsCache[mode]);
   else body.innerHTML = '<div class="emptyline">读取中…</div>';
   let d;
-  try { d = await wcall('/readdata/detail', {mode, baseTime: 0}); }
+  try {
+    // 悬停侧边栏时预取的就在手边，直接贴上去，不再等一趟
+    const hot = await preAwait('stats:' + mode);
+    d = hot != null ? hot : await wcall('/readdata/detail', {mode, baseTime: 0});
+  }
   catch (e) { setHtml(body, `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`); return; }
 
   const cmp = (typeof d.compare === 'number')
@@ -3227,9 +3837,9 @@ async function renderDetailView(storeId, readerId, title) {
 
   let d = {};
   try {
-    const r = await fetch('/api/detail?book=' + encodeURIComponent(storeId || '')
-      + '&reader=' + encodeURIComponent(readerId || ''));
-    d = (await r.json()).data || {};
+    // 卡片上悬停过的话（见 shelfCard 的 hoverAhead），这趟多半已经在路上了
+    const hot = await preAwait(detailKey(storeId, readerId));
+    d = hot != null ? hot : await detailFetch(storeId, readerId);
   } catch (e) {
     if (+p.dataset.seq === seq) body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
     return;
@@ -3630,15 +4240,312 @@ async function pumpQueue() {
   }, 3000);
 }
 
+/* ── 右下角小 Agent ─────────────────────
+   这里不发请求给任何第三方，就是把你说的话、加上「本机这一半」的资料，交给
+   你自己在设置里配的那个兼容 OpenAI 的接口，再把它的回复一句句搬回来。
+   资料分两半：书架/读到哪在前端手上（下面 agentContext 现攒），本机的划线笔记在后端手上
+   （后端自己读），两边拼在一起当作「资料」送过去 —— 只是资料，不是指令。 */
+
+let agentCfg = {};        // 后端回的那份状态：url_set / key_set / model
+let agBusy = false;       // 正在等回复
+let agFilled = false;     // 设置里那两栏只回填一次，别把用户正清空的地址又填回去
+let agMsgs = [];          // {who:'me'|'ai'|'err', text}
+const AG_KEY = 'guizang_agent_v1';
+
+try {
+  const saved = JSON.parse(localStorage.getItem(AG_KEY) || '[]');
+  // 报错那种一行不留：它说的是当时那次连接的事，留在记录里只会让下次打开莫名其妙
+  if (Array.isArray(saved)) agMsgs = saved.filter(m => m && m.text && m.who !== 'err').slice(-24);
+} catch (e) { agMsgs = []; }
+
+function agSave() {
+  try {
+    localStorage.setItem(AG_KEY, JSON.stringify(agMsgs.filter(m => m.who !== 'err').slice(-24)));
+  } catch (e) {}
+}
+
+const agReady = () => !!(agentCfg.url_set && agentCfg.model);
+
+/** 把气泡、设置里那行状态、问候语一起刷成当前配置的样子。
+ *  每 2.6s 会被 drawState 叫一次，所以只写文字、只换 class，不重建节点。 */
+function paintAgent(cfg) {
+  agentCfg = cfg || {};
+  const b = $('#agent');
+  if (!b) return;
+  b.classList.toggle('none', !agReady());
+  b.classList.toggle('on', agReady());
+  const who = $('#agWho');
+  if (who) who.textContent = agReady() ? (agentCfg.model + (agentCfg.key_set ? '' : ' · 没填 Key')) : '没配';
+  const va = $('#v-agent');
+  if (va) va.textContent = agReady() ? agentCfg.model : (agentCfg.url_set ? '缺模型名' : '没配');
+  const ku = $('#agentkey');
+  if (ku) ku.placeholder = agentCfg.key_set ? '已保存 ····' + (agentCfg.key_tail || '') : 'sk-…';
+  const uu = $('#agenturl');
+  const mu = $('#agentmodel');
+  if (!agFilled && (agentCfg.url || agentCfg.model)) {
+    agFilled = true;
+    if (uu) uu.value = agentCfg.url || '';
+    if (mu) mu.value = agentCfg.model || '';
+  }
+  renderChips();
+}
+
+/* 开场白 + 三个能问的问题。空面板最容易让人不知道说什么。 */
+const AG_TIPS = [
+  '我最近在读什么？哪些书一直没读完？',
+  '我划过的笔记里，最近都在讲什么？',
+  '按我最近读的东西，给我说说接下来读什么',
+];
+
+function renderChips() {
+  const box = $('#agChips');
+  if (!box) return;
+  if (agMsgs.length || !agReady()) { box.replaceChildren(); return; }
+  if (box.childElementCount) return;      // 已经铺过就别再重建
+  box.replaceChildren(...AG_TIPS.map(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t;
+    b.onclick = () => { $('#agQ').value = t; agAsk(t); };
+    return b;
+  }));
+}
+
+function agScroll() {
+  const body = $('#agBody');
+  if (body) body.scrollTop = body.scrollHeight;
+}
+
+function agDraw() {
+  const body = $('#agBody');
+  if (!body) return;
+  if (!agMsgs.length) {
+    const tip = document.createElement('div');
+    tip.className = 'agtip';
+    tip.textContent = agReady()
+      ? '问它书架、划线、读到哪了。资料都在本机，问了才会发给你配的那个接口。'
+      : '还没配接口：点右上角「去设置」，填一个兼容 OpenAI 的地址、Key 和模型名。';
+    if (agReady()) {
+      const kb = document.createElement('em');
+      kb.textContent = 'Enter 发送 · Shift+Enter 换行';
+      tip.append(kb);
+    }
+    body.replaceChildren(tip);
+  } else {
+    body.replaceChildren(...agMsgs.map(m => {
+      const d = document.createElement('div');
+      d.className = 'agmsg ' + m.who;
+      d.textContent = m.text;
+      return d;
+    }));
+  }
+  renderChips();
+  agScroll();
+}
+
+function agPush(who, text) {
+  agMsgs.push({who, text});
+  if (agMsgs.length > 24) agMsgs = agMsgs.slice(-24);
+  agSave();
+  agDraw();
+  return agMsgs[agMsgs.length - 1];
+}
+
+/** 前端这一半的资料：书架上有哪些书、各自什么状态、读到了哪。
+ *  只报书名与状态这类「目录级」信息，正文与划线由后端自己读，不在这儿重复搬一遍。 */
+function agentContext() {
+  const all = shelfAll();
+  if (!all.length) return '';
+  const bucket = {'在读': [], '想读': [], '已读': [], '': []};
+  for (const b of all) {
+    const s = stateOf(b) || '';
+    const pg = b.progress;
+    // 书架给的 progress 是 0-100 的整数；本地已取回的另有章节数
+    const at = (typeof pg === 'number' && pg > 0) ? '，读到 ' + Math.round(pg) + '%' : '';
+    (bucket[s] || bucket['']).push((b.title || '未命名') + '／' + (b.author || '佚名') + at);
+  }
+  const out = [];
+  for (const k of ['在读', '想读', '已读', '']) {
+    if (!bucket[k].length) continue;
+    out.push('【' + (k || '未标记') + '】' + bucket[k].slice(0, 60).join('；'));
+  }
+  const mine = Object.keys(local);
+  if (mine.length) out.push('【已下载到本机】共 ' + mine.length + ' 本');
+  return out.join('\n');
+}
+
+async function agAsk(text) {
+  const q = (text || '').trim();
+  if (!q || agBusy) return;
+  if (!agReady()) {
+    agPush('err', '小 Agent 还没配：去设置 → 小 Agent 里填个地址、Key 和模型名。');
+    return;
+  }
+  agBusy = true;
+  $('#agQ').value = '';
+  $('#agQ').style.height = '';
+  $('#agSend').disabled = true;
+  agPush('me', q);
+  const wait = document.createElement('div');
+  wait.className = 'agmsg ai wait';
+  wait.innerHTML = '<i></i><i></i><i></i>';
+  $('#agBody').append(wait);
+  agScroll();
+
+  // 最近几轮带上，太长的砍掉 —— 记住「在聊什么」，不背着整段历史走
+  const history = agMsgs.filter(m => m.who !== 'err').slice(-9, -1)
+    .map(m => ({role: m.who === 'me' ? 'user' : 'assistant', content: m.text}));
+
+  let got = '';
+  const fail = m => {
+    wait.remove();
+    if (got) { agPush('ai', got); got = ''; }
+    agPush('err', m);
+  };
+
+  try {
+    const r = await fetch('/api/agent/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({q, history, ctx: agentContext()}),
+    });
+    if (!r.ok || !r.body) throw new Error('本机服务没有响应');
+    const rd = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const {value, done} = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let j;
+        try { j = JSON.parse(line); } catch (e) { continue; }
+        if (j.err) { fail(j.err); try { await rd.cancel(); } catch (e) {} return; }
+        if (j.d) {
+          got += j.d;
+          wait.textContent = got;          // 边到边显示，不用等整段说完
+          agScroll();
+        }
+      }
+    }
+    if (got) { wait.remove(); agPush('ai', got); }
+    else { fail('那边一个字都没回。模型名或地址可能不对。'); }
+  } catch (e) {
+    fail('没聊成：' + (e && e.message ? e.message : e));
+  } finally {
+    agBusy = false;
+    $('#agSend').disabled = false;
+    renderChips();
+  }
+}
+
+/* 右下角这条队：气泡 → 任务抽屉 → 小助手面板。
+   面板要站在抽屉上方，就得知道抽屉实测多高 —— 展开/收起、任务条数变化都会改它，
+   所以用 ResizeObserver 把高度写成 --dock-h，位置由 CSS 算。
+   （之前两边都写死 bottom:78px，两个矩形完全重合，一开面板就整块压住任务列表。） */
+function syncRail() {
+  const d = $('#dock');
+  if (!d) return;
+  const h = Math.round(d.getBoundingClientRect().height);
+  document.documentElement.style.setProperty('--dock-h', (h > 0 ? h : 36) + 'px');
+}
+syncRail();
+window.addEventListener('resize', syncRail);
+if (window.ResizeObserver && $('#dock')) new ResizeObserver(syncRail).observe($('#dock'));
+
+function agOpen(open) {
+  const p = $('#agentpane');
+  if (!p) return;
+  if (open) {
+    // 抽屉摊开时面板会被挤成一条，开面板前先把它收起 —— 右下角同时只摊开一块玻璃。
+    const d = $('#dock');
+    if (d && !d.classList.contains('closed')) {
+      d.classList.add('closed');
+      const c = $('#dockChev');
+      if (c) c.textContent = '展开';
+    }
+    syncRail();
+    agDraw();
+    agScroll();
+  }
+  p.classList.toggle('open', !!open);
+}
+
+$('#agent').onclick = e => { e.stopPropagation(); agOpen(!$('#agentpane').classList.contains('open')); };
+$('#agentpane').onclick = e => e.stopPropagation();
+$('#agSend').onclick = () => agAsk($('#agQ').value);
+$('#agQ').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agAsk($('#agQ').value); }
+});
+$('#agQ').addEventListener('input', e => {
+  const t = e.target;
+  t.style.height = 'auto';
+  t.style.height = Math.min(104, t.scrollHeight) + 'px';
+});
+$('#agClear').onclick = () => { agMsgs = []; agSave(); agDraw(); };
+$('#agSet').onclick = e => { e.stopPropagation(); agOpen(false); setPop(true, 'agent'); };
+
+/* 点界面别处收掉面板 —— 但正在等回复时先留着，别把话丢在半路上。
+   设置弹层要是开着，那是用户自己点开的，交回给它处理。 */
+document.addEventListener('click', e => {
+  if (!$('#agentpane').classList.contains('open')) return;
+  if (agBusy || pop.classList.contains('open')) return;
+  if (e.target.closest && e.target.closest('#agent, #agentpane')) return;
+  agOpen(false);
+});
+
+/* 设置里的「保存 / 测一下」 */
+$('#saveagent').onclick = async () => {
+  const url = $('#agenturl').value.trim();
+  const key = $('#agentkey').value.trim();
+  const model = $('#agentmodel').value.trim();
+  // 地址留空＝关掉它（气泡上的红点会自己亮起来），和 Key 那栏的用法一致
+  const r = await post('agent.save', {url, key, model});
+  whisper(r.msg || '已保存');
+  paintAgent(r.agent || {});
+  if (r.ok) {
+    $('#agentkey').value = '';
+    $('#agenttest').click();     // 存下就顺手验一次：配错当场知道，别等真要用时才发现
+  }
+};
+
+$('#agenttest').onclick = async () => {
+  const btn = $('#agenttest');
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '测…';
+  try {
+    const r = await post('agent.test');
+    whisper(r.msg || (r.ok ? '连上了' : '没连上'));
+  } catch (e) {
+    whisper('测不动：本机服务没响应');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = keep;
+  }
+};
+
 /* ── 启动 ─────────────────────────────── */
 renderView();
 moveNavPill();      // 胶囊先就位，别等第一次点侧边栏时才凭空冒出来
 window.addEventListener('resize', moveNavPill);   // 换宽度时按钮行高会变，跟着重算
+wireNavAhead();     // 侧边栏悬停预判：指针停在哪儿，先替那一屏把数据拉起来
 setInterval(() => drawState(), 2600);
 drawState(true);
 // 索引状态一上来就报一次：不然设置里那行「笔记索引：—」要等到用户进某个视图才更新；
 // 如果上一轮还在跑（比如刷新前点了建立），顺带把进度轮询接上。
 loadIdxState().then(st => { if (st.running) watchIndex(); });
+
+/* 空闲预判：书架之后最可能去的是「划线笔记」这一屏，等页面闲下来先把它拉起来。
+   不占用首屏那一口气 —— 只有真的闲了才动。Safari 没有 requestIdleCallback，
+   退回一个「迟一点再说」的定时器，效果一样是「用户还没到，数据先到」。 */
+const whenIdle = window.requestIdleCallback
+  ? (fn) => window.requestIdleCallback(fn, {timeout: 2500})
+  : (fn) => setTimeout(fn, 1500);
+drawState(true).then(() => whenIdle(() => { if (keySet) preNotebooks(); }));
 </script>
 </body>
 </html>

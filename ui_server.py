@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -32,6 +33,11 @@ from urllib.parse import urlparse, parse_qs
 import platform_compat as pc
 
 REPO = os.path.dirname(os.path.abspath(__file__))
+
+# 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
+# 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
+# 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
+VERSION = "0.9.1"
 
 
 def py():
@@ -236,6 +242,39 @@ def save_cfg(d):
 
 def weread_key():
     return (load_cfg().get("weread_key") or "").strip()
+
+
+# ---------- 导出位置 ----------
+#
+# 「正文 / 完整包」这些下载其实是**外壳**在落盘（WKDownloadDelegate），不是后端 ——
+# 后端只管把这个设置存下来，外壳每次下载前现读一遍同一个 config.json。
+# 所以这里不缓存，永远现读，改完立刻生效、不用重启。
+
+def export_dir():
+    return (load_cfg().get("export_dir") or "").strip()
+
+
+def set_export_dir(path):
+    """存导出目录。返回 (ok, 人话)。
+
+    选一个不存在或不能写的目录是有可能的（目录被删了、选到了只读卷），
+    存之前先验一次：真到下载那一刻才发现写不进去，用户看到的是「点了没反应」，
+    而那时候他早忘了自己选过什么。
+    """
+    path = (path or "").strip()
+    cfg = load_cfg()
+    if not path:
+        cfg.pop("export_dir", None)
+        save_cfg(cfg)
+        return True, "已改回系统「下载」文件夹"
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isdir(path):
+        return False, "这个文件夹不存在（或者不在本机）"
+    if not os.access(path, os.W_OK):
+        return False, "这个文件夹不能写，换一个吧"
+    cfg["export_dir"] = path
+    save_cfg(cfg)
+    return True, "导出位置已设为 " + path
 
 
 # ---------- 壁纸 ----------
@@ -768,6 +807,224 @@ def flomo_send(url, content, timeout=20):
     raise RuntimeError("；".join(errs)[:280])
 
 
+# ---------- 小 Agent ----------
+#
+# 界面右下角那颗气泡。这里不内置任何模型，只用用户自己填的「兼容 OpenAI 的接口」
+# （/chat/completions 那一套）。后端只做三件事：存配置、拼上下文、把上游的流
+# 原样转给页面。
+#
+# 上下文的来源分两半：书架与阅读状态在**前端**手上（它已经同步过一遍，后端再拉一次
+# 就是白打一趟官方网关），本机的划线笔记在**后端**手上（索引文件就在磁盘上）。
+# 所以前端把摘要捎过来，后端把它和最近的划线拼成一页纸，只在用户真的问话时才发出去。
+#
+# 界面上那句提示是承诺：不问就不发。所以这里没有「预热」「后台摘要」任何说法 ——
+# 只有 agent_chat 被调到，才去拼、才去连。
+
+AGENT_SYS = (
+    "你是「归藏」里的读书小助手，只服务这一个用户。"
+    "你的资料是他本机的微信读书数据：书架与读到哪、下载到本机的书的划线笔记。"
+    "回答时：先给结论再给依据；引用划线要说明是哪本书；"
+    "没把握就直说没把握，不要编造书里没写过的话。"
+    "语气平实、简短，不用营销腔，不要堆 emoji。"
+)
+
+
+def agent_cfg():
+    c = load_cfg()
+    return ((c.get("agent_url") or "").strip(),
+            (c.get("agent_key") or "").strip(),
+            (c.get("agent_model") or "").strip())
+
+
+def agent_state():
+    """给页面的那份状态。Key 只回尾巴 —— 设置页靠它显示「已保存 ····abcd」，
+    真正的 Key 永远不出这台机器。"""
+    url, key, model = agent_cfg()
+    return {"url": url, "model": model, "url_set": bool(url),
+            "key_set": bool(key), "key_tail": key[-4:] if key else ""}
+
+
+def agent_url_full(url):
+    """把用户填的地址补成真正的 completions 端点。
+
+    有人填 https://api.x.com（少了 /v1），有人填 …/v1（少了 /chat/completions），
+    两种都按常见约定补齐；填全了的原样返回。
+    """
+    u = (url or "").strip().rstrip("/")
+    if not re.match(r"^https?://", u):
+        return ""
+    if u.endswith("/chat/completions"):
+        return u
+    if re.search(r"/v\d+$", u):
+        return u + "/chat/completions"
+    return u + "/v1/chat/completions"
+
+
+def set_agent_cfg(url, key, model):
+    """存小 Agent 的三件套。返回 (ok, 人话)。
+
+    Key 传空串表示「不改」—— 页面上那个输入框永远显示的是占位符，
+    用户只改模型时不该被逼着把 Key 再贴一遍。
+    """
+    url = (url or "").strip()
+    model = (model or "").strip()[:80]
+    cfg = load_cfg()
+    if not url:
+        for k in ("agent_url", "agent_key", "agent_model"):
+            cfg.pop(k, None)
+        save_cfg(cfg)
+        return True, "小 Agent 已关闭"
+    full = agent_url_full(url)
+    if not full:
+        return False, "地址要写成 http:// 或 https:// 开头"
+    if not model:
+        return False, "还差一个模型名"
+    cfg["agent_url"] = full
+    cfg["agent_model"] = model
+    if (key or "").strip():
+        cfg["agent_key"] = key.strip()
+    save_cfg(cfg)
+    return True, "小 Agent 已连上 " + full
+
+
+def local_context():
+    """后端这一半的上下文：本机已取回的书 + 最近的一批划线。"""
+    out = []
+    books = list_books()
+    if books:
+        out.append("【下载到本机的书】共 %d 本" % len(books))
+        for b in books[:40]:
+            seg = "- 《%s》" % b["title"]
+            if b.get("author"):
+                seg += "（%s）" % b["author"]
+            seg += "：已取 %d" % b["chapters"]
+            if b.get("total"):
+                seg += "/%d" % b["total"]
+            seg += " 章"
+            if b.get("done"):
+                seg += "，已取全"
+            if b.get("state"):
+                seg += "，标记为「%s」" % b["state"]
+            pr = b.get("progress") or {}
+            if pr.get("chapters"):
+                seg += "，进度到第 %s 章" % pr["chapters"]
+            out.append(seg)
+    idx = load_notes_index()
+    items = sorted((idx.get("items") or []), key=lambda x: -(x.get("at") or 0))[:50]
+    if items:
+        out.append("")
+        out.append("【最近的划线 / 想法】共索引 %d 条，这里给最新的 %d 条"
+                   % (len(idx.get("items") or []), len(items)))
+        for x in items:
+            out.append("- 《%s》%s：%s" % (x.get("title") or "?", x.get("kind") or "划线",
+                                          (x.get("text") or "").replace("\n", " ")[:160]))
+    elif not idx.get("built_at"):
+        out.append("")
+        out.append("【划线笔记】用户还没在界面上建过笔记索引，所以这里没有划线可看。")
+    return "\n".join(out)
+
+
+def agent_payload(q, history, front_ctx):
+    """拼成一次 /chat/completions 的请求体。
+
+    front_ctx 是页面捎来的书架摘要（纯文本，前端已经压过一遍），只当资料，
+    不当指令 —— 就算书名里写了「忽略上面的要求」，那也只是一本书的名字。
+    """
+    url, key, model = agent_cfg()
+    msgs = [{"role": "system", "content": AGENT_SYS}]
+    digest = []
+    if (front_ctx or "").strip():
+        digest.append("【书架与阅读状态（来自本机界面）】")
+        digest.append(front_ctx.strip()[:6000])
+    tail = local_context()
+    if tail:
+        digest.append("")
+        digest.append(tail)
+    if digest:
+        msgs.append({"role": "system",
+                     "content": "以下是这位用户本机的资料摘要，回答时以它为准：\n"
+                                + "\n".join(digest)})
+    for h in (history or [])[-8:]:
+        r = (h or {}).get("role")
+        c = ((h or {}).get("content") or "").strip()
+        if r in ("user", "assistant") and c:
+            msgs.append({"role": r, "content": c[:4000]})
+    msgs.append({"role": "user", "content": (q or "").strip()[:4000]})
+    return {"url": url, "key": key,
+            "body": {"model": model, "messages": msgs, "stream": True}}
+
+
+def agent_http_error(e):
+    """上游报错时，把它自己的话带回去 —— 这类接口的提示往往比我们翻译得更准
+    （是 Key 错了、模型名不对，还是余额用完了）。"""
+    raw = e.read().decode("utf-8", "replace")
+    try:
+        m = (json.loads(raw).get("error") or {}).get("message")
+    except Exception:
+        m = None
+    return RuntimeError("接口回了个 %s：%s" % (e.code, (m or raw)[:200]))
+
+
+def agent_open(payload, stream=True, timeout=120):
+    """连上游，把响应对象交出去。"""
+    req = urllib.request.Request(
+        payload["url"], data=json.dumps(payload["body"]).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Accept": "text/event-stream" if stream else "application/json",
+                 "Authorization": "Bearer " + (payload["key"] or "-"),
+                 "User-Agent": "guizang/1.0"},
+        method="POST")
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        raise agent_http_error(e)
+    except Exception as e:
+        raise RuntimeError("连不上那个地址：%s" % str(e)[:160])
+
+
+def agent_deltas(resp):
+    """把上游的 SSE 拆成一段段正文。上游字段缺失/半行 JSON 都直接跳过 ——
+    宁可少吐几个字，也不能因为一行脏数据把整段对话打断。"""
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return
+        try:
+            j = json.loads(data)
+        except Exception:
+            continue
+        for ch in (j.get("choices") or []):
+            piece = (ch.get("delta") or {}).get("content")
+            if piece:
+                yield piece
+
+
+def agent_test():
+    """「测一下」：发一句最小的话过去，走完整条链路（含 Key）。
+    非流式，只为快 —— 用户要的是「通没通」，不是「说得多好」。"""
+    url, key, model = agent_cfg()
+    if not url or not model:
+        return False, "还没填地址和模型", 0
+    t0 = time.time()
+    try:
+        with agent_open({"url": url, "key": key,
+                         "body": {"model": model, "stream": False,
+                                  "messages": [{"role": "user",
+                                                "content": "只回两个字：在的"}]}},
+                        stream=False, timeout=45) as r:
+            j = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception as e:
+        return False, str(e)[:200], 0
+    ms = int((time.time() - t0) * 1000)
+    try:
+        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    except Exception:
+        say = ""
+    return True, "通了，%d 毫秒。它说：%s" % (ms, (say or "（没说话）")[:60]), ms
+
 
 def list_books():
     books = []
@@ -1076,6 +1333,27 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, "application/json; charset=utf-8",
                    json.dumps(obj, ensure_ascii=False))
 
+    # 小 Agent 的回复是一段段吐出来的（上游 SSE），所以这条响应没法先算长度。
+    # 走 chunked：每段正文一个 JSON 行，最后来一个收尾块。写完主动断连 ——
+    # 本机自己的页面，重连一次的开销远小于把 chunked 的半开连接留在那儿的风险。
+    def _sse_start(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+    def _chunk(self, text):
+        b = text.encode("utf-8")
+        self.wfile.write(b"%x\r\n" % len(b) + b + b"\r\n")
+        self.wfile.flush()
+
+    def _chunk_end(self):
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -1102,12 +1380,15 @@ class Handler(BaseHTTPRequestHandler):
                 "states": lib.get("state") or {},
                 "repo": REPO,
                 "out": OUT_DIR,
+                "version": VERSION,
                 "weread": {"key_set": bool(weread_key()),
                            "key_tail": weread_key()[-4:] if weread_key() else ""},
                 "flomo": {"url_set": bool(load_cfg().get("flomo_url")),
                           "tail": (load_cfg().get("flomo_url") or "")[-8:]},
                 "wallpaper": {"set": os.path.isfile(WALL_PATH),
                               "v": int(os.path.getmtime(WALL_PATH)) if os.path.isfile(WALL_PATH) else 0},
+                "export": {"dir": export_dir()},
+                "agent": agent_state(),
             })
 
         if path == "/api/log":
@@ -1364,6 +1645,28 @@ class Handler(BaseHTTPRequestHandler):
             save_lib(lib)
             return self._json({"ok": True, "msg": f"已删除 {n} 本的本地缓存"})
 
+        if u.path == "/api/agent/chat":
+            q = ((body or {}).get("q") or "").strip()
+            if not q:
+                return self._json({"ok": False, "msg": "说点什么吧"})
+            url, key, model = agent_cfg()
+            if not url or not model:
+                return self._json({"ok": False, "msg": "小 Agent 还没配：去设置 → 小 Agent 里填个地址和模型"})
+            payload = agent_payload(q, (body or {}).get("history"), (body or {}).get("ctx"))
+            # 从这一行起就转成流式了，之后没法再改 HTTP 状态码 —— 出错只能当作
+            # 流里的一条消息发出去，所以先把「是不是配好了」这类问题在前头挡掉。
+            self._sse_start()
+            try:
+                with agent_open(payload) as r:
+                    for piece in agent_deltas(r):
+                        self._chunk(json.dumps({"d": piece}, ensure_ascii=False) + "\n")
+                self._chunk('{"done":true}\n')
+            except Exception as e:
+                log(f"--- 小 Agent 出错：{str(e)[:200]} ---")
+                self._chunk(json.dumps({"err": str(e)[:300]}, ensure_ascii=False) + "\n")
+            self._chunk_end()
+            return
+
         if u.path == "/api/action":
             return self._action(body)
         if u.path == "/api/weread":
@@ -1462,6 +1765,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "log.clear":
             return self._json(clear_log())
+
+        if action == "export_dir":
+            ok, msg = set_export_dir(body.get("dir"))
+            return self._json({"ok": ok, "msg": msg, "dir": export_dir()})
+
+        if action == "agent.save":
+            ok, msg = set_agent_cfg(body.get("url"), body.get("key"), body.get("model"))
+            return self._json({"ok": ok, "msg": msg, "agent": agent_state()})
+
+        if action == "agent.test":
+            ok, msg, _ms = agent_test()
+            return self._json({"ok": ok, "msg": msg})
 
         if action == "install":
             # 只有这一步需要把系统代理翻成环境变量：playwright 的下载器是 Node，

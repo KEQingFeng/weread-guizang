@@ -15,7 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<!-- 这一份会被 shell/build_macos.sh 用 ui_server.py 里的 VERSION 盖掉；
+	     留在这里只是让人直接打开模板时也能看到一个真数。 -->
+	<string>0.9.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleInfoDictionaryVersion</key>
