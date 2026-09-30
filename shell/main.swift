@@ -105,6 +105,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     private var serverURL: URL?
     private var keeper: Any?                       // 保住 streamer，别让它被回收
     private var busy = false
+    private var dlDests: [ObjectIdentifier: URL] = [:]   // 下载 → 落盘位置，落完用来提示
 
     // 应用包里的三处路径
     private let resDir: URL
@@ -605,6 +606,87 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         dbg("页面预加载失败 url=\(webView.url?.absoluteString ?? "nil") \(error.localizedDescription)")
     }
 
+    // MARK: 下载
+    //
+    // 界面上「正文 / 完整包」是先把文件 fetch 成 blob，再点一个带 download 属性的
+    // <a>。这种导航 WKWebView 默认当成普通跳转处理 —— 于是整个界面被导航到那个
+    // blob 上，用户看到满屏纯文本、还没有返回按钮，也就是「点了正文就再也回不到书架」。
+    // 宿主必须接管：声明要存盘的导航转成下载，交给下面的 WKDownloadDelegate 落盘。
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // 别处的网页一律交给系统浏览器。界面自己那条 127.0.0.1 与首启页的 file://
+        // 留在窗口里，其余 http(s) 出去 —— 否则整块界面会被那个网页顶掉，而且这个
+        // 窗口没有地址栏也没有后退键，用户只能关掉重开。
+        if let u = navigationAction.request.url, isOutside(u) {
+            openOutside(u)
+            decisionHandler(.cancel)
+            return
+        }
+        if navigationAction.shouldPerformDownload {
+            dbg("导航 → 转下载 url=\(navigationAction.request.url?.absoluteString ?? "nil")")
+            decisionHandler(.download)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    /// 这个地址是不是「外面」的 —— 自己的后端与首启页不算。
+    private func isOutside(_ u: URL) -> Bool {
+        switch (u.scheme ?? "").lowercased() {
+        case "file": return false
+        case "http", "https":
+            let host = (u.host ?? "").lowercased()
+            return host != "127.0.0.1" && host != "localhost" && host != "::1"
+        default: return false
+        }
+    }
+
+    private func openOutside(_ u: URL) {
+        dbg("交给系统浏览器 \(u.absoluteString)")
+        NSWorkspace.shared.open(u)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // 第二条路：服务端自己声明成附件（Content-Disposition: attachment）的响应。
+        // 判据必须收在这里 —— 试过「一律转下载」，首页那次 text/html 也被当成下载，
+        // 界面直接空白（didFailProvisional Frame load interrupted）。所以只有
+        // 附件、或者浏览器根本显示不出来的类型（zip / apkg）才转。
+        let cd = (navigationResponse.response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
+        if cd.contains("attachment") || !navigationResponse.canShowMIMEType {
+            dbg("响应 → 转下载 url=\(navigationResponse.response.url?.absoluteString ?? "nil")")
+            decisionHandler(.download)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    // MARK: 界面上的外链（原书 / 源网站）
+    //
+    // ui.html 用 window.open(url) 打开微信读书原书。WKWebView 自己不负责开窗口，
+    // 不实现这个方法，点下去就是毫无反应 —— 又一次「按钮点了没用」。交给系统
+    // 浏览器还有一个好处：登录态与账号密码留在用户自己的浏览器里，不落进这个小窗口。
+
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let u = navigationAction.request.url, isOutside(u) { openOutside(u) }
+        return nil
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
+                 didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse,
+                 didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
     // MARK: 文件选择
     //
     // WKWebView 自己不弹选择框，得由宿主来实现 —— 界面上「选图片」那个按钮
@@ -626,6 +708,94 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             completionHandler(panel.urls)
         } else {
             completionHandler(nil)
+        }
+    }
+}
+
+// MARK: - 下载落盘
+//
+// WebKit 自己不挑保存位置（completionHandler 给 nil 就等于取消下载），所以位置由
+// 这里定：优先「下载」文件夹，重名按 macOS 的习惯加序号（米德尔马契 (2).md）。
+// 存完在界面上浮一句提示 —— 否则点了按钮什么也没发生，用户还是不知道该去哪儿找。
+
+extension Shell: WKDownloadDelegate {
+
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String,
+                  completionHandler: @escaping (URL?) -> Void) {
+        let dest = freeDestination(for: suggestedFilename)
+        dlDests[ObjectIdentifier(download)] = dest
+        dbg("下载落盘 \(dest.path)")
+        completionHandler(dest)
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let dest = dlDests.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        dbg("下载完成 \(dest.path)")
+        // 主界面才有 whisper（首启页没有），别往首启页里打。
+        if web.url?.isFileURL != true { js("whisper(\(jsString("已存到\(folderLabel(dest))· \(dest.lastPathComponent)")))") }
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error,
+                  resumeData: Data?) {
+        let name = dlDests.removeValue(forKey: ObjectIdentifier(download))?.lastPathComponent ?? "文件"
+        dbg("下载失败 \(name) \(error.localizedDescription)")
+        if web.url?.isFileURL != true { js("whisper(\(jsString("没存成：\(name)")))") }
+    }
+
+    /// 提示语里那个位置该怎么说 —— 落在「下载」里就直说，退到了别处也别瞒着。
+    fileprivate func folderLabel(_ dest: URL) -> String {
+        let parent = dest.deletingLastPathComponent()
+        if parent.lastPathComponent == "Downloads" { return "「下载」文件夹 " }
+        return "\(parent.path) "
+    }
+
+    /// 挑一个还不存在的落盘路径，重名时依次试「名字 (2).扩展名」。
+    ///
+    /// 服务端给的标题偶尔带斜杠或冒号（书名里的），直接拼进路径会变成子目录，
+    /// 先抹平。全空的话给个固定名，不能返回 nil —— 那是取消下载的意思。
+    fileprivate func freeDestination(for name: String) -> URL {
+        let fm = FileManager.default
+        let safe = name.replacingOccurrences(of: "/", with: "-")
+                       .replacingOccurrences(of: ":", with: "-")
+        let stem = safe.isEmpty ? "归藏导出" : safe
+
+        // 首选「下载」文件夹。但 macOS 对桌面 / 文档 / 下载这些位置有 TCC 保护，
+        // 没被授权的进程往里写会被系统拦下（而且不一定报错，表现就是下载停在那儿
+        // 不动）。所以先真写一个探针文件确认能写，不能写就退到数据目录里。
+        let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let base: URL
+        if let d = dl, isWritableDir(d) {
+            base = d
+        } else {
+            base = dataDir.appendingPathComponent("downloads", isDirectory: true)
+            try? fm.createDirectory(at: base, withIntermediateDirectories: true)
+            dbg("「下载」不可写，改落 \(base.path)")
+        }
+
+        var url = base.appendingPathComponent(stem)
+        if !fm.fileExists(atPath: url.path) { return url }
+
+        let ext = url.pathExtension
+        let root = url.deletingPathExtension().lastPathComponent
+        var n = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(root) (\(n))" : "\(root) (\(n)).\(ext)"
+            url = base.appendingPathComponent(candidate)
+            if !fm.fileExists(atPath: url.path) { return url }
+            n += 1
+        }
+    }
+
+    /// 真写一个临时文件再删掉 —— 只看 isWritableFile 不够，TCC 拦的是实际写入。
+    fileprivate func isWritableDir(_ dir: URL) -> Bool {
+        let probe = dir.appendingPathComponent(".guizang-write-probe")
+        do {
+            try Data("x".utf8).write(to: probe)
+            try? FileManager.default.removeItem(at: probe)
+            return true
+        } catch {
+            return false
         }
     }
 }

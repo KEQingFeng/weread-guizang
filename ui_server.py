@@ -1262,7 +1262,9 @@ class Handler(BaseHTTPRequestHandler):
             md = merged_markdown(book)
             if md is None:
                 return self._send(404, "text/plain; charset=utf-8", "没有章节内容")
-            fn = (q.get("name", [book])[0] or book)
+            # 没点名就用书名（跟 /api/zip 一个规矩）。原来退回书 id，下载下来是
+            # 一串 00a32ec0… 的目录名，用户根本认不出是哪本书。
+            fn = (q.get("name", [""])[0] or meta_title(book))
             return self._send(200, "text/markdown; charset=utf-8", md,
                               {"Content-Disposition": content_disp(fn, "md")})
 
