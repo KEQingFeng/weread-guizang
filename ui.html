@@ -1,0 +1,3629 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script>
+  // 尽早定下主题，避免刷新时先闪一下浅色
+  try {
+    var _t = localStorage.getItem('guizang_theme') || 'auto';
+    if (_t === 'dark' || _t === 'light') document.documentElement.dataset.theme = _t;
+  } catch (e) {}
+</script>
+<title>归藏</title>
+<style>
+  :root{
+    --ink:#1a1e26;
+    --ink-2:#5b6373;
+    --ink-3:#8b93a3;
+    --line:rgba(20,24,32,.075);
+    --line-2:rgba(20,24,32,.13);
+    --glass-rgb:255,255,255;
+    --frost:.68;                    /* 磨砂浓度：面板透多少（设置里可调，存本机） */
+    --blur:24px;                    /* 模糊强度：同上 */
+    --glass:rgba(var(--glass-rgb), var(--frost));
+    --glass-2:rgba(var(--glass-rgb), calc(var(--frost) * .66));
+    --solid:#fff;
+    --accent:#2f7ff0;
+    --accent-soft:rgba(47,127,240,.11);
+    --mint:#1f9e85;
+    --warn:#a97c22;
+    --err:#c8554a;
+    --shadow:0 1px 2px rgba(20,24,32,.04), 0 20px 44px -22px rgba(20,24,32,.24);
+    --sheen:inset 0 .5px 0 rgba(255,255,255,.72);
+    --r:20px; --r-sm:10px; --r-xl:26px;
+    /* iOS 那味道的缓动：末段回弹一点，不像 linear 那样硬停 */
+    --spring:cubic-bezier(.32,.72,0,1);
+    --pop:cubic-bezier(.34,1.56,.64,1);
+  }
+  /* 主题：默认跟随系统；用户在界面上手动选了就以 html[data-theme] 为准 */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ink:#eceef3;
+      --ink-2:#a8b0c0;
+      --ink-3:#7c8598;
+      --line:rgba(255,255,255,.09);
+      --line-2:rgba(255,255,255,.15);
+      --glass-rgb:28,31,38;
+      --frost:.62;
+      --solid:#1e2128;
+      --accent:#5fa4f7;
+      --accent-soft:rgba(95,164,247,.15);
+      --mint:#3ec7a8;
+      --warn:#d4a24e;
+      --err:#e87a70;
+      --shadow:0 1px 2px rgba(0,0,0,.32), 0 20px 44px -22px rgba(0,0,0,.6);
+      --sheen:inset 0 .5px 0 rgba(255,255,255,.06);
+    }
+  }
+  html[data-theme="dark"]{
+    color-scheme:dark;
+    --ink:#eceef3;
+    --ink-2:#a8b0c0;
+    --ink-3:#7c8598;
+    --line:rgba(255,255,255,.09);
+    --line-2:rgba(255,255,255,.15);
+    --glass-rgb:28,31,38;
+    --frost:.62;
+    --solid:#1e2128;
+    --accent:#5fa4f7;
+    --accent-soft:rgba(95,164,247,.15);
+    --mint:#3ec7a8;
+    --warn:#d4a24e;
+    --err:#e87a70;
+    --shadow:0 1px 2px rgba(0,0,0,.32), 0 20px 44px -22px rgba(0,0,0,.6);
+    --sheen:inset 0 .5px 0 rgba(255,255,255,.06);
+  }
+  html[data-theme="light"]{ color-scheme:light }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; min-height:100vh; color:var(--ink);
+    background:#eef1f7;
+    font:13.5px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) body{background:#12151b} }
+  html[data-theme="dark"] body{background:#12151b}
+
+  /* 环境光：极淡的色晕 + 细颗粒，让玻璃有东西可以透 */
+  .ambient{position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden}
+  .ambient i{position:absolute; display:block; border-radius:50%; filter:blur(70px); opacity:.55}
+  .ambient i:nth-child(1){width:46vw; height:46vw; left:-10vw; top:-14vw; background:rgba(47,127,240,.30)}
+  .ambient i:nth-child(2){width:38vw; height:38vw; right:-8vw; top:6vh; background:rgba(31,158,133,.24)}
+  .ambient i:nth-child(3){width:42vw; height:42vw; left:18vw; bottom:-18vw; background:rgba(214,140,96,.18)}
+  .ambient u{
+    position:absolute; inset:0; opacity:.035; mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) .ambient i:nth-child(1){background:rgba(47,127,240,.20); opacity:.5}
+    :root:not([data-theme="light"]) .ambient i:nth-child(2){background:rgba(31,158,133,.15)}
+    :root:not([data-theme="light"]) .ambient i:nth-child(3){background:rgba(180,110,80,.13)}
+    :root:not([data-theme="light"]) .ambient u{mix-blend-mode:screen; opacity:.022}
+  }
+  html[data-theme="dark"] .ambient i:nth-child(1){background:rgba(47,127,240,.20); opacity:.5}
+  html[data-theme="dark"] .ambient i:nth-child(2){background:rgba(31,158,133,.15)}
+  html[data-theme="dark"] .ambient i:nth-child(3){background:rgba(180,110,80,.13)}
+  html[data-theme="dark"] .ambient u{mix-blend-mode:screen; opacity:.022}
+
+  .glass{
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%);
+    border:1px solid var(--line);
+    box-shadow:var(--shadow);
+  }
+
+  /* ── 顶栏 ───────────────────────────── */
+  .bar{
+    position:sticky; top:0; z-index:30;
+    display:flex; align-items:center; gap:11px;
+    height:52px; padding:0 20px;
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%);
+    border-bottom:1px solid var(--line);
+  }
+  .mark{
+    width:26px; height:26px; flex:none; border-radius:8px;
+    background:linear-gradient(155deg,#4b93f2,#2568cc);
+    box-shadow:0 3px 10px -4px rgba(47,127,240,.7), inset 0 .5px 0 rgba(255,255,255,.45);
+    display:grid; place-items:center; color:#fff;
+    font-size:12.5px; font-weight:600;
+  }
+  .bar .name{font-size:14px; font-weight:600}
+  .bar .spacer{flex:1}
+
+  .iconbtn{
+    width:30px; height:30px; flex:none; display:grid; place-items:center;
+    border-radius:8px; border:1px solid transparent; background:transparent;
+    color:var(--ink-2); cursor:pointer; padding:0;
+    transition:background .16s ease, color .16s ease, border-color .16s ease, transform .12s ease;
+  }
+  .iconbtn:hover{background:var(--accent-soft); color:var(--accent)}
+  .iconbtn:active{transform:scale(.94)}
+  .iconbtn svg{width:16px; height:16px; display:block}
+  .iconbtn[aria-expanded="true"]{background:var(--accent-soft); color:var(--accent)}
+
+  .live{
+    display:inline-flex; align-items:center; gap:7px;
+    height:24px; padding:0 10px; border-radius:999px;
+    font-size:11.5px; color:var(--ink-2);
+    background:rgba(127,140,160,.14);
+  }
+  .live b{width:6px; height:6px; border-radius:50%; background:var(--ink-3); flex:none}
+  .live.on{color:var(--accent); background:var(--accent-soft)}
+  .live.on b{background:var(--accent); animation:breathe 2.2s ease-in-out infinite}
+  .live.good b{background:var(--mint)}
+  .live.bad{color:var(--err); background:rgba(200,85,74,.12)}
+  .live.bad b{background:var(--err)}
+  @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
+
+  /* ── 设置弹层 ────────────────────────── */
+  .pop{
+    position:fixed; z-index:40; top:56px; left:20px; width:322px;
+    border-radius:var(--r); padding:6px;
+    transform-origin:14px -8px;
+    opacity:0; transform:scale(.96) translateY(-4px); pointer-events:none;
+    transition:opacity .2s ease, transform .24s cubic-bezier(.2,.9,.28,1);
+  }
+  .pop.open{opacity:1; transform:none; pointer-events:auto}
+  .pop .head{padding:11px 12px 7px; font-size:11.5px; color:var(--ink-3)}
+  .row{display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:10px}
+  .row:hover{background:rgba(127,140,160,.09)}
+  .row .k{font-size:12px; color:var(--ink-3); width:70px; flex:none}
+  .row .v{font-size:12.5px; font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .row .v em{font-style:normal; color:var(--ink-3); font-weight:400; margin-left:6px}
+  .row .grow{flex:1}
+  .row.path .v{font-size:11px; font-weight:400; color:var(--ink-2)}
+  .hint{padding:8px 12px 10px; font-size:11.5px; color:var(--ink-3); line-height:1.5}
+
+  /* ── 主体 ───────────────────────────── */
+  main{position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:22px 20px 80px}
+
+  .split{display:grid; grid-template-columns:340px minmax(0,1fr); gap:16px; align-items:start}
+  @media (max-width:880px){ .split{grid-template-columns:1fr} }
+
+  .pane{border-radius:var(--r); overflow:hidden}
+  .pane > .top{
+    display:flex; align-items:center; gap:8px;
+    padding:13px 15px; border-bottom:1px solid var(--line);
+  }
+  .pane > .top .t{font-size:12.5px; font-weight:600}
+  .pane > .top .n{font-size:11.5px; color:var(--ink-3)}
+  .pane > .top .grow{flex:1}
+  .pane .body{padding:15px}
+
+  /* 取书 */
+  .fetch .field{
+    display:flex; align-items:center; gap:8px;
+    background:var(--glass-2); border:1px solid var(--line-2);
+    border-radius:10px; padding:0 4px 0 12px; height:40px;
+    transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+  }
+  .fetch .field:focus-within{
+    border-color:var(--accent); background:var(--solid);
+    box-shadow:0 0 0 4px var(--accent-soft);
+  }
+  .fetch input{
+    flex:1; min-width:0; height:36px; border:0; outline:0; background:transparent;
+    font:inherit; font-size:13.5px; color:var(--ink);
+  }
+  .fetch input::placeholder{color:var(--ink-3)}
+  .fetch .go{
+    height:30px; padding:0 14px; flex:none; border:0; border-radius:7px; cursor:pointer;
+    font:inherit; font-size:12.5px; font-weight:550; color:#fff;
+    background:linear-gradient(158deg,#4b93f2,#2568cc);
+    box-shadow:0 4px 12px -6px rgba(47,127,240,.85);
+    transition:filter .15s ease, transform .1s ease, opacity .15s ease;
+  }
+  .fetch .go:hover:not(:disabled){filter:brightness(1.07)}
+  .fetch .go:active:not(:disabled){transform:scale(.97)}
+  .fetch .go:disabled{opacity:.4; cursor:default; box-shadow:none}
+  .fetch .note{margin:11px 2px 0; font-size:11.5px; color:var(--ink-3); line-height:1.55}
+  .fetch .note b{font-weight:500; color:var(--ink-2)}
+  .fetch .revoke{
+    margin-top:13px; width:100%; height:32px; border-radius:8px; cursor:pointer;
+    font:inherit; font-size:12.5px; color:var(--err);
+    background:transparent; border:1px solid var(--line-2);
+    transition:background .16s ease, border-color .16s ease, opacity .16s ease;
+  }
+  .fetch .revoke:hover:not(:disabled){background:rgba(200,85,74,.09); border-color:rgba(200,85,74,.35)}
+  .fetch .revoke:disabled{opacity:.35; cursor:default}
+
+  /* 进展 */
+  .sweep{height:2px; overflow:hidden; position:relative}
+  .sweep.on::before{
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(90deg,rgba(47,127,240,0),var(--accent) 45%,#8cc2ff 60%,rgba(47,127,240,0));
+    animation:sweep 2s cubic-bezier(.45,.05,.55,.95) infinite;
+  }
+  @keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+  .trace .body{padding:6px 0 10px; max-height:calc(100vh - 250px); min-height:260px; overflow:auto}
+  .trace .stat{
+    display:flex; align-items:baseline; gap:7px; padding:12px 15px 4px;
+    font-size:11.5px; color:var(--ink-3);
+  }
+  .trace .stat b{font-size:15px; font-weight:600; color:var(--ink)}
+  .trace .stat s{text-decoration:none; color:var(--line-2)}
+  .trace .stream:empty::after{
+    content:"还没有开始"; display:block; padding:40px 15px; text-align:center;
+    color:var(--ink-3); font-size:12px;
+  }
+  .line{display:flex; align-items:baseline; gap:12px; padding:6px 15px; animation:soften .32s ease both}
+  @keyframes soften{from{opacity:0; transform:translateY(3px)}to{opacity:1; transform:none}}
+  .line .what{flex:1; min-width:0; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .line .how{flex:none; font-size:11.5px; color:var(--ink-3); display:flex; gap:10px}
+  .line .how i{font-style:normal}
+  .line.hush .what{color:var(--ink-2)}
+  .line.faint{padding-top:3px; padding-bottom:3px}
+  .line.faint .what{color:var(--ink-3); font-size:11.5px}
+  .line.bad .what,.line.bad .how{color:var(--err)}
+  .line.bookish .what{font-weight:600}
+  .sep{display:flex; align-items:center; gap:10px; padding:13px 15px 5px; animation:soften .32s ease both}
+  .sep::before,.sep::after{content:""; height:1px; background:var(--line); flex:1}
+  .sep span{font-size:10.5px; color:var(--ink-3); white-space:nowrap}
+
+  /* ── 书架 ───────────────────────────── */
+  .shelfbox{margin-top:18px; border-radius:var(--r); overflow:hidden}
+  .shelfbox .top{display:flex; align-items:center; gap:9px; padding:12px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .shelfbox .top .t{font-size:12.5px; font-weight:600}
+  .folder{
+    display:inline-flex; align-items:center; gap:7px; flex:none;
+    height:26px; padding:0 10px; border-radius:8px; cursor:pointer;
+    font-size:12px; color:var(--ink-2);
+    background:rgba(127,140,160,.12); border:1px solid transparent;
+    transition:background .16s ease, color .16s ease, border-color .16s ease, transform .12s ease;
+  }
+  .folder:hover{background:rgba(127,140,160,.2)}
+  .folder:active{transform:scale(.97)}
+  .folder.on{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.28)}
+  .folder em{font-style:normal; color:var(--ink-3); font-size:11px}
+  .folder.on em{color:var(--accent); opacity:.7}
+  .folder.hot{border-color:var(--accent); background:var(--accent-soft); color:var(--accent)}
+  .folder .kill{
+    width:15px; height:15px; margin-right:-4px; border-radius:50%; display:grid; place-items:center;
+    font-size:11px; line-height:1; color:var(--ink-3); opacity:0;
+  }
+  .folder:hover .kill{opacity:1}
+  .folder .kill:hover{background:rgba(200,85,74,.2); color:var(--err)}
+  .folder input{
+    width:78px; height:20px; border:0; outline:0; background:transparent;
+    font:inherit; font-size:12px; color:var(--ink);
+  }
+  .newwrap{display:flex; align-items:center; gap:6px}
+  .newwrap input{
+    width:104px; height:26px; padding:0 9px; border-radius:8px;
+    border:1px solid var(--line-2); background:var(--glass-2);
+    font:inherit; font-size:12px; color:var(--ink); outline:0;
+  }
+  .newwrap input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .wall{
+    columns:3; column-gap:14px; padding:15px;
+  }
+  @media (max-width:1000px){ .wall{columns:2} }
+  @media (max-width:560px){ .wall{columns:1} }
+
+  .book{
+    break-inside:avoid; margin-bottom:14px; border-radius:var(--r-sm); cursor:pointer;
+    background:var(--glass-2); border:1px solid var(--line);
+    overflow:hidden; position:relative;
+    animation:soften .4s var(--spring) backwards;
+    transition:transform .26s var(--spring), box-shadow .22s ease,
+               border-color .2s ease, background .2s ease, opacity .2s ease;
+  }
+  .book:hover{transform:translateY(-3px); box-shadow:var(--shadow); border-color:var(--line-2); background:var(--glass)}
+  .book.open{border-color:rgba(47,127,240,.3)}
+  .book.dragging{opacity:.42; transform:rotate(-1.4deg) scale(.98)}
+  .book.before{border-top-color:var(--accent); box-shadow:0 -2px 0 -1px var(--accent)}
+  .cover{
+    position:relative; display:grid; place-items:center;
+    border-left:3px solid var(--spine,var(--accent));
+    border-bottom:1px solid var(--line);
+  }
+  .cover span{
+    font-size:27px; font-weight:600; letter-spacing:.08em;
+    color:var(--ink); opacity:.22; user-select:none;
+  }
+  /* 有官方封面时盖在生成式底纹上；取不到就露出下面的首字，不留破图 */
+  .cover img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
+  .cover{cursor:pointer}
+  .cover::after{
+    content:"在微信读书打开"; position:absolute; inset:auto 0 0 0;
+    padding:5px 8px; font-size:10.5px; text-align:center; color:#fff;
+    background:linear-gradient(transparent,rgba(20,26,38,.72));
+    opacity:0; transition:opacity .18s ease;
+  }
+  .cover:hover::after{opacity:1}
+  .book .info{padding:10px 12px 11px}
+  .book .nm{
+    font-size:13px; font-weight:600; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .book .by{font-size:11.5px; color:var(--ink-3); margin-top:3px}
+  .book .facts{display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--ink-3); margin-top:5px}
+  .tag{font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:5px; background:var(--accent-soft); color:var(--accent)}
+  .tag.done{background:rgba(31,158,133,.14); color:var(--mint)}
+  .tag.hold{background:rgba(169,124,34,.15); color:var(--warn)}
+  .drawer{display:grid; grid-template-rows:0fr; transition:grid-template-rows .26s cubic-bezier(.2,.9,.28,1)}
+  .book.open .drawer{grid-template-rows:1fr}
+  .drawer > div{overflow:hidden}
+  .deeds{display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 12px; border-top:1px solid var(--line); margin-top:2px; padding-top:11px}
+  .deed{
+    height:27px; padding:0 10px; border-radius:7px; cursor:pointer;
+    font:inherit; font-size:11.5px; color:var(--ink-2);
+    background:transparent; border:1px solid var(--line-2);
+    transition:background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
+  }
+  .deed:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .deed:active{transform:scale(.96)}
+  .deed:disabled{opacity:.42; cursor:default; background:transparent; color:var(--ink-3)}
+  .deed:disabled:hover{background:transparent; color:var(--ink-3); border-color:var(--line-2)}
+  .deed:disabled:active{transform:none}
+  .deed.cut{color:var(--err); border-color:rgba(200,85,74,.28)}
+  .deed.cut:hover{background:rgba(200,85,74,.12); color:var(--err); border-color:var(--err)}
+  .deed.sure{color:#fff; background:var(--err); border-color:var(--err)}
+  .emptywall{padding:56px 20px; text-align:center; color:var(--ink-3); font-size:12.5px}
+  .emptywall .a{font-size:13px; color:var(--ink-2); margin-bottom:5px}
+
+  .whisper{
+    position:fixed; left:50%; bottom:32px; z-index:50;
+    transform:translateX(-50%) translateY(7px);
+    padding:9px 18px; border-radius:999px; font-size:12.5px;
+    background:rgba(28,37,54,.92); color:#fff; opacity:0; pointer-events:none;
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    box-shadow:0 16px 34px -16px rgba(28,37,54,.75);
+    transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1);
+  }
+  .whisper.up{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) .whisper{background:rgba(233,237,244,.94); color:#12151b}
+  }
+  html[data-theme="dark"] .whisper{background:rgba(233,237,244,.94); color:#12151b}
+
+  /* ── 弹窗 ───────────────────────────── */
+  .veil{
+    position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:24px;
+    background:rgba(20,26,38,.42); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    opacity:0; pointer-events:none; transition:opacity .22s ease;
+  }
+  .veil.open{opacity:1; pointer-events:auto}
+  .sheet{
+    width:min(580px,100%); max-height:80vh; overflow:auto; border-radius:var(--r); padding:22px;
+    transform:translateY(10px) scale(.985); transition:transform .26s cubic-bezier(.2,.9,.28,1);
+  }
+  .veil.open .sheet{transform:none}
+  .sheet h3{margin:0 0 7px; font-size:15px}
+  .sheet p{margin:0 0 14px; font-size:12.5px; color:var(--ink-2); line-height:1.72}
+  .sheet p b{font-weight:600; color:var(--ink)}
+  .sheet textarea{
+    width:100%; height:238px; padding:12px; border-radius:10px; resize:vertical; outline:none;
+    border:1px solid var(--line-2); background:var(--surface-2); color:var(--ink);
+    font:11.5px/1.62 ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  .sheet textarea:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .sheet .acts{display:flex; gap:8px; justify-content:flex-end; margin-top:15px}
+
+  /* ── 标签页 ─────────────────────────── */
+  .tabs{display:inline-flex; gap:3px; padding:3px; border-radius:9px; background:rgba(127,140,160,.14)}
+  .tabs button{
+    height:24px; padding:0 11px; border:0; border-radius:7px; cursor:pointer; background:transparent;
+    font:inherit; font-size:12px; color:var(--ink-2); transition:background .16s ease, color .16s ease;
+  }
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{background:var(--solid); color:var(--ink); box-shadow:0 1px 3px rgba(28,37,54,.13)}
+
+  /* ── 微信读书 ───────────────────────── */
+  .wrgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:4px 18px; padding:6px 0}
+  .wrbook{display:flex; gap:11px; align-items:flex-start; padding:10px 15px; border-radius:10px}
+  .wrbook:hover{background:rgba(127,140,160,.08)}
+  .wrbook img,.wrbook .ph{
+    width:44px; height:63px; flex:none; border-radius:5px; object-fit:cover;
+    background:linear-gradient(150deg,#e7eefb,#d9e5f7); border:1px solid var(--line);
+  }
+  .wrbook .info{min-width:0; flex:1}
+  .wrbook .t{
+    font-size:12.5px; font-weight:600; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .wrbook .a{font-size:11px; color:var(--ink-3); margin-top:2px}
+  .wrbook .m{font-size:11px; color:var(--ink-3); margin-top:4px}
+  .wrbook a{color:var(--accent); text-decoration:none; border-bottom:1px solid transparent}
+  .wrbook a:hover{border-bottom-color:var(--accent)}
+  .wrrow{display:flex; align-items:center; gap:12px; padding:11px 15px; border-top:1px solid var(--line)}
+  .wrrow:first-child{border-top:0}
+  .wrrow .nm{flex:1; font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .wrrow .ct{font-size:11px; color:var(--ink-3)}
+  .note{padding:12px 15px; border-top:1px solid var(--line); font-size:12.5px; line-height:1.72}
+  .note .src{font-size:11px; color:var(--ink-3); margin-top:5px}
+  .statgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:12px; padding:15px}
+  .statbox{padding:13px; border-radius:10px; background:var(--surface-2); border:1px solid var(--line)}
+  .statbox .k{font-size:11px; color:var(--ink-3)}
+  .statbox .v{font-size:19px; font-weight:600; margin-top:4px; letter-spacing:-.01em}
+  .statbox .v small{font-size:11px; font-weight:400; color:var(--ink-3); margin-left:3px}
+  .wrsearch{display:flex; gap:9px; padding:15px; border-bottom:1px solid var(--line)}
+  .wrsearch input{
+    flex:1; height:34px; padding:0 13px; border-radius:9px; outline:none;
+    border:1px solid var(--line-2); background:var(--surface-2);
+    font:inherit; font-size:13px; color:var(--ink);
+  }
+  .wrsearch input:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .emptyline{padding:40px 20px; text-align:center; color:var(--ink-3); font-size:12.5px}
+  .emptyline b{display:block; color:var(--ink-2); font-weight:520; margin-bottom:5px}
+
+  /* ── 侧边栏 + 内容区 ───────────────────── */
+  .shell{display:grid; grid-template-columns:214px minmax(0,1fr); gap:16px; align-items:start}
+  @media (max-width:840px){ .shell{grid-template-columns:1fr} }
+  .side{position:sticky; top:72px; border-radius:var(--r); padding:14px 12px}
+  @media (max-width:840px){ .side{position:static} }
+  .sidehead{display:flex; align-items:center; gap:10px; padding:2px 8px 14px}
+  .smark{
+    width:30px; height:30px; flex:none; border-radius:9px; display:grid; place-items:center;
+    color:#fff; font-size:13px; font-weight:600;
+    background:linear-gradient(150deg,#4b93f2,#2568cc);
+    box-shadow:0 5px 14px -6px rgba(47,127,240,.65), inset 0 .5px 0 rgba(255,255,255,.4);
+  }
+  .sname{font-size:13px; font-weight:600; line-height:1.2}
+  .ssub{font-size:11px; color:var(--ink-3); margin-top:3px}
+  .side nav{display:flex; flex-direction:column; gap:2px}
+  .side nav button{
+    display:flex; align-items:center; gap:9px; width:100%; height:34px; padding:0 11px;
+    border:0; border-radius:9px; background:transparent; cursor:pointer; text-align:left;
+    font:inherit; font-size:13px; color:var(--ink-2);
+    transition:background .16s ease, color .16s ease;
+  }
+  .side nav button:hover{background:rgba(127,140,160,.13); color:var(--ink)}
+  .side nav button.on{background:var(--accent-soft); color:var(--accent); font-weight:550}
+  .side nav button .badge{margin-left:auto; font-size:11px; color:var(--ink-3)}
+  .side nav button.on .badge{color:var(--accent); opacity:.8}
+  .sidefoot{
+    margin-top:12px; padding:11px 9px 3px; border-top:1px solid var(--line);
+    font-size:11px; color:var(--ink-3); line-height:1.6;
+  }
+  .content{border-radius:var(--r); overflow:hidden; min-height:360px}
+  .chead{display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line)}
+  .chead .t{font-size:13.5px; font-weight:600}
+  .chead .n{font-size:11.5px; color:var(--ink-3)}
+  .chead .grow{flex:1}
+
+  /* ── 书架卡（悬停出操作） ──────────────── */
+  .sgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(152px,1fr)); gap:16px; padding:16px}
+  .wcard{
+    position:relative; border-radius:10px; overflow:hidden;
+    background:var(--glass-2); border:1px solid var(--line);
+    transition:transform .28s var(--spring), box-shadow .24s ease, border-color .2s ease;
+    /* 入场动画不能用 fill:both：那样动画结束后 to 帧的 transform:none 会一直压着，
+       hover 的 translateY 与点击时的状态切换互相抢，卡片就会「左右晃一下」。
+       改成 backwards —— 只在延迟期间占位，跑完就把 transform 交还给 transition。 */
+    animation:soften .42s var(--spring) backwards;
+  }
+  .wcard:hover{transform:translateY(-3px); box-shadow:var(--shadow); border-color:var(--line-2)}
+  .wcard .cv{position:relative; aspect-ratio:2/3; overflow:hidden; background:linear-gradient(150deg,#e7eefb,#d9e5f7)}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .wcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)} }
+  html[data-theme="dark"] .wcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)}
+  .wcard .cv img{width:100%; height:100%; object-fit:cover; display:block}
+  .wcard .cv .ph{width:100%; height:100%; display:grid; place-items:center; font-size:24px; font-weight:600; color:var(--ink); opacity:.2}
+  .wcard .mt{padding:9px 11px 11px}
+  .wcard .mt .n{
+    font-size:12.5px; font-weight:600; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .wcard .mt .a{font-size:11px; color:var(--ink-3); margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .hoveract{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:8px;
+    background:linear-gradient(rgba(20,26,38,.05), rgba(20,26,38,.5));
+    opacity:0; transition:opacity .2s ease;
+    pointer-events:none;              /* 只有那颗按钮接点击，封面本身要能点（展开/收起） */
+  }
+  .hoveract button{pointer-events:auto}
+  .wcard:hover .hoveract{opacity:1}
+  .hoveract button{
+    height:30px; padding:0 15px; border:0; border-radius:8px; cursor:pointer;
+    font:inherit; font-size:12.5px; font-weight:550; color:#fff;
+    background:linear-gradient(150deg,#4b93f2,#1f7ce0);
+    box-shadow:0 6px 18px -8px rgba(0,0,0,.65);
+    transition:filter .15s ease, transform .1s ease;
+  }
+  .hoveract button:hover{filter:brightness(1.08)}
+  .hoveract button:active{transform:scale(.96)}
+  .hoveract button.ghost{background:rgba(255,255,255,.94); color:var(--ink)}
+  .pbar{position:absolute; left:0; right:0; bottom:0; padding:8px 10px; color:#fff; background:rgba(18,24,36,.66); z-index:2}
+  .pbar .lb{display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:5px; letter-spacing:.02em}
+  .pbar .bg{height:4px; border-radius:2px; background:rgba(255,255,255,.3); overflow:hidden}
+  .pbar .bg i{display:block; height:100%; background:#fff; width:0; transition:width .45s ease}
+  /* 还不知道总量（目录没建好）时的不定长条：一段光带来回走，表示"在动" */
+  .pbar .bg i.unk{width:38%; animation:pbarunk 1.5s cubic-bezier(.65,0,.35,1) infinite}
+  @keyframes pbarunk{0%{margin-left:-38%}100%{margin-left:100%}}
+  .strip{
+    position:absolute; top:0; right:0; bottom:0; width:106px; z-index:3;
+    display:flex; flex-direction:column; gap:6px; padding:10px 8px;
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .82));
+    -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%);
+    border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .34s var(--spring);
+  }
+  .wcard.open .strip{transform:none}
+  .wcard.open .hoveract{opacity:0}
+  .strip button{
+    height:27px; flex:none; border:1px solid var(--line-2); border-radius:9px; cursor:pointer;
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .5));
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    box-shadow:var(--sheen);
+    font:inherit; font-size:11.5px; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, border-color .15s ease, transform .12s var(--spring);
+  }
+  .strip button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .strip button:active{transform:scale(.95)}
+  .strip .close{margin-top:auto; color:var(--ink-3)}
+
+  /* ── 右下角任务记录 ───────────────────── */
+  .dock{
+    position:fixed; right:20px; bottom:20px; z-index:40; width:272px; border-radius:12px; overflow:hidden;
+    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%);
+    border:1px solid var(--line); box-shadow:var(--shadow);
+  }
+  .dockhead{display:flex; align-items:center; gap:8px; padding:9px 12px; cursor:pointer; user-select:none}
+  .dockhead .dt{font-size:12px; font-weight:600}
+  .dockhead .dn{font-size:11px; color:var(--ink-3)}
+  .dockhead .grow{flex:1}
+  .dockhead .dchev{font-size:11px; color:var(--ink-3)}
+  .dockhead .dclear{
+    border:1px solid var(--line-2); border-radius:7px; cursor:pointer;
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .5));
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    font:inherit; font-size:10.5px; color:var(--ink-3); padding:2px 8px;
+    transition:color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .dockhead .dclear:hover{color:var(--accent); border-color:rgba(47,127,240,.32)}
+  .dockhead .dclear:disabled{opacity:.4; cursor:default}
+  .dockbody{max-height:238px; overflow:auto; border-top:1px solid var(--line)}
+  .dock.closed .dockbody{max-height:0; overflow:hidden}   /* 高度过渡见 2.0 段：不再 display:none */
+  .drow{display:flex; align-items:center; gap:9px; padding:9px 12px; border-top:1px solid var(--line); cursor:pointer}
+  .drow:first-child{border-top:0}
+  .drow:hover{background:rgba(127,140,160,.09)}
+  .drow .nm{flex:1; font-size:12px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .drow .st{font-size:11px; color:var(--ink-3); white-space:nowrap}
+  .drow .st.ok{color:var(--mint)}
+  .drow .st.bad{color:var(--err)}
+  .dempty{padding:16px 12px; text-align:center; font-size:11.5px; color:var(--ink-3)}
+  @media (max-width:640px){
+    .dock{right:12px; bottom:12px; width:calc(100vw - 24px)}
+  }
+
+  /* ── 顶栏：主题切换 ───────────────────── */
+  .seg{display:inline-flex; gap:2px; padding:2px; border-radius:8px; background:rgba(127,140,160,.14)}
+  .seg button{
+    width:27px; height:22px; border:0; border-radius:6px; background:transparent; cursor:pointer;
+    color:var(--ink-3); display:grid; place-items:center; transition:background .15s ease, color .15s ease;
+  }
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{background:var(--solid); color:var(--ink); box-shadow:0 1px 3px rgba(28,37,54,.13)}
+  .seg svg{width:13px; height:13px; display:block}
+
+  /* ── 书架工具条 ───────────────────────── */
+  .stools{display:flex; align-items:center; gap:9px; padding:11px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .stools input.f{
+    flex:1; min-width:168px; height:32px; padding:0 12px; border-radius:9px; outline:none;
+    border:1px solid var(--line-2); background:var(--surface-2);
+    font:inherit; font-size:12.5px; color:var(--ink);
+  }
+  .stools input.f::placeholder{color:var(--ink-3)}
+  .stools input.f:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .stools .sel{
+    height:32px; padding:0 10px; border-radius:9px; border:1px solid var(--line-2);
+    background:var(--surface-2); font:inherit; font-size:12.5px; color:var(--ink-2); cursor:pointer;
+  }
+  .stools .cnt{font-size:11.5px; color:var(--ink-3)}
+  .more{padding:16px; text-align:center}
+  .more button{
+    height:32px; padding:0 18px; border-radius:9px; cursor:pointer;
+    border:1px solid var(--line-2); background:var(--solid); color:var(--ink-2);
+    font:inherit; font-size:12.5px; transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .more button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+
+  /* ── 划线笔记：多选与导入 ─────────────── */
+  .ntools{display:flex; align-items:center; gap:9px; padding:11px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .ntools .cnt{font-size:11.5px; color:var(--ink-3)}
+  .ntools input.tag{
+    width:150px; height:30px; padding:0 10px; border-radius:8px; outline:none;
+    border:1px solid var(--line-2); background:var(--surface-2);
+    font:inherit; font-size:12px; color:var(--ink);
+  }
+  .ntools input.tag:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .nitem{display:flex; gap:11px; padding:12px 15px; border-top:1px solid var(--line); cursor:pointer}
+  .nitem:first-child{border-top:0}
+  .nitem:hover{background:rgba(127,140,160,.07)}
+  .nitem.on{background:var(--accent-soft)}
+  .nitem input[type=checkbox]{
+    margin:4px 0 0; width:15px; height:15px; flex:none; accent-color:var(--accent); cursor:pointer;
+  }
+  .nitem .bd{flex:1; min-width:0}
+  .nitem .tx{font-size:12.5px; line-height:1.72; white-space:pre-wrap; word-break:break-word}
+  .nitem .mt{font-size:11px; color:var(--ink-3); margin-top:5px}
+  .nitem .mt .src{color:var(--ink-2)}
+
+  @keyframes arrive{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:none}}
+  /* 羊皮卷：书架卡滚进视口才从上往下摊开，同批内错开几十毫秒 */
+  @keyframes unfurl{
+    from{opacity:0; transform:perspective(700px) rotateX(-13deg) translateY(-10px) scaleY(.94); transform-origin:top center}
+    to{opacity:1; transform:none; transform-origin:top center}
+  }
+  .wcard.unfurl{animation:unfurl .52s var(--spring) backwards}
+  .wcard.pre{opacity:0; animation:none}   /* 还没滚到视口里：先隐身，等「摊开」那一下 */
+  /* 摊开过一次就永久「已展开」：DOM 里挪动位置（筛选、加载更多）不会再重放动画。
+     CSS 动画在节点被重新插入时会重跑，所以看过的卡必须把 animation 关掉。 */
+  .wcard.rev{animation:none; opacity:1}
+  /* 侧边栏切换的整块交接改走 Web Animations API，见 slideView() */
+  .bar{animation:arrive .5s cubic-bezier(.2,.9,.28,1) both}
+  .split > *{animation:arrive .58s cubic-bezier(.2,.9,.28,1) both}
+  .split > *:nth-child(1){animation-delay:.04s}
+  .split > *:nth-child(2){animation-delay:.1s}
+  .shelfbox{animation:arrive .58s cubic-bezier(.2,.9,.28,1) both; animation-delay:.16s}
+
+  /* ── 视图常驻（.vpane）───────────────────
+     每个视图一个节点，建好就留着；切换只把它挂回 #view 并播一次上下交接。
+     原来每次点击都 view.innerHTML=… 把整面书架拆掉重建，几十张卡一起退回
+     opacity:0 再重放「摊开」——那就是用户看到的「点一下闪一下」。 */
+  .vpane{display:flex; flex-direction:column; min-height:360px}
+  /* 本轮的根因修复：作者写的 display:flex 会盖掉浏览器默认的 [hidden]{display:none}，
+     于是七个面板同时摊在一页里（页面被撑到 77,020 像素高），点侧边栏「看不见反应」——
+     监听器全在，只是要切过去的面板本来就已经在页面上。用 !important 焊死：
+     以后任何面板/动效样式都别想把隐藏的视图叠回布局里。 */
+  [hidden]{display:none !important}
+  .vbody{flex:1; min-width:0}
+
+  /* 卡片：只动 transform/opacity（走合成层，不掉帧）；封面在自己的盒子里微缩放 */
+  .wcard .cv img{opacity:0; transition:transform .55s var(--spring), opacity .4s ease}
+  .wcard .cv img.in{opacity:1}
+  .wcard:hover .cv img{transform:scale(1.05)}
+  .wcard:hover{transform:translateY(-4px) scale(1.014)}
+  .wcard.tap{transform:translateY(-1px) scale(.986); transition-duration:.12s}
+
+  /* 左上角徽标：hover 或已有本地成果时才浮出来，书架不吵 */
+  .wcard .tag{
+    position:absolute; left:8px; top:8px; z-index:2; padding:2px 8px; border-radius:99px;
+    font-size:10px; line-height:15px; color:#17233c; white-space:nowrap;
+    background:rgba(255,255,255,.82); box-shadow:0 1px 3px rgba(20,24,32,.14);
+    -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px);
+    opacity:0; transform:translate3d(0,-5px,0);
+    transition:opacity .2s ease, transform .3s var(--spring);
+  }
+  .wcard:hover .tag, .wcard.hasTag .tag{opacity:1; transform:none}
+  .wcard .tag.go{background:rgba(43,140,240,.92); color:#fff}
+  .wcard .tag.have{background:rgba(47,191,168,.92); color:#fff}
+
+  /* 封面缺失/加载失败时的书脊：色相由书 id 稳定派生，错落但不花 */
+  .wcard .cv .spine{--h:212; position:absolute; inset:0; display:grid; place-items:center;
+    background:linear-gradient(156deg, hsl(var(--h) 42% 91%), hsl(calc(var(--h) + 26) 36% 80%))}
+  .wcard .cv .spine::before{content:''; position:absolute; left:10px; top:12px; bottom:12px;
+    width:2px; border-radius:2px; background:rgba(255,255,255,.5)}
+  .wcard .cv .spine i{font-style:normal; font-size:26px; font-weight:600;
+    color:hsl(var(--h) 38% 34%); opacity:.5}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) .wcard .cv .spine{
+      background:linear-gradient(156deg, hsl(var(--h) 26% 24%), hsl(calc(var(--h) + 26) 24% 16%))}
+    :root:not([data-theme="light"]) .wcard .cv .spine i{color:hsl(var(--h) 44% 82%)}
+  }
+  html[data-theme="dark"] .wcard .cv .spine{
+    background:linear-gradient(156deg, hsl(var(--h) 26% 24%), hsl(calc(var(--h) + 26) 24% 16%))}
+  html[data-theme="dark"] .wcard .cv .spine i{color:hsl(var(--h) 44% 82%)}
+
+  /* 读取中不再是一行字，而是同形状的骨架微光 —— 高度与真卡片一致，
+     数据到了换上去不会把网格顶一下 */
+  @keyframes shimmer{from{background-position:170% 0}to{background-position:-70% 0}}
+  .skel{aspect-ratio:2/3; border-radius:14px;
+    background:linear-gradient(100deg, rgba(127,140,160,.10) 32%, rgba(127,140,160,.21) 50%, rgba(127,140,160,.10) 68%);
+    background-size:220% 100%; animation:shimmer 1.6s linear infinite}
+  .skgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(152px,1fr)); gap:18px; padding:18px}
+  .skline{height:11px; border-radius:6px; margin:9px 18px;
+    background:linear-gradient(100deg, rgba(127,140,160,.10) 32%, rgba(127,140,160,.21) 50%, rgba(127,140,160,.10) 68%);
+    background-size:220% 100%; animation:shimmer 1.6s linear infinite}
+
+  /* 设置弹层：从齿轮那颗按钮的位置长出来，而不是整块凭空出现 */
+  .pop{transform-origin:calc(100% - 26px) 8px; transform:translate3d(0,-8px,0) scale(.96);
+    transition:opacity .2s ease, transform .34s var(--spring)}
+  .pop.open{transform:none}
+
+  /* 任务栏展开/收起用高度过渡，不再「啪」地出现 */
+  .dockbody{transition:max-height .34s var(--spring), opacity .2s ease}
+  .dock.closed .dockbody{max-height:0; opacity:0; border-top-color:transparent}
+
+  /* 侧边栏当前项：胶囊跟着换位置，用一层伪元素做位移动画 */
+  .side nav{position:relative}
+  .navpill{position:absolute; left:0; right:0; height:36px; border-radius:11px; z-index:-1;
+    background:var(--solid); box-shadow:0 1px 3px rgba(20,24,32,.07), var(--sheen);
+    transition:transform .38s var(--spring), opacity .2s ease; opacity:0}
+  .navpill.on{opacity:1}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important; transition:none !important}
+  }
+
+  ::-webkit-scrollbar{width:10px; height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:rgba(120,133,155,.3); border-radius:99px; border:3px solid transparent; background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(120,133,155,.5); background-clip:content-box}
+
+  /* ═══ 界面 2.0：更清爽、更大留白、更强的玻璃与液化感 ═══ */
+
+  body{background:#ecedf0}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) body{background:#131519}
+  }
+  html[data-theme="dark"] body{background:#131519}
+
+  /* 背景：壁纸铺在一张「钉住的」固定层上（不是 body 背景）。
+     挂在 body 上时，页面有多高背景盒就有多高，cover 会把图放大到填满那几万像素 →
+     看起来就是被拉长/裁没了。固定层永远是视口大小：图还是图，页面从它上面自然滑过。 */
+  .wallpaper{position:fixed; inset:0; z-index:-1; display:none; overflow:hidden;
+    background-image:var(--wall-img);
+    background-size:cover; background-position:center; background-repeat:no-repeat}
+  html[data-wall] .wallpaper{display:block}
+  .wallpaper::after{                  /* 同色薄雾：压住杂乱，又给玻璃留点可透的东西 */
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(rgba(var(--wall-tint,236,237,240),.26),
+                               rgba(var(--wall-tint,236,237,240),.42));
+  }
+  html[data-wall] .ambient{opacity:0}          /* 有壁纸就别再叠色晕 */
+
+  /* 壁纸偏暗 → 文字转浅；偏亮 → 文字加深。玻璃也跟着换色，保证看得清 */
+  html[data-wall="dark"]{
+    color-scheme:dark;
+    --ink:#f6f7fa;
+    --ink-2:rgba(246,247,250,.74);
+    --ink-3:rgba(246,247,250,.52);
+    --line:rgba(255,255,255,.13);
+    --line-2:rgba(255,255,255,.19);
+    --glass-rgb:24,26,32;
+    --frost:.46;
+    --solid:rgba(26,28,34,.66);
+    --accent:#8ec2ff;
+    --accent-soft:rgba(142,194,255,.2);
+    --mint:#7fe0c6;
+    --err:#ff9b90;
+    --shadow:0 2px 8px rgba(0,0,0,.22), 0 24px 54px -26px rgba(0,0,0,.5);
+    --sheen:inset 0 .5px 0 rgba(255,255,255,.14);
+  }
+  html[data-wall="light"]{
+    color-scheme:light;
+    --ink:#14161b;
+    --ink-2:rgba(20,22,27,.72);
+    --ink-3:rgba(20,22,27,.48);
+    --line:rgba(255,255,255,.5);
+    --line-2:rgba(255,255,255,.66);
+    --glass-rgb:255,255,255;
+    --frost:.6;
+    --solid:rgba(255,255,255,.8);
+    --shadow:0 2px 8px rgba(20,24,32,.06), 0 24px 54px -26px rgba(20,24,32,.28);
+    --sheen:inset 0 .5px 0 rgba(255,255,255,.9);
+  }
+
+  /* 大容器：更圆的角 + 更厚的模糊，接近液态玻璃 */
+  .side, .content, .shelfbox, .dock, .sheet{
+    border-radius:var(--r-xl);
+    -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
+    backdrop-filter:blur(var(--blur)) saturate(190%);
+    box-shadow:var(--shadow), var(--sheen);
+  }
+  .card, .pane, .statbox{box-shadow:var(--sheen)}
+  .bar{-webkit-backdrop-filter:blur(var(--blur)) saturate(190%); backdrop-filter:blur(var(--blur)) saturate(190%)}
+  .wcard{border-radius:15px; border-color:transparent; box-shadow:0 1px 2px rgba(20,24,32,.035)}
+  .wcard:hover{box-shadow:var(--shadow), var(--sheen)}
+  .wcard .cv{border-radius:14px 14px 0 0}
+
+  /* 留白：更接近参考图的呼吸感 */
+  main{max-width:1120px; padding:26px 22px 96px}
+  .shell{grid-template-columns:196px minmax(0,1fr); gap:20px}
+  .side{padding:16px 12px}
+  /* 窄窗口（分屏、小窗）：侧边栏收到内容上方，导航横排——2.0 的 .shell 覆盖了旧断点，这里补回来 */
+  @media (max-width:840px){
+    .shell{grid-template-columns:minmax(0,1fr)}
+    .side{position:static}
+    .sidehead{padding-bottom:10px}
+    .side nav{flex-direction:row; flex-wrap:wrap; gap:6px}
+    .side nav button{width:auto; flex:1 1 30%; justify-content:center}
+    main{padding:18px 14px 88px}
+    .sgrid{gap:14px; padding:14px}
+  }
+  section{margin-bottom:22px}
+  .sgrid{gap:18px; padding:18px}
+  .chead{padding:16px 18px}
+  .stools, .ntools{padding:12px 18px}
+  .statgrid{gap:12px; padding:18px}
+  .dock{width:280px; border-radius:22px}
+
+  /* 顶栏：去掉"方块里带字"，只留一个线条标记 */
+  .mark{
+    width:20px; height:20px; border-radius:0; background:none; box-shadow:none;
+    color:var(--ink); display:grid; place-items:center;
+  }
+  .mark svg{width:19px; height:19px; display:block}
+  .smark{display:none}                    /* 侧边栏不再有方块标记 */
+  .bar{height:56px}
+  .title-wrap h1{letter-spacing:.02em}
+
+  /* 侧边栏：几何简约，选中是一个干净的玻璃胶囊 */
+  .sidehead{padding:2px 10px 16px}
+  .sname{font-size:13.5px; font-weight:600}
+  .ssub{font-size:11px; margin-top:4px}
+  .side nav{gap:3px}
+  .side nav button{height:36px; padding:0 11px; border-radius:11px; font-size:13px}
+  .side nav button svg{width:16px; height:16px; flex:none; opacity:.6; transition:opacity .16s ease}
+  .side nav button:hover{background:rgba(127,140,160,.1)}
+  .side nav button.on{
+    background:var(--solid); color:var(--ink); font-weight:550;
+    box-shadow:0 1px 3px rgba(20,24,32,.07), var(--sheen);
+  }
+  .side nav button.on svg{opacity:1}
+  .side nav button .badge{margin-left:auto; font-size:11px}
+
+  /* 控件：统一到更柔的形态 */
+  input[type=text], .stools input.f, .wrsearch input, .ntools input.tag{
+    border-radius:11px; border-color:var(--line); background:var(--glass-2);
+  }
+  .tabs{padding:3px; border-radius:11px}
+  .tabs button{border-radius:9px}
+  .tabs button.on{box-shadow:0 1px 3px rgba(20,24,32,.08), var(--sheen)}
+  .seg{border-radius:10px}
+  .seg button{border-radius:8px}
+  .deed{border-radius:9px}
+  .veil{background:rgba(16,19,25,.34); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px)}
+
+  /* ═══ 详情页 / 批量 / 卡片 ═══ */
+
+  /* 详情：顶部一张大卡（封面 + 关键信息），下面分块 */
+  .dtop{display:flex; gap:22px; padding:22px; align-items:flex-start; flex-wrap:wrap}
+  .dtop .cv{
+    width:132px; flex:none; aspect-ratio:2/3; border-radius:14px; overflow:hidden;
+    background:linear-gradient(150deg,#e7eefb,#d9e5f7); box-shadow:var(--shadow), var(--sheen);
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .dtop .cv{background:linear-gradient(150deg,#232a38,#1c222e)} }
+  html[data-theme="dark"] .dtop .cv{background:linear-gradient(150deg,#232a38,#1c222e)}
+  .dtop .cv img{width:100%; height:100%; object-fit:cover; display:block}
+  .dtop .tx{flex:1; min-width:240px}
+  .dtop h2{margin:0; font-size:21px; font-weight:600; letter-spacing:-.01em; line-height:1.3}
+  .dtop .au{font-size:13px; color:var(--ink-2); margin-top:6px}
+  .dtop .intro{font-size:12.5px; color:var(--ink-2); line-height:1.78; margin-top:12px; max-width:60ch}
+  .kv{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:14px}
+  .kv .it{padding:11px 13px; border-radius:13px; background:var(--glass-2); border:1px solid var(--line)}
+  .kv .it .k{font-size:11px; color:var(--ink-3)}
+  .kv .it .v{font-size:13.5px; font-weight:560; margin-top:3px}
+  .kv .it .v small{font-size:11px; font-weight:400; color:var(--ink-3); margin-left:2px}
+  .pwrap{margin-top:14px}
+  .pwrap .lb{display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-3); margin-bottom:6px}
+  .pwrap .bg{height:6px; border-radius:3px; background:rgba(127,140,160,.2); overflow:hidden}
+  .pwrap .bg i{display:block; height:100%; border-radius:3px; background:var(--accent); transition:width .5s ease}
+  /* 详情页那条进度：宽度是建节点时就写死的，靠 transition 动不了 ——
+     用 scaleX 从 0 长到满，跑完把 transform 交还给 CSS，仍只动合成层。 */
+  @keyframes growx{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+  .pwrap .bg i{transform-origin:left center; animation:growx .66s var(--spring) backwards}
+  .dacts{display:flex; gap:8px; flex-wrap:wrap; padding:0 22px 20px}
+
+  /* 批量 */
+  .wcard .pick{position:absolute; top:9px; left:9px; z-index:4; display:none}
+  body.batch .wcard .pick{display:block}
+  body.batch .wcard .hoveract{display:none}
+  .wcard .pick input{width:17px; height:17px; accent-color:var(--accent); cursor:pointer}
+  .wcard.on{outline:2px solid var(--accent); outline-offset:2px}
+  .batchbar{
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(14px);
+    z-index:45; display:flex; align-items:center; gap:9px; padding:10px 14px;
+    border-radius:16px; opacity:0; pointer-events:none;
+    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
+    backdrop-filter:blur(var(--blur)) saturate(190%);
+    border:1px solid var(--line); box-shadow:var(--shadow), var(--sheen);
+    transition:opacity .22s ease, transform .26s cubic-bezier(.2,.9,.28,1);
+  }
+  body.batch .batchbar{opacity:1; pointer-events:auto; transform:translateX(-50%)}
+  .batchbar .n{font-size:12.5px; color:var(--ink-2); margin-right:2px; white-space:nowrap}
+
+  /* 卡片回顾 / 随机漫步 */
+  .review{max-width:600px; margin:26px auto; padding:0 18px}
+  .review .card{
+    border-radius:20px; padding:26px 24px; min-height:190px; display:flex;
+    flex-direction:column; justify-content:center; gap:14px;
+    background:var(--solid); border:1px solid var(--line);
+    box-shadow:var(--shadow), var(--sheen);
+  }
+  .review .q{font-size:17px; line-height:1.8; font-weight:520; white-space:pre-wrap}
+  .review .a{font-size:12.5px; color:var(--ink-3); border-top:1px solid var(--line); padding-top:12px; white-space:pre-wrap}
+  .review .cnt{text-align:center; font-size:11.5px; color:var(--ink-3); margin-bottom:12px}
+  .review .acts{display:flex; gap:9px; justify-content:center; margin-top:16px}
+  .review .acts button{height:36px; padding:0 20px; border-radius:11px}
+  .wall.qwall{columns:2; column-gap:14px; padding:18px}
+  @media (max-width:900px){ .wall.qwall{columns:1} }
+  .qcard{
+    break-inside:avoid; margin-bottom:14px; padding:15px 16px; border-radius:16px;
+    background:var(--solid); border:1px solid var(--line); box-shadow:var(--sheen);
+    animation:soften .4s cubic-bezier(.2,.9,.28,1) both;
+  }
+  .qcard .t{font-size:13px; line-height:1.78; white-space:pre-wrap}
+  .qcard .m{font-size:11px; color:var(--ink-3); margin-top:9px; display:flex; gap:8px; flex-wrap:wrap}
+  .qcard .m .k{color:var(--ink-2)}
+</style>
+</head>
+<body>
+
+<div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
+
+<div class="ambient"><i></i><i></i><i></i><u></u></div>
+
+<header class="bar">
+  <button class="iconbtn" id="gear" aria-expanded="false" title="设置">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="2.6"/>
+      <path d="M10 2.4v1.8M10 15.8v1.8M17.6 10h-1.8M4.2 10H2.4M15.4 4.6l-1.3 1.3M5.9 14.1l-1.3 1.3M15.4 15.4l-1.3-1.3M5.9 5.9 4.6 4.6"/>
+    </svg>
+  </button>
+  <div class="mark" title="归藏">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.45"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 4.6C8.4 3.4 6.3 3.1 3.6 3.4v11.3c2.7-.3 4.8 0 6.4 1.2 1.6-1.2 3.7-1.5 6.4-1.2V3.4c-2.7-.3-4.8 0-6.4 1.2z"/>
+      <path d="M10 4.6v11.3"/>
+    </svg>
+  </div>
+  <div class="name">归藏</div>
+  <div class="spacer"></div>
+  <div class="seg" id="themeSeg">
+    <button data-t="auto" title="跟随系统">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+        <circle cx="8" cy="8" r="5.6"/>
+        <path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+    <button data-t="light" title="浅色">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <circle cx="8" cy="8" r="3"/>
+        <path d="M8 1.2v1.5M8 13.3v1.5M14.8 8h-1.5M2.7 8H1.2M12.8 3.2l-1.1 1.1M4.3 11.7l-1.1 1.1M12.8 12.8l-1.1-1.1M4.3 4.3 3.2 3.2"/>
+      </svg>
+    </button>
+    <button data-t="dark" title="深色">
+      <svg viewBox="0 0 16 16" fill="currentColor">
+        <path d="M13.4 9.8A5.8 5.8 0 0 1 6.2 2.6a5.8 5.8 0 1 0 7.2 7.2z"/>
+      </svg>
+    </button>
+  </div>
+  <div class="live" id="live"><b></b><span id="liveText">静候</span></div>
+</header>
+
+<div class="pop glass" id="pop">
+  <div class="head">设置</div>
+  <div class="row">
+    <span class="k">运行组件</span>
+    <span class="v" id="v-browser">检视中</span>
+    <span class="grow"></span>
+    <button class="deed" id="fix">修复</button>
+  </div>
+  <div class="row">
+    <span class="k">微信读书</span>
+    <span class="v" id="v-account">未连接</span>
+    <span class="grow"></span>
+    <button class="deed" id="connect">连接</button>
+  </div>
+  <div class="row">
+    <span class="k">接口 Key</span>
+    <input id="keyinput" type="text" spellcheck="false" autocomplete="off" placeholder="wrk-…"
+           style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+    <button class="deed" id="savekey">保存</button>
+  </div>
+  <div class="hint" id="keyhint">填上官方接口 Key 后，下方就能看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 里复制，形如 wrk-…）。填一次就存在本机，下次打开不用再填。</div>
+  <div class="row">
+    <span class="k">flomo</span>
+    <input id="flomoinput" type="text" spellcheck="false" autocomplete="off" placeholder="https://flomoapp.com/iwh/…"
+           style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+    <button class="deed" id="saveflomo">保存</button>
+  </div>
+  <div class="hint" id="flomohint">填上你的 flomo 记录 API 地址（在 flomo 网页版「设置 → API」里拿，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。</div>
+  <div class="row">
+    <span class="k">壁纸</span>
+    <span class="v" id="v-wall">默认</span>
+    <span class="grow"></span>
+    <button class="deed" id="pickWall">选图片</button>
+    <button class="deed" id="clearWall" style="margin-left:6px">清除</button>
+  </div>
+  <div class="hint" id="wallhint">选一张横屏图当整页背景。背景固定不动、页面照常往上滑，文字与玻璃颜色会跟着壁纸明暗自动调整。</div>
+  <input type="file" id="wallFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+  <div class="row">
+    <span class="k">磨砂浓度</span>
+    <input type="range" id="frostRange" min="30" max="96" step="2" value="72"
+           style="flex:1;min-width:0;accent-color:var(--accent)">
+    <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
+  </div>
+  <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。</div>
+  <div class="row">
+    <span class="k">模糊强度</span>
+    <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
+           style="flex:1;min-width:0;accent-color:var(--accent)">
+    <span class="v" id="v-blur" style="width:44px;text-align:right">26px</span>
+  </div>
+  <div class="hint" id="idxRow" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span id="idxNote" data-idx-note>笔记索引：—</span>
+    <span class="grow" style="flex:1"></span>
+    <button class="deed" id="idxBuild" data-idx-go style="height:24px">建立</button>
+    <button class="deed" id="idxRebuild" style="height:24px">重建</button>
+  </div>
+  <div style="display:flex;gap:8px;padding:4px 12px 12px">
+    <button class="deed" id="mcp" style="flex:1;height:30px">一键建立 MCP</button>
+  </div>
+  <div class="row path">
+    <span class="k">存放位置</span>
+    <span class="v" id="v-path">—</span>
+  </div>
+</div>
+
+<main>
+
+  <div class="shell">
+
+    <aside class="side glass">
+      <div class="sidehead">
+        <div>
+          <div class="sname">微信读书</div>
+          <div class="ssub" id="wrWho">未连接</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <button data-v="shelf" class="on">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3.4 5.2c0-.9.7-1.6 1.6-1.6h3.2c.9 0 1.6.7 1.6 1.6v10.3c0-.8-.7-1.4-1.6-1.4H5c-.9 0-1.6.6-1.6 1.4z"/>
+            <path d="M16.6 5.2c0-.9-.7-1.6-1.6-1.6h-3.2c-.9 0-1.6.7-1.6 1.6v10.3c0-.8.7-1.4 1.6-1.4H15c.9 0 1.6.6 1.6 1.4z"/>
+          </svg>
+          我的书架<span class="badge" id="bgShelf"></span>
+        </button>
+        <button data-v="notes">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 15.5 5 12l7-7a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3l-7 7z"/>
+            <path d="M11.4 5.6 14.4 8.6"/>
+          </svg>
+          划线笔记
+        </button>
+        <button data-v="random">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.4" y="3.4" width="13.2" height="13.2" rx="3.2" transform="rotate(8 10 10)"/>
+            <path d="M7.6 8.4h4.8M7.2 11.6h3.2"/>
+          </svg>
+          随机漫步
+        </button>
+        <button data-v="stats">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M4.5 16V11M10 16V5M15.5 16v-6.5"/>
+          </svg>
+          阅读统计
+        </button>
+        <button data-v="pick">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 3.2l1.7 4.1 4.1 1.7-4.1 1.7L10 14.8 8.3 10.7 4.2 9l4.1-1.7z"/>
+            <path d="M15.4 14.2l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/>
+          </svg>
+          为我推荐
+        </button>
+        <button data-v="search">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="9" cy="9" r="5"/>
+            <path d="M12.8 12.8 16.4 16.4"/>
+          </svg>
+          搜索书籍
+        </button>
+      </nav>
+      <div class="sidefoot" id="sideFoot"></div>
+    </aside>
+
+    <section class="content glass" id="view"></section>
+
+  </div>
+
+</main>
+
+<div class="batchbar" id="batchbar">
+  <span class="n" id="batchN">已选 0 本</span>
+  <button class="deed" data-b="fetch">抓取</button>
+  <button class="deed" data-b="shelf">加书架</button>
+  <button class="deed" data-b="zip">导出</button>
+  <select class="deed" id="batchState" style="padding:0 6px">
+    <option value="待读">待读</option>
+    <option value="在读">在读</option>
+    <option value="已读">已读</option>
+    <option value="">清除标记</option>
+  </select>
+  <button class="deed" data-b="state">应用</button>
+  <button class="deed" data-b="del" style="color:var(--err)">删缓存</button>
+  <button class="deed" data-b="off">退出</button>
+</div>
+
+<div class="dock closed" id="dock">
+  <div class="dockhead" id="dockHead">
+    <span class="dt">任务</span><span class="dn" id="dockCount"></span>
+    <span class="grow"></span>
+    <button class="dclear" id="logClear" type="button" title="清除攒下的输出记录">清日志</button>
+    <button class="dclear" id="dockClear" type="button" title="清空已完成的记录">清空</button>
+    <span class="dchev" id="dockChev">展开</span>
+  </div>
+  <div class="dockbody" id="dockBody"></div>
+</div>
+
+<div class="veil" id="veil">
+  <div class="sheet glass">
+    <h3 id="sheetTitle"></h3>
+    <p id="sheetText"></p>
+    <textarea id="sheetBody" readonly hidden></textarea>
+    <div class="acts" id="sheetActs"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+
+let running = false, lastStarted = null, tick = null, busyLog = false;
+let local = {};            // 已导出的书：bookId → 统计（含 total，用来算百分比）
+let stateMap = {};         // 阅读状态标签：id → 想读/在读/读完（没抓取的书也能标）
+let tasks = [];            // 右下角任务记录（localStorage 持久化）
+let keySet = false;
+let v = 'shelf';           // 侧边栏当前视图
+let shelfBooks = [], shelfAlbums = [], shelfAt = 0;
+
+const MOOD = {export: '收取中', login: '等待确认', install: '正在准备', images: '正在归档'};
+const STRIP = /[✅❌⚠️📱📖📄📦🖼🔍🎧🧠]|\uFE0F/gu;
+const SOFTEN = [
+  [/等待扫码超时（5 分钟）/g, '等待确认已超时'],
+  [/请用微信扫码[^\n]*/g, '等待你确认连接'],
+  [/未登录，正在打开扫码窗口…/g, '尚未连接，正在唤起确认窗口'],
+  [/已登录（会话仍然有效）/g, '连接仍然有效'],
+  [/^已登录$/g, '连接仍然有效'],
+  [/登录成功，会话已保存到.*/g, '连接已建立'],
+  [/Book ID:\s*/g, '编号 '],
+  [/打开阅读器\.\.\./g, '进入书页'],
+  [/已跳到全书开头，当前:「(.*)」\(点击首项「(.*)」\)/g, '回到卷首 · $1'],
+  [/上次:\s*(.*?),\s*编号:\s*(\d+)/g, '上次读到 $1'],
+  [/^会话开始:「(.*)」$/g, '由此继续 · $1'],
+  [/无新章节，导出完成。/g, '已无新内容，本次到此'],
+  [/已到全书最后一章，导出完成。/g, '已至卷末'],
+  [/全书导出完成/g, '完整取回'],
+  [/3 秒后自动重开继续\.\.\./g, '稍候继续'],
+  [/本次:\s*\+(\d+)\s*章,\s*\+([\d,]+)\s*字/g, '本轮 增 $1 章 · $2 字'],
+  [/下载 (\d+) 张图片\.\.\./g, '归档 $1 幅插图'],
+  [/图片下载完成\s+(\d+)\/(\d+)/g, '插图 $1/$2'],
+  [/^共 (\d+) 张图片.*$/g, '归档 $1 幅插图'],
+  [/^完成: ok=(\d+) skip=(\d+) fail=(\d+).*$/g, '插图 新增 $1 · 跳过 $2 · 失败 $3'],
+  [/^图片目录:\s*(.*)$/g, '存放 $1'],
+  [/^(\d+) 章, ([\d,]+) bytes, (\d+) 张图$/g, '成品 $1 章 · $2 字节 · $3 幅图'],
+  [/^output\/(.*)$/g, '存放 $1'],
+  [/^--- 启动 (\w+).*$/g, '开始'],
+  [/^--- 任务结束（退出码 (\d+)）---$/g, '告一段落'],
+  [/^--- 会话 (\d+) ---$/g, '第 $1 轮'],
+  [/^=+$/g, ''],
+];
+
+function soften(text) {
+  let s = text.replace(STRIP, '').replace(/\s{2,}/g, ' ').trim();
+  for (const [re, to] of SOFTEN) s = s.replace(re, to);
+  return s.replace(/[·、,，:：\-\s]+$/g, '').trim();
+}
+
+const CHAPTER = /^\[\s*(\d+)\]\s*(.*?)\s*(\d+)\s*字\s*\((\d+)\s*页\)\s*(\+\d+\s*图)?/;
+const PATIENCE = /^\[\s*(\d+)\]\s*(.*?)\s*(\d+)\s*字\s*\[末章\]/;
+
+function classify(raw) {
+  const clean = raw.replace(STRIP, '').replace(/[ \t]{2,}/g, ' ').trim();
+  if (!clean) return {kind: 'skip'};
+  let m = clean.match(CHAPTER);
+  if (m) return {kind: 'chapter', idx: +m[1], title: m[2].trim(), chars: +m[3],
+                 imgs: m[5] ? parseInt(m[5].replace(/\D/g, ''), 10) : 0};
+  m = clean.match(PATIENCE);
+  if (m) return {kind: 'chapter', idx: +m[1], title: m[2].trim(), chars: +m[3], imgs: 0};
+
+  const soft = soften(clean);
+  if (!soft) return {kind: 'skip'};
+  if (/^(第 \d+ 轮|开始|告一段落)$/.test(soft)) return {kind: 'sep', text: soft};
+
+  m = soft.match(/^(.{1,42}?)\s+—\s+(.{1,20})$/);
+  if (m) {
+    const nm = m[1].replace(/^(完整取回|已至卷末)\s*/, '').replace(/^[!！?？:：·、,，\-\s]+/, '').trim();
+    if (nm) return {kind: 'bookish', text: nm, by: m[2].trim()};
+  }
+  if (/^(完整取回|已至卷末|已无新内容)/.test(soft)) return {kind: 'hush', text: soft};
+  if (/^(尚未连接|连接已断开|等待确认已超时|尚未)/.test(soft)) return {kind: 'bad', text: soft};
+  if (/异常|失败|Error|Traceback|not defined|refused/.test(soft)) return {kind: 'bad', text: soft};
+  if (/^(File |Traceback|playwright|asyncio|return |await |raise |Call log|navigating to |\.\.\.|[~^]+|\s*-\s)/
+        .test(soft) || /site-packages|\w+(\.\w+)*:\s/.test(soft))
+    return {kind: 'faint', technical: true, text: soft};
+  if (/^编号\s|^上次读到|^由此继续/.test(soft)) return {kind: 'faint', text: soft};
+  return {kind: 'plain', text: soft};
+}
+
+const nm = n => (n || 0).toLocaleString('zh-CN');
+const pad = n => String(n).padStart(2, '0');
+function hum(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+function when(ts) {
+  const d = new Date(ts * 1000);
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function lineNode(it) {
+  if (it.kind === 'sep') {
+    if (!it.text) return null;
+    const el = document.createElement('div');
+    el.className = 'sep';
+    const sp = document.createElement('span');
+    sp.textContent = it.text;
+    el.append(sp);
+    return el;
+  }
+  if (it.kind === 'skip') return null;
+  const el = document.createElement('div');
+  el.className = 'line'
+    + (it.kind === 'hush' ? ' hush' : '')
+    + (it.kind === 'faint' ? ' faint' : '')
+    + (it.kind === 'bad' ? ' bad' : '')
+    + (it.kind === 'bookish' ? ' bookish' : '');
+  const what = document.createElement('div');
+  what.className = 'what';
+  const how = document.createElement('div');
+  how.className = 'how';
+  if (it.kind === 'chapter') {
+    what.textContent = it.title || '未题名';
+    if (it.chars) { const i = document.createElement('i'); i.textContent = nm(it.chars) + ' 字'; how.append(i); }
+    if (it.imgs) { const i = document.createElement('i'); i.textContent = it.imgs + ' 幅图'; how.append(i); }
+  } else {
+    what.textContent = it.text;
+    if (it.by) { const i = document.createElement('i'); i.textContent = it.by; how.append(i); }
+  }
+  el.append(what, how);
+  return el;
+}
+
+function foldFrame(list, count) {
+  const el = document.createElement('div');
+  el.className = 'line faint';
+  const what = document.createElement('div');
+  what.className = 'what';
+  what.textContent = `另有 ${count} 行技术细节`;
+  const how = document.createElement('div');
+  how.className = 'how';
+  const btn = document.createElement('button');
+  btn.className = 'deed';
+  btn.style.cssText = 'height:20px;padding:0 8px;font-size:11px';
+  btn.textContent = '展开';
+  btn.onclick = () => {
+    const frag = document.createDocumentFragment();
+    for (const it of list) { const n = lineNode(it); if (n) frag.append(n); }
+    el.replaceWith(frag);
+  };
+  how.append(btn);
+  el.append(what, how);
+  return el;
+}
+
+function absorb(it) {
+  if (it.kind !== 'chapter') return;
+  if (it.idx > tally.chapters) tally.chapters = it.idx;
+  tally.chars += it.chars;
+  tally.imgs += it.imgs;
+}
+
+function compose(lines) {
+  const raw = lines.map(l => classify(l.s));
+  const items = [];
+  let inStack = false;
+  for (const it of raw) {
+    if (it.kind === 'bad' && /Traceback/.test(it.text || '')) { inStack = true; items.push(it); continue; }
+    if (inStack) {
+      if (it.kind === 'sep' || it.kind === 'skip') inStack = false;
+      else if (it.kind === 'bad') inStack = false;
+      else { items.push({kind: 'faint', technical: true, text: it.text || it.title || ''}); continue; }
+    }
+    items.push(it);
+  }
+  const frag = document.createDocumentFragment();
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    if (it.kind === 'faint' && it.technical) {
+      let j = i;
+      while (j < items.length && items[j].kind === 'faint' && items[j].technical) j++;
+      if (j - i >= 3) { frag.append(foldFrame(items.slice(i, j), j - i)); i = j; continue; }
+    }
+    absorb(it);
+    const el = lineNode(it);
+    if (el) frag.append(el);
+    i++;
+  }
+  return frag;
+}
+
+function paintTaskCount() {
+  const el = $('#dockCount');
+  if (!el) return;
+  const live = tasks.filter(t => t.state === 'running').length;
+  el.textContent = live ? `${live} 进行中` : (tasks.length ? `${tasks.length} 条` : '');
+}
+
+let whisperEl = null, whisperTimer = null;
+function whisper(msg) {
+  if (!whisperEl) {
+    whisperEl = document.createElement('div');
+    whisperEl.className = 'whisper';
+    document.body.append(whisperEl);
+  }
+  whisperEl.textContent = msg;
+  requestAnimationFrame(() => whisperEl.classList.add('up'));
+  clearTimeout(whisperTimer);
+  whisperTimer = setTimeout(() => whisperEl.classList.remove('up'), 2400);
+}
+
+async function fetchLog(tail) {
+  try {
+    const d = await (await fetch(`/api/log?tail=${tail || 200}`)).json();
+    return compose(d.lines || []);
+  } catch (e) {
+    return document.createTextNode('取不到输出');
+  }
+}
+
+async function post(action, extra) {
+  const r = await fetch('/api/action', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({action}, extra || {}))
+  });
+  return r.json();
+}
+/** 下载：先 fetch 成 blob 再落盘。
+ *  原来直接给 <a href> 导航，服务端一旦报错（返回的是纯文本原因），
+ *  浏览器会把那行字当成页面打开 —— 用户看到的「跳转」就是这么来的。 */
+async function clip(href, name) {
+  let r;
+  try {
+    r = await fetch(href);
+  } catch (e) {
+    whisper('连不上本地服务'); return false;
+  }
+  if (!r.ok) {
+    whisper(((await r.text()) || '').slice(0, 70) || ('没能取到文件（' + r.status + '）'));
+    return false;
+  }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name || 'export';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  return true;
+}
+/* ── 本地映射 + 任务记录 ───────────────── */
+
+const TASK_KEY = 'guizang_tasks_v1';
+let loggedIn = false;
+let flomoSet = false;
+try { tasks = JSON.parse(localStorage.getItem(TASK_KEY) || '[]'); } catch (e) { tasks = []; }
+
+function saveTasks() {
+  try { localStorage.setItem(TASK_KEY, JSON.stringify(tasks.slice(0, 24))); } catch (e) {}
+}
+
+/** 已取回多少 —— 目录总章数做分母。
+ *  原来只按「已落盘章节 / 总章数」算，而一章要翻十几页，
+ *  于是整章期间百分比一动不动，看着就像卡死（用户报的「进度条不动」）。
+ *  现在引擎每翻几页会写 _progress.json，这里用累计页数在「当前这一章」内部插值，
+ *  并记一个只增不减的高水位，所以条子永远朝前走、不会跳回去。
+ *  返回 -1 表示总量还不知道（目录还没建好），前端改用不定长条。 */
+const pctHold = {};
+
+function pct(id) {
+  const b = local[id];
+  if (!b) return 0;
+  if (b.done) { pctHold[id] = 100; return 100; }
+  if (!b.total) return -1;
+  const pr = b.progress || {};
+  let p = (b.chapters / b.total) * 100;
+  if (pr.running && pr.pages) {
+    p += Math.min(0.9, (pr.pages % 14) / 14) * (100 / b.total);
+  }
+  p = Math.max(1, Math.min(99, p));
+  const prev = pctHold[id] || 0;
+  const kept = Math.max(p, prev);        // 单调：不因换会话/统计口径回退
+  pctHold[id] = kept;
+  return Math.round(kept);
+}
+
+function paintDock() {
+  const body = $('#dockBody');
+  if (!body) return;
+  paintTaskCount();
+  const clear = $('#dockClear');
+  if (clear) clear.disabled = !tasks.some(t => t.state !== 'running');
+  if (!tasks.length) {
+    body.innerHTML = '<div class="dempty">还没有任务</div>';
+    return;
+  }
+  body.replaceChildren(...tasks.map(t => {
+    const row = document.createElement('div');
+    row.className = 'drow';
+    const n = document.createElement('div');
+    n.className = 'nm';
+    n.textContent = t.title || t.book;
+    const st = document.createElement('div');
+    st.className = 'st' + (t.state === 'done' ? ' ok' : t.state === 'fail' ? ' bad' : '');
+    const p = pct(t.book);
+    st.textContent = t.state === 'running' ? (p < 0 ? '抓取中' : p + '%')
+      : t.state === 'done' ? '导出成功' : '未走完';
+    row.append(n, st);
+    row.onclick = () => showTaskLog(t);
+    return row;
+  }));
+}
+
+async function showTaskLog(t) {
+  const acts = [{ label: '知道了', lead: true }];
+  if (t.state === 'running') {
+    acts.unshift({
+      label: '中止', keep: true,
+      run: async () => { const r = await post('stop'); whisper(r.ok ? '已请求中止' : r.msg); },
+    });
+  }
+  // 记录就在眼前时，就地给一个清除入口（不用回到那条小横条上找）
+  acts.push({ label: '清除记录', keep: true, run: askClearLog });
+  sheet({ title: t.title || t.book, text: '这条任务的最近输出：', actions: acts });
+  sBody.hidden = false;
+  sBody.value = '读取中…';
+  const host = document.createElement('div');
+  host.append(await fetchLog(160));
+  sBody.value = host.innerText.trim() || '（没有输出）';
+}
+
+function startTask(book, title) {
+  const old = tasks.find(t => t.book === book && t.state === 'running');
+  if (old) return old;
+  const t = {book, title, at: Date.now(), state: 'running'};
+  tasks.unshift(t);
+  saveTasks();
+  paintDock();
+  delete pctHold[book];          // 新一轮从 0 起，别拿上次的百分比垫着
+  return t;
+}
+
+/* ── 书卡：悬停「查看详情」→ 竖排操作栏 ── */
+
+async function beginFetch(id, title) {
+  if (!loggedIn) { whisper('先在左上角设置里连接账号'); setPop(true); return false; }
+  const r = await post('export', {book: id});
+  if (!r.ok) { whisper(r.msg); return false; }
+  startTask(id, title);
+  whisper('开始取书 · ' + (title || id));
+  await drawState(true);
+  return true;
+}
+
+/** 阅读器 id 与书架 bookId 是两套命名空间：书架的 deepLink 里 v= 就是阅读器 id */
+function readerIdOf(b) {
+  const m = String(b.deepLink || '').match(/[?&]v=([0-9A-Za-z]+)/);
+  return m ? m[1] : '';
+}
+function readerToBookMap() {
+  const m = {};
+  for (const b of (shelfBooks || [])) {
+    const r = readerIdOf(b);
+    if (r && b.bookId) m[r] = b.bookId;
+  }
+  return m;
+}
+/** 反向：书架 bookId → 阅读器 id（笔记索引用的是 bookId，本地目录用的是阅读器 id） */
+function bookToReaderMap() {
+  const m = {};
+  for (const b of (shelfBooks || [])) {
+    const r = readerIdOf(b);
+    if (r && b.bookId) m[b.bookId] = r;
+  }
+  return m;
+}
+
+/** 状态标签：本地目录 id、书架 bookId、阅读器 id 三种键都认 */
+function stateOf(x) {
+  if (typeof x === 'string') return stateMap[x] || (local[x] && local[x].state) || '';
+  for (const k of [x.bookId, readerIdOf(x), x.id]) {
+    if (!k) continue;
+    if (stateMap[k]) return stateMap[k];
+    if (local[k] && local[k].state) return local[k].state;
+  }
+  return '';
+}
+
+/** 收起所有摊开操作条的书架卡。一次只摊一张，点别处就恢复原状。 */
+function closeAllCards(except) {
+  document.querySelectorAll('.wcard.open').forEach(c => {
+    if (c !== except) c.classList.remove('open');
+  });
+}
+
+/** 封面缺失时的书脊色：由书 id 稳定派生，同一本书永远同一个颜色 */
+function spineHue(seed) {
+  const s = String(seed || 'book');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+/** 「最近读过」说成人话，别丢一串日期给用户自己算 */
+function daysAgo(ts) {
+  if (!ts) return '';
+  const d = Math.floor((Date.now() / 1000 - ts) / 86400);
+  if (d < 0) return '';
+  if (d === 0) return '今天读过';
+  if (d === 1) return '昨天读过';
+  if (d < 30) return `${d} 天前读过`;
+  if (d < 365) return `${Math.floor(d / 30)} 个月前读过`;
+  return `${Math.floor(d / 365)} 年前读过`;
+}
+
+/** 一张书架卡里「会变」的判断，集中一处：建卡和原位刷新共用同一套口径，
+ *  免得刷新的时候两处算出不一样的东西。 */
+function cardBits(b) {
+  // 兼容两种来源：微信书架（bookId/deepLink/cover 是 URL）与本地已取回（id/deep/cover 是布尔）
+  const readerId = readerIdOf(b);
+  const keyForLocal = [b.bookId, readerId, b.id].find(k => k && local[k]) || '';
+  const mine = keyForLocal ? local[keyForLocal] : null;
+  // 本地导出目录用的是阅读器 id；取简介/封面则要用书架的 bookId
+  const id = keyForLocal || readerId || b.bookId || b.id;
+  const storeId = b.bookId || readerToBookMap()[readerId] || id;
+  const detailStore = b.bookId || readerToBookMap()[readerId] || '';
+  const detailReader = readerId || (mine && mine.id) || (detailStore ? '' : id);
+  const busy = tasks.some(t => t.book === id && t.state === 'running');
+  const stt = stateOf(b);
+  const bits = [];
+  if (mine) bits.push(`已取回 ${mine.chapters} 章`);
+  else if (b.author || b.category) bits.push(b.author || b.category);
+  if (stt) bits.push(stt);
+  const ago = daysAgo(b.readUpdateTime);
+  if (ago) bits.push(ago);
+  // 登记这张卡的两套 id：批量勾选记的是卡片 id，加书架要的是书城短 id
+  cardIds.set(id, {store: storeId, reader: readerId, title: b.title || ''});
+  return {
+    readerId, id, storeId, detailStore, detailReader, mine, busy, stt,
+    coverUrl: typeof b.cover === 'string' ? b.cover
+      : (b.cover ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
+    // 「摊开过」的卡原位刷新时靠它判要不要重播动画
+    revealed: revealed.has(id),
+    // 骨架形状：只有这两件事会让卡片结构变化（进度条、取书↔正文）
+    shape: (busy ? 'b' : '-') + (mine ? 'm' : '-'),
+    tagText: busy ? '正在取'
+      : mine ? (mine.done ? '已存全' : `已取 ${mine.chapters || 0} 章`)
+        : b.finishReading ? '读完' : '',
+    tagCls: busy ? 'go' : mine ? 'have' : '',
+    meta: bits.join(' · '),
+  };
+}
+
+function shelfCard(b, bits) {
+  const t = bits || cardBits(b);
+  const {id, mine, busy, coverUrl, detailStore, detailReader} = t;
+  const el = document.createElement('article');
+  el.className = 'wcard';
+  el.dataset.id = id;
+  el.dataset.shape = t.shape;
+  // 这本书之前已经「摊开」过：直接放好，不再走一遍 opacity:0 → 摊开
+  if (t.revealed) el.classList.add('rev');
+
+  // 批量模式下左上角出勾选框
+  const pick = document.createElement('label');
+  pick.className = 'pick';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = batch.has(id);
+  cb.onchange = e => {
+    e.stopPropagation();
+    if (cb.checked) batch.add(id); else batch.delete(id);
+    el.classList.toggle('on', cb.checked);
+    paintBatch();
+  };
+  cb.onclick = e => e.stopPropagation();
+  pick.append(cb);
+  el.append(pick);
+
+  const cv = document.createElement('div');
+  cv.className = 'cv';
+  // 没封面 / 封面挂了：用派生色书脊顶上，形状和真封面一样（2:3），网格不会缺角
+  const ph = () => {
+    const d = document.createElement('div');
+    d.className = 'spine';
+    d.style.setProperty('--h', spineHue(id));
+    const i = document.createElement('i');
+    i.textContent = (b.title || '书').slice(0, 1);
+    d.append(i);
+    return d;
+  };
+  if (coverUrl) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = coverUrl;
+    img.onerror = () => img.replaceWith(ph());
+    img.onload = () => img.classList.add('in');   // 到了再淡入，别「啪」地砸出来
+    if (img.complete && img.naturalWidth) img.classList.add('in');
+    cv.append(img);
+  } else {
+    cv.append(ph());
+  }
+
+  // 左上角徽标：只在「有话说」的时候挂上，平时靠 hover 才浮出，书架不吵
+  if (t.tagText) {
+    const tag = document.createElement('span');
+    tag.className = 'tag' + (t.tagCls ? ' ' + t.tagCls : '');
+    tag.textContent = t.tagText;
+    el.append(tag);
+    if (busy) el.classList.add('hasTag');   // 正在跑的那本常驻显示，进度一眼找得到
+  }
+
+  if (busy) {
+    const bar = document.createElement('div');
+    bar.className = 'pbar';
+    bar.innerHTML = barHtml(id);
+    cv.append(bar);
+  }
+
+  // 悬停只出一个按钮：查看详情（用户要求统一）
+  const act = document.createElement('div');
+  act.className = 'hoveract';
+  if (!busy) {
+    const btn = document.createElement('button');
+    btn.textContent = '查看详情';
+    btn.onclick = e => { e.stopPropagation(); toggleCard(); };
+    act.append(btn);
+  }
+
+  const strip = document.createElement('div');
+  strip.className = 'strip';
+  // 操作条里的按钮：先办事，再把这张卡收回去（点过的卡片不该一直摊着）
+  const mk = (label, fn) => {
+    const x = document.createElement('button');
+    x.textContent = label;
+    x.onclick = e => { e.stopPropagation(); fn(); closeAllCards(); };
+    return x;
+  };
+  // 卡上只留两个动作（用户要求）：详情 + 取书；已经取回来的换成「正文」。
+  // 完整包 / 源网站 / 目录 / 补全图片这些收进详情页，需要再点进去拿。
+  strip.append(mk('详情', () => renderDetailView(detailStore, detailReader, b.title)));
+  if (mine) {
+    strip.append(mk('正文', () => clip('/api/md?book=' + encodeURIComponent(id)
+      + '&name=' + encodeURIComponent(b.title || id), (b.title || id) + '.md')));
+  } else {
+    strip.append(mk('取书', () => beginFetch(id, b.title)));
+  }
+
+  const mt = document.createElement('div');
+  mt.className = 'mt';
+  const n = document.createElement('div');
+  n.className = 'n';
+  n.textContent = b.title || id;
+  n.style.cursor = 'pointer';
+  n.title = '看详情';
+  n.onclick = e => { e.stopPropagation(); renderDetailView(detailStore, detailReader, b.title); closeAllCards(); };
+  const a = document.createElement('div');
+  a.className = 'a';
+  a.textContent = t.meta;
+  mt.append(n, a);
+
+  // 悬停层只盖封面：盖整张卡的话，下面的书名就点不到了
+  cv.append(act);
+  // 封面本身也是开关：点一下展开、再点一下收起（触屏没有 hover，只能这样开）
+  function toggleCard() {
+    const was = el.classList.contains('open');
+    closeAllCards(el);                // 一次只摊开一张，别铺一屏操作条
+    el.classList.toggle('open', !was);
+  }
+  cv.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    e.stopPropagation();
+    toggleCard();
+  });
+  // 按下去先压一格，抬手才弹回 —— 有实体按键的反馈感，不是「点了一下空气」
+  cv.addEventListener('pointerdown', () => el.classList.add('tap'));
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+    cv.addEventListener(ev, () => el.classList.remove('tap')));
+  el.append(cv, strip, mt);
+  return el;
+}
+
+/** 原位刷新：只改文本，不动节点 —— 已解码的封面、展开状态、滚动位置全都留着。
+ *  只有卡片骨架真的变了（开始/结束取书、空↔已取回）才换节点，且换完直接标记为
+ *  「已摊开」，绝不再重播一次动画。 */
+function syncShelfCard(el, b, bits) {
+  const t = bits || cardBits(b);
+  if (el.dataset.shape !== t.shape) {
+    const fresh = shelfCard(b, t);
+    fresh.classList.add('rev');
+    el.replaceWith(fresh);
+    return fresh;
+  }
+  const tag = el.querySelector('.tag');
+  if (tag) {
+    if (tag.textContent !== t.tagText) tag.textContent = t.tagText;
+    tag.className = 'tag' + (t.tagCls ? ' ' + t.tagCls : '');
+  } else if (t.tagText) {
+    const x = document.createElement('span');
+    x.className = 'tag' + (t.tagCls ? ' ' + t.tagCls : '');
+    x.textContent = t.tagText;
+    el.append(x);
+  }
+  el.classList.toggle('hasTag', t.busy);
+  const a = el.querySelector('.mt .a');
+  if (a && a.textContent !== t.meta) a.textContent = t.meta;
+  const cbox = el.querySelector('.pick input');
+  if (cbox) {
+    cbox.checked = batch.has(t.id);
+    el.classList.toggle('on', cbox.checked);
+  }
+  return el;
+}
+
+/** 进度条的内容：百分比 + 一句「正在做什么」；不知道总量时用不定长条 */
+function barHtml(id) {
+  const p = pct(id);
+  const pr = (local[id] || {}).progress || {};
+  const note = pr.stalled ? '页面卡住，正在重开续取'
+    : (pr.pages ? '已翻 ' + pr.pages + ' 页'
+      : (pr.running ? '正在打开阅读器' : '后台抓取中'));
+  const fill = p < 0 ? '<i class="unk"></i>' : '<i style="width:' + p + '%"></i>';
+  return '<div class="lb"><span>' + (p < 0 ? '抓取中' : p + '%') + '</span><span>'
+    + note + '</span></div><div class="bg">' + fill + '</div>';
+}
+
+/** 不重排网格，只把进度条推进（避免每 2.6s 重渲染抖一下） */
+function paintProgress() {
+  document.querySelectorAll('.wcard').forEach(el => {
+    const bar = el.querySelector('.pbar');
+    if (!bar) return;
+    const html = barHtml(el.dataset.id);
+    if (bar.innerHTML !== html) bar.innerHTML = html;
+  });
+}
+
+/* ── 状态 ─────────────────────────────── */
+let localStamp = '';
+
+async function drawState(force) {
+  let s;
+  try { s = await (await fetch('/api/state')).json(); }
+  catch (e) {
+    $('#live').className = 'live bad';
+    $('#liveText').textContent = '连接已断开';
+    return;
+  }
+
+  const t = s.task || {};
+  running = !!t.running;
+  loggedIn = !!(s.login && s.login.logged_in);
+  keySet = !!(s.weread && s.weread.key_set);
+  flomoSet = !!(s.flomo && s.flomo.url_set);
+
+  local = {};
+  for (const b of (s.books || [])) local[b.id] = b;
+  stateMap = s.states || {};
+
+  // 外部（命令行 / MCP）起的任务也收进右下角
+  if (running && t.book && !tasks.some(x => x.book === t.book && x.state === 'running')) {
+    const b = local[t.book];
+    startTask(t.book, b ? b.title : t.book);
+  }
+
+  // 任务收尾：以「书是否标为已导完」为主判据，退出码为辅
+  let flipped = false;
+  for (const task of tasks) {
+    if (task.state !== 'running') continue;
+    if (running) continue;                      // 还有任务在跑就先不判
+    const b = local[task.book];
+    const ok = !!(b && b.done) || (t.book === task.book && t.exit_code === 0);
+    task.state = ok ? 'done' : 'fail';
+    flipped = true;
+    if (ok) whisper('导出成功 · ' + (task.title || task.book));
+  }
+  if (flipped) saveTasks();
+  paintDock();
+
+  const live = $('#live'), txt = $('#liveText');
+  if (running) { live.className = 'live on'; txt.textContent = MOOD[t.kind] || '进行中'; }
+  else if (t.exit_code && t.exit_code !== 0) { live.className = 'live bad'; txt.textContent = '上次未走完'; }
+  else if (lastStarted) { live.className = 'live good'; txt.textContent = '已停下'; }
+  else { live.className = 'live'; txt.textContent = '静候'; }
+  if (t.started_at) lastStarted = t.started_at;
+
+  $('#connect').disabled = running;
+  $('#fix').disabled = running;
+
+  $('#v-browser').textContent = s.chromium ? '就绪' : '待修复';
+  const acc = $('#v-account');
+  if (s.login) {
+    acc.textContent = s.login.logged_in ? '已连接' : '未连接';
+    const em = document.createElement('em');
+    em.textContent = when(s.login.checked_at);
+    acc.append(em);
+  } else {
+    acc.textContent = '未检测';
+  }
+  if (s.out) $('#v-path').textContent = s.out;
+
+  // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
+  const ki = $('#keyinput'), fi = $('#flomoinput');
+  if (ki) ki.placeholder = keySet ? '已保存 ····' + ((s.weread || {}).key_tail || '') : 'wrk-…';
+  if (fi) fi.placeholder = flomoSet ? '已保存 ····' + ((s.flomo || {}).tail || '') : 'https://flomoapp.com/iwh/…';
+
+  $('#wrWho').textContent = loggedIn
+    ? (keySet ? '账号与接口已就绪' : '已连接，未填接口 Key') : '未连接';
+  $('#sideFoot').innerHTML = `已取回 <b style="color:var(--ink-2)">${Object.keys(local).length}</b> 本`
+    + (running ? ' · 有任务在跑' : '');
+  $('#keyhint').textContent = keySet
+    ? '接口 Key 已保存在本机，下次打开不用再填。'
+    : '填上官方接口 Key 后，可看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 复制，形如 wrk-…）。';
+  $('#flomohint').textContent = flomoSet
+    ? 'flomo 地址已保存在本机。到「划线笔记」里多选后可一键导入。'
+    : '填上你的 flomo 记录 API 地址（flomo 网页版「设置 → API」，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。';
+
+  // 壁纸：首次载入或换过就重新铺上；文字颜色由实际图片的明暗决定
+  const wp = s.wallpaper || {};
+  const vw = $('#v-wall');
+  if (vw) vw.textContent = wp.set ? '已设置' : '默认';
+  if (wp.set && wp.v !== wallApplied) {
+    wallApplied = wp.v;
+    applyWall('/api/wallpaper?v=' + wp.v);
+  } else if (!wp.set && wallApplied) {
+    wallApplied = 0;
+    applyWall('');
+  }
+
+  if (running && !tick) tick = setInterval(paintProgress, 1200);
+  if (!running && tick) { clearInterval(tick); tick = null; }
+
+  const stamp = JSON.stringify([Object.keys(local),
+    tasks.filter(x => x.state === 'running').map(x => x.book)]);
+  if (v === 'shelf') {
+    // 接口 Key 是启动以后才读到的那一次：书架结构要重铺（之前铺的是空壳）并补拉书架
+    if (keySet !== shellKeyAt && shownPane === 'shelf') renderShelfView();
+    else if (force || stamp !== localStamp) { localStamp = stamp; renderShelfGrid(); }
+    else paintProgress();
+  } else if (force) renderView();
+  // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
+}
+
+/* ── 设置弹层 ─────────────────────────── */
+const pop = $('#pop'), gear = $('#gear');
+function setPop(open) {
+  pop.classList.toggle('open', open);
+  gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+gear.onclick = e => { e.stopPropagation(); setPop(!pop.classList.contains('open')); };
+pop.onclick = e => e.stopPropagation();
+// 点界面任意别处：收掉设置弹层，也收掉摊开的书架卡（用户要求不必再点「收起」）
+document.addEventListener('click', () => { setPop(false); closeAllCards(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { setPop(false); closeAllCards(); }
+});
+
+/* ── 主题 / 设置 / 侧边栏 / 任务栏 交互 ── */
+
+const THEME_KEY = 'guizang_theme';
+let theme = 'auto';
+try { theme = localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) {}
+
+function applyTheme(t) {
+  theme = t;
+  const root = document.documentElement;
+  if (t === 'dark' || t === 'light') root.dataset.theme = t;
+  else delete root.dataset.theme;          // auto：交回给系统
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+  [...$('#themeSeg').children].forEach(b => b.classList.toggle('on', b.dataset.t === t));
+}
+$('#themeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) applyTheme(b.dataset.t);
+});
+applyTheme(theme);
+
+/* ── 磨砂浓度 / 模糊强度：只影响观感，存在本机 localStorage ── */
+
+const LOOK_KEY = 'guizang_look_v1';
+
+function look() {
+  try { return JSON.parse(localStorage.getItem(LOOK_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+
+function applyLook(part) {
+  const l = look();
+  const root = document.documentElement;
+  const frost = l.frost != null ? l.frost : 72;     // 百分比
+  const blur = l.blur != null ? l.blur : 24;        // px
+  if (part !== 'blur') root.style.setProperty('--frost', (frost / 100).toFixed(3));
+  if (part !== 'frost') root.style.setProperty('--blur', blur + 'px');
+  const fr = $('#frostRange'), br = $('#blurRange');
+  if (fr) fr.value = frost;
+  if (br) br.value = blur;
+  const fv = $('#v-frost'), bv = $('#v-blur');
+  if (fv) fv.textContent = frost + '%';
+  if (bv) bv.textContent = blur + 'px';
+}
+
+function setLook(k, val) {
+  const l = look();
+  l[k] = val;
+  try { localStorage.setItem(LOOK_KEY, JSON.stringify(l)); } catch (e) {}
+  applyLook(k);
+}
+
+$('#frostRange').addEventListener('input', e => setLook('frost', +e.target.value));
+$('#blurRange').addEventListener('input', e => setLook('blur', +e.target.value));
+applyLook();
+
+/* ── 笔记索引：状态 + 建立 / 重建 ── */
+
+function paintIdxNote() {
+  const s = idxState || {};
+  let txt = '笔记索引：还没建过';
+  if (s.running) txt = `索引中 ${s.done || 0}/${s.total || '?'} · 已收 ${s.count || 0} 条`;
+  else if (s.built_at) txt = `已有 ${s.count || 0} 条 · ${new Date(s.built_at * 1000)
+    .toLocaleString('zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'})}`;
+  // 同一个文案出现在设置面板和视图空状态两处，一起更新
+  document.querySelectorAll('[data-idx-note]').forEach(el => { el.textContent = txt; });
+}
+
+async function rebuildIndex() {
+  const r = await (await fetch('/api/notes_index', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rebuild: true}),
+  })).json();
+  whisper(r.msg || '开始重建');
+  watchIndex();
+}
+
+$('#idxBuild').onclick = () => { $('#idxBuild').disabled = true; buildIndex(); };
+$('#idxRebuild').onclick = () => {
+  sheet({title: '重建笔记索引',
+    text: '把全部有笔记的书重新拉一遍（几百本要几分钟）。旧的会先留一份备份。',
+    actions: [{label: '开始重建', lead: true, run: rebuildIndex}, {label: '再说'}]});
+};
+
+$('#nav').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) setView(b.dataset.v);
+});
+
+$('#batchbar').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.b === 'off') { setBatch(false); return; }
+  runBatch(b.dataset.b);
+});
+
+$('#dockHead').onclick = () => {
+  const d = $('#dock');
+  d.classList.toggle('closed');
+  $('#dockChev').textContent = d.classList.contains('closed') ? '展开' : '收起';
+};
+
+// 清空记录：只清跑完的（成功/未走完），正在抓的那几条得留着看进度
+$('#dockClear').onclick = e => {
+  e.stopPropagation();
+  const gone = tasks.filter(t => t.state !== 'running').length;
+  if (!gone) { whisper('没有可以清掉的记录'); return; }
+  tasks = tasks.filter(t => t.state === 'running');
+  saveTasks();
+  paintDock();
+  whisper(`已清掉 ${gone} 条记录`);
+};
+
+/* 清日志：右下角「清空」动的是本机那 24 条任务条目，后端攒下的输出记录是另一份 ——
+   以前这份一直清不掉，点进任务看到的还是上一次失败时的现场，就像「记录没真的清掉」。
+   正在跑的那一次会保留，否则中止/查进度时看不到现场，反倒制造新的「点了没反应」。 */
+async function clearRunLog() {
+  let r;
+  try { r = await post('log.clear'); } catch (e) { whisper('连不上本地服务'); return; }
+  if (!r.ok) { whisper(r.msg || '没清掉'); return; }
+  whisper(r.msg);
+  if (!sBody.hidden) sBody.value = '（输出记录已清除）';
+}
+
+/* 清除输出记录有两个入口：进展横条上的「清日志」、任务弹层里的「清除记录」。
+   两个都走这一份确认 —— 弹层里一击就抹掉整片现场太手滑了。 */
+async function askClearLog() {
+  let n = 0;
+  try {
+    const d = await (await fetch('/api/log?tail=1')).json();
+    n = Math.max(0, (d.next || 0) - (d.base || 0));
+  } catch (err) {}
+  if (!n) { whisper('输出记录已经是空的'); return; }
+  sheet({
+    title: '清除输出记录',
+    text: `将清掉攒下的 ${n} 行输出记录（进展里那些抓取现场）。正在跑的任务照清，之后的新输出会继续记进来；右下角的任务条目不受影响。`,
+    actions: [{ label: '确认清除', lead: true, run: clearRunLog }, { label: '算了' }],
+  });
+}
+
+$('#logClear').onclick = e => { e.stopPropagation(); askClearLog(); };
+
+$('#connect').onclick = async () => {
+  const r = await post('login');
+  whisper(r.ok ? '确认窗口已唤起，请在浏览器里完成' : r.msg);
+  setPop(false);
+  drawState();
+};
+$('#fix').onclick = async () => {
+  const r = await post('install');
+  if (!r.ok) whisper(r.msg);
+  setPop(false);
+  drawState();
+};
+
+async function saveCfg(payload, label) {
+  const r = await (await fetch('/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })).json();
+  whisper(r.msg || (r.ok ? label + '已保存' : '保存失败'));
+  if (r.ok) await drawState(true);
+  return r;
+}
+
+$('#savekey').onclick = () => {
+  const v = $('#keyinput').value.trim();
+  if (!v) { whisper('先填 Key（想清除请留空后点一次保存）'); return; }
+  saveCfg({weread_key: v}, 'Key').then(() => { $('#keyinput').value = ''; });
+};
+$('#keyinput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#savekey').click(); });
+
+$('#saveflomo').onclick = () => {
+  const v = $('#flomoinput').value.trim();
+  saveCfg({flomo_url: v}, 'flomo 地址').then(() => { $('#flomoinput').value = ''; });
+};
+$('#flomoinput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveflomo').click(); });
+
+/* ── 壁纸：整页背景 + 随壁纸明暗自适应 ── */
+
+let wallApplied = 0;
+let portraitWarned = false;
+
+function sampleTone(img) {
+  // 缩到 48×48 求平均亮度，决定整体用浅字还是深字
+  const c = document.createElement('canvas');
+  c.width = c.height = 48;
+  const g = c.getContext('2d', {willReadFrequently: true});
+  try {
+    g.drawImage(img, 0, 0, 48, 48);
+    const d = g.getImageData(0, 0, 48, 48).data;
+    let r = 0, gg = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
+    r /= n; gg /= n; b /= n;
+    return {r: Math.round(r), g: Math.round(gg), b: Math.round(b),
+            lum: (0.2126 * r + 0.7152 * gg + 0.0722 * b) / 255};
+  } catch (e) {
+    return null;              // 跨域等情况下取不到像素，退回浅色
+  }
+}
+
+function applyWall(url) {
+  const root = document.documentElement;
+  if (!url) {
+    delete root.dataset.wall;
+    root.style.removeProperty('--wall-img');
+    root.style.removeProperty('--wall-tint');
+    const f = $('#wallFile');
+    if (f) f.value = '';
+    return;
+  }
+  root.style.setProperty('--wall-img', 'url("' + url + '")');
+  const im = new Image();
+  im.onload = () => {
+    const t = sampleTone(im);
+    if (!t) { root.dataset.wall = 'light'; return; }
+    root.style.setProperty('--wall-tint', t.r + ',' + t.g + ',' + t.b);
+    root.dataset.wall = t.lum < 0.55 ? 'dark' : 'light';
+    // 固定层按视口 cover：竖图在宽屏上会被放大裁切，提前提醒一句
+    if (im.naturalHeight > im.naturalWidth * 1.15 && !portraitWarned) {
+      portraitWarned = true;
+      whisper('这是竖图，铺满宽屏会被裁掉上下；换横屏壁纸更完整');
+    }
+  };
+  im.onerror = () => { root.dataset.wall = 'light'; };
+  im.src = url;
+}
+
+$('#wallFile').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  if (f.size > 15 * 1024 * 1024) { whisper('图片太大了（请压到 15MB 以内）'); return; }
+  const dataUrl = await new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.readAsDataURL(f);
+  });
+  applyWall(dataUrl);                 // 先本地立刻生效，再落盘
+  whisper('正在保存壁纸…');
+  const r = await (await fetch('/api/wallpaper', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({data: dataUrl}),
+  })).json();
+  whisper(r.msg || (r.ok ? '壁纸已保存' : '保存失败'));
+  if (r.ok) drawState(true);
+});
+
+$('#pickWall').onclick = () => $('#wallFile').click();
+
+$('#clearWall').onclick = async () => {
+  applyWall('');
+  const r = await (await fetch('/api/wallpaper', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({clear: true}),
+  })).json();
+  whisper(r.msg || '已恢复默认背景');
+  drawState(true);
+};
+
+
+/* ── 弹窗 ─────────────────────────────── */
+const veil = $('#veil'), sTitle = $('#sheetTitle'), sText = $('#sheetText'),
+      sBody = $('#sheetBody'), sActs = $('#sheetActs');
+function sheet({ title, text, body, actions }) {
+  sTitle.textContent = title || '';
+  sText.textContent = text || '';
+  sText.hidden = !text;
+  sBody.value = body || '';
+  sBody.hidden = !body;
+  sActs.replaceChildren(...(actions || []).map(a => {
+    const btn = document.createElement('button');
+    btn.className = 'deed' + (a.lead ? ' sure' : '');
+    btn.textContent = a.label;
+    btn.style.height = '30px';
+    btn.onclick = () => { if (!a.keep) closeSheet(); if (a.run) a.run(); };
+    return btn;
+  }));
+  veil.classList.add('open');
+}
+function closeSheet() { veil.classList.remove('open'); }
+veil.onclick = e => { if (e.target === veil) closeSheet(); };
+
+/* ── 一键建立 MCP ─────────────────────── */
+$('#mcp').onclick = async () => {
+  setPop(false);
+  let prompt = '';
+  try { prompt = (await (await fetch('/api/mcp')).json()).prompt || ''; } catch (e) {}
+  if (!prompt) { whisper('取提示词失败'); return; }
+  let copied = false;
+  try { await navigator.clipboard.writeText(prompt); copied = true; } catch (e) {}
+  sheet({
+    title: copied ? '提示词已复制' : '提示词已备好',
+    text: copied
+      ? '把下面这段直接粘给你的 AI Agent（Qoder / ZCode / Claude 都行），它会自己完成配置。粘完记得重启 Agent —— MCP 是启动时加载的。'
+      : '剪贴板没写进去（可能缺权限），请手动全选下面这段，复制给你的 Agent，重启后生效。',
+    body: prompt,
+    actions: [{ label: '知道了', lead: true }],
+  });
+};
+
+/* ── 视图：书架 / 划线笔记 / 统计 / 推荐 / 搜索 ── */
+
+async function wcall(api_name, params, ms = 20000) {
+  // 带超时：官方网关偶发不回包，原来没有 timeout 的话
+  // 「读取中…」会一直挂在那里（用户报的就是这个）。
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  let r;
+  try {
+    r = await (await fetch('/api/weread', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({api_name, params: params || {}}),
+      signal: ctl.signal,
+    })).json();
+  } catch (e) {
+    throw new Error(ctl.signal.aborted ? '读取超时，稍后再试' : '连接不上本地服务');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!r.ok) throw new Error(r.msg || '调用失败');
+  return r.data || {};
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+function hrs(sec) {
+  const h = Math.floor((sec || 0) / 3600);
+  const m = Math.round(((sec || 0) % 3600) / 60);
+  return h ? `${h}<small>小时</small>${m ? m + '<small>分</small>' : ''}` : `${m}<small>分</small>`;
+}
+
+/* ── 视图常驻 ─────────────────────────────
+   每个视图一个节点，建好就一直留在 #view 里，切换只是把 hidden 挪一挪再播一次交接。
+   原来每次点侧边栏/每次 drawState(force) 都 `$('#view').innerHTML = …`，整面书架被
+   拆掉重建：几十张卡同时回到 opacity:0，再一张张重放「摊开」——那就是「点按钮闪一下」。 */
+const PANES = {};
+const SPRING = 'cubic-bezier(.32,.72,0,1)';
+let shownPane = '';        // 当前可见的视图
+let paneScroll = {};       // 每个视图离开时的滚动深度，回来时停在上次那一屏
+let slideDir = 'pd';       // 这一次交接往上还是往下滑（侧边栏按顺序判断）
+
+function paneEl(name) {
+  let p = PANES[name];
+  if (!p) {
+    p = document.createElement('div');
+    p.className = 'vpane';
+    p.dataset.pane = name;
+    $('#view').append(p);
+    PANES[name] = p;
+  }
+  const changed = shownPane !== name;
+  if (changed && PANES[shownPane]) paneScroll[shownPane] = window.scrollY;
+  for (const k in PANES) PANES[k].hidden = (k !== name);
+  if (changed) {
+    shownPane = name;
+    slideView(slideDir, name);
+    // 整页滚动，切换时要把新视图的滚动位置接手过来：回到书架就停在上次那一屏，
+    // 不是从头再滚一遍；新开的视图则回到顶部，不会停在上一页的深度里。
+    const y = paneScroll[name] || 0;
+    if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
+  }
+  return p;
+}
+
+/** 每个视图一个常驻 pane + 一个数据区。结构只铺一次（fresh 为真时调用方才接线），
+ *  之后进来只换数据，骨架、已解码的封面、滚动位置全都留着。 */
+function viewPane(name, header) {
+  const p = paneEl(name);
+  let body = p.querySelector(':scope > .vbody');
+  const fresh = !body;
+  if (fresh) {
+    p.innerHTML = header || '';
+    body = document.createElement('div');
+    body.className = 'vbody';
+    p.append(body);
+  }
+  return {p, body, fresh};
+}
+
+/** 表头右侧那颗计数。各视图常驻后同一份表头会同时存在好几份，
+ *  所以不再用全局 id 去抢，按 pane 取自己那一份。 */
+function noteEl(name) {
+  const p = PANES[name];
+  return p ? p.querySelector('[data-hnote]') : null;
+}
+
+function setNote(name, text) {
+  const n = noteEl(name);
+  if (n) n.textContent = text || '';
+}
+
+/** 用户要「减少动态效果」时，WAAPI 也得自己关掉（CSS 那条 *{animation:none}
+ *  管不到 Web Animations API）。 */
+const reduceMq = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)');
+function prefersReduced() { return !!(reduceMq && reduceMq.matches); }
+
+/** 交接动画走 Web Animations API：不必像原来那样「摘 class → 读 offsetWidth 逼一次
+ *  重排 → 再加 class」，少一次同步布局就少一次掉帧。 */
+function slideView(dir, name) {
+  const p = PANES[name || v];
+  if (!p || !p.animate || prefersReduced()) return;
+  const dy = dir === 'pd' ? 18 : -18;
+  p.animate(
+    [{opacity: 0, transform: `translate3d(0,${dy}px,0) scale(.992)`},
+     {opacity: 1, transform: 'none'}],
+    {duration: 420, easing: SPRING});
+}
+
+/** 覆盖视图（详情、卡片回顾、某本的划线）不走侧边栏，交接由 paneEl 统一播。 */
+
+/** 侧边栏那几颗按钮 —— 胶囊是自己造出来的节点，混在 children 里，取的时候得挑掉。 */
+function navBtns() {
+  return [...$('#nav').querySelectorAll('button[data-v]')];
+}
+
+/** 让这一次切换按「返回」的方向播（从上面接回来），进去和回来的方向要对得上。 */
+function slideBack(fn) {
+  slideDir = 'pu';
+  try { fn(); } finally { slideDir = 'pd'; }
+}
+
+function setView(nv) {
+  const order = navBtns().map(x => x.dataset.v);
+  // 侧边栏是从上到下排的：往下点就从下面接，往上点就从上面接
+  slideDir = order.indexOf(nv) >= order.indexOf(v) ? 'pd' : 'pu';
+  v = nv;
+  navBtns().forEach(b => b.classList.toggle('on', b.dataset.v === nv));
+  moveNavPill();
+  localStamp = '';
+  renderView();          // 视图真的换了才由 paneEl 播交接；同一个视图只是更数据
+  slideDir = 'pd';
+}
+
+function viewHeader(title, extra) {
+  return `<div class="chead"><span class="t">${esc(title)}</span>
+    <span class="n" data-hnote></span><span class="grow"></span>${extra || ''}</div>`;
+}
+
+/** 把动态标题（书名）换到表头上，不重建整块结构。 */
+function setHeadTitle(name, title) {
+  const p = PANES[name];
+  const t = p && p.querySelector('.chead .t');
+  if (t) t.textContent = title || '';
+}
+
+/** 侧边栏选中态是一颗会滑动的胶囊：把它移到当前项那一行，位移走 transform。 */
+function moveNavPill() {
+  const nav = $('#nav');
+  if (!nav) return;
+  let pill = nav.querySelector('.navpill');
+  const first = !pill;
+  if (first) {
+    pill = document.createElement('span');
+    pill.className = 'navpill';
+    pill.setAttribute('aria-hidden', 'true');
+    nav.prepend(pill);
+  }
+  const on = nav.querySelector('button.on') || nav.querySelector('button[data-v]');
+  if (!on) return;
+  pill.style.height = on.offsetHeight + 'px';
+  pill.style.transform = `translate3d(0,${on.offsetTop}px,0)`;
+  // 淡入只做一次；之后切换只位移，transition 会让它自己滑过去
+  if (first) requestAnimationFrame(() => pill.classList.add('on'));
+}
+
+function notReady() {
+  return `<div class="emptyline"><b>还没连上微信读书</b>
+    先连账号才能看自己的书架与笔记；统计、推荐与站内搜索还需要在左上角设置里填官方接口 Key。</div>`;
+}
+
+async function loadShelf(force) {
+  if (!keySet) return false;
+  if (!force && shelfBooks.length && Date.now() - shelfAt < 300000) return true;
+  const d = await wcall('/shelf/sync');
+  shelfBooks = d.books || [];
+  shelfAlbums = d.albums || [];
+  shelfAt = Date.now();
+  return true;
+}
+
+/* ── 加入书架：全程序唯一会改动微信读书的动作 ───────────────
+   官方 Agent Gateway 只读，写这一步由后端 shelf_add.py 借登录 profile 打网页端接口。 */
+
+const ADDED_KEY = 'guizang_added';
+let addedShelf = new Set();
+try { addedShelf = new Set(JSON.parse(localStorage.getItem(ADDED_KEY) || '[]')); } catch (e) {}
+function saveAdded() {
+  try { localStorage.setItem(ADDED_KEY, JSON.stringify([...addedShelf].slice(-300))); } catch (e) {}
+}
+
+/** 卡片 id（可能是阅读器 id）→ 书城短 id 与书名。批量勾选只记卡片 id，
+ *  而加书架必须要书城短 id，所以每张卡建/刷时在这里登一次记。 */
+const cardIds = new Map();
+
+/** 这本是不是已经在用户的微信书架上。
+ *  拿到过真书架数据就以它为准（缓存里刚加的、App 里已删的都不会骗人）；
+ *  没填接口 Key 时 shelfBooks 永远是空，退回本机记录，至少不会「加了又说没加」。 */
+function onOwnShelf(storeId) {
+  const k = String(storeId || '');
+  if (!/^\d{5,20}$/.test(k)) return false;
+  if (shelfBooks.length) {
+    const live = shelfBooks.some(b => String(b.bookId) === k);
+    if (!live) addedShelf.delete(k);
+    return live;
+  }
+  return addedShelf.has(k);
+}
+
+/** 加书架：按钮原地变状态，不重建结构（重建就会闪）。 */
+async function addToShelf(ids, title, btn) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(x => /^\d{5,20}$/.test(String(x)));
+  if (!list.length) { whisper('这本没带可添加的书籍编号，加不了书架'); return; }
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '加入中…'; }
+  else whisper(`正在把 ${list.length} 本加进书架…`);
+  let r;
+  try { r = await post('shelf.add', {ids: list}); }
+  catch (e) { r = {ok: false, msg: '连不上本地服务'}; }
+  if (!r.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+    whisper(r.msg || '没能加进书架');
+    return;
+  }
+  list.forEach(x => addedShelf.add(String(x)));
+  saveAdded();
+  if (btn) {
+    btn.textContent = list.length > 1 ? `已加入 ${list.length} 本` : '已加入书架';
+    btn.title = '微信读书书架里已经有这本了';
+  }
+  // 批量那趟没有书名，别写成「《3 本》已加入书架」
+  const who = title && list.length === 1 ? `《${title}》` : `这 ${list.length} 本`;
+  whisper(`${who}已加入书架，微信读书里也能看到了`);
+  shelfAt = 0;                       // 缓存作废：下次进书架视图重新拉
+  if (v === 'shelf') refreshShelf(true);
+}
+
+/** 详情页那颗书架按钮：在架就明说，不在架才给动作。 */
+function shelfBtn(storeId, title) {
+  const b = document.createElement('button');
+  b.className = 'deed';
+  b.style.height = '32px';
+  if (onOwnShelf(storeId)) {
+    b.textContent = '已加入书架';
+    b.disabled = true;
+    b.title = '微信读书书架里已经有这本了';
+  } else {
+    b.textContent = '加入书架';
+    b.title = '加进你自己的微信读书书架（会真的动微信那边）';
+    b.onclick = () => addToShelf(storeId, title, b);
+  }
+  return b;
+}
+
+/** 合并微信书架 + 本地已取回，按最近阅读排序，再按关键字筛选 */
+function shelfAll() {
+  const byId = new Map();
+  const shelfReaders = new Set();
+  for (const b of (shelfBooks || [])) {
+    byId.set(b.bookId, b);
+    const r = readerIdOf(b);
+    if (r) shelfReaders.add(r);
+  }
+  for (const a of (shelfAlbums || [])) {
+    const id = a.albumId || a.bookId;
+    if (id) byId.set(id, Object.assign({}, a, {bookId: id}));
+  }
+  for (const b of Object.values(local)) {
+    // 已经以书架卡出现过的就别再单列一张 —— 阅读器 id 与 bookId 不同名，
+    // 不这样判会同一本书出现两张卡
+    if (shelfReaders.has(b.id)) continue;
+    if (!byId.has(b.id)) byId.set(b.id, b);
+  }
+  let arr = [...byId.values()];
+  // 以「最近阅读」为主；没读过记录的排最后
+  arr.sort((a, b) => (b.readUpdateTime || 0) - (a.readUpdateTime || 0));
+  const q = (window.__sfilter || '').trim().toLowerCase();
+  if (q) {
+    arr = arr.filter(x => ((x.title || '') + (x.author || '') + (x.category || ''))
+      .toLowerCase().includes(q));
+  }
+  const st = window.__sstate || '';
+  if (st) arr = arr.filter(x => stateOf(x) === st);
+  return arr;
+}
+
+let shelfShown = 0;
+const SHELF_BATCH = 60;
+
+function renderView() {
+  if (v === 'shelf') { renderShelfView(); return; }
+  if (v === 'notes') { renderNotebooks(); return; }
+  if (v === 'random') { renderRandomView(); return; }
+  if (v === 'stats') { renderStatsView(); return; }
+  if (v === 'pick') { renderPickView(); return; }
+  renderSearchView();
+}
+
+/** 书架骨架：和真卡片同形状（2:3 + 一行标题），数据换上去时网格不会被顶一下。 */
+function shelfSkeleton(n) {
+  const box = document.createElement('div');
+  box.className = 'skgrid';
+  for (let i = 0; i < (n || 12); i++) {
+    const s = document.createElement('div');
+    s.className = 'skel';
+    box.append(s);
+  }
+  return box;
+}
+
+let shellKeyAt = null;   // 书架那一屏的结构是在「有没有接口 Key」的哪种前提下铺的
+
+function renderShelfView() {
+  const p = paneEl('shelf');
+  // 结构和「Key 到没到」是绑定的：启动那一下 Key 常常还没读出来，铺的是空壳，
+  // Key 一到就要重铺一次并补拉书架；其余时候进来只更数据，界面不再被拆掉重建。
+  if (p.dataset.built === '1' && p.dataset.keyset === String(!!keySet)) {
+    refreshShelf();
+    return;
+  }
+  p.dataset.built = '1';
+  p.dataset.keyset = String(!!keySet);
+  shellKeyAt = keySet;
+  p.innerHTML = viewHeader('我的书架',
+    `<button class="deed" id="goSearch" style="height:32px">去搜索找书</button>`)
+    + `<div class="stools">
+         <input class="f" id="sfilter" placeholder="按书名 / 作者 / 分类筛选书架">
+         <select class="sel" id="sstate">
+           <option value="">全部状态</option>
+           <option value="待读">待读</option>
+           <option value="在读">在读</option>
+           <option value="已读">已读</option>
+         </select>
+         <button class="deed" id="sBatch" style="height:32px">批量</button>
+         <span class="cnt" id="scnt"></span>
+       </div>`;
+  const wrap = document.createElement('div');
+  wrap.id = 'shelfWrap';
+  p.append(wrap);
+  const gs = p.querySelector('#goSearch');
+  if (gs) gs.onclick = () => setView('search');
+  wireShelfTools();
+  const f = p.querySelector('#sfilter');
+  if (f) {
+    f.value = window.__sfilter || '';
+    let timer = null;
+    f.addEventListener('input', () => {
+      window.__sfilter = f.value;
+      shelfShown = 0;
+      clearTimeout(timer);
+      timer = setTimeout(renderShelfGrid, 180);
+    });
+  }
+  wrap.append(keySet ? shelfSkeleton(12) : document.createElement('div'));
+  if (keySet) refreshShelf();
+}
+
+/** 拉一次书架并刷新网格。骨架在结构里等着，数据到了才 replaceChildren。
+ *  force=false 时走 loadShelf 的 5 分钟缓存，重复点侧边栏不会反复打接口。 */
+function refreshShelf(force) {
+  if (!keySet) { renderShelfGrid(); return; }
+  loadShelf(!!force).catch(() => {}).then(() => {
+    if (shelfShown === 0) shelfShown = SHELF_BATCH;
+    renderShelfGrid();
+  });
+}
+
+/** 羊皮卷：书架卡滚进视口才从上往下摊开，同一屏露出的几张错开几十毫秒。
+ *  「摊开过」记在数据层 Set 里而不是节点上 —— 视图常驻后卡片节点会被复用、
+ *  换位，只要这本书见过就不能再藏起来，否则一筛选就整面空白。
+ *  三条腿一起走，缺一条也不会留下看不见的空白卡：
+ *    1）画完立刻同步量一遍，已经在眼前的直接展开（不等观察器，后台标签页里
+ *       IntersectionObserver 根本不会回调，用户切回来会看见一屏空白）；
+ *    2）观察器负责滚进来的；
+ *    3）滚动/尺寸变化/标签页切回来/切回书架时各兜一遍。 */
+let revealIO = null;
+let revealGrid = null;
+const revealed = new Set();
+
+function isRevealed(card) { return revealed.has(card.dataset.id); }
+
+function revealOne(card, k) {
+  if (revealed.has(card.dataset.id)) { card.classList.remove('pre'); return; }
+  revealed.add(card.dataset.id);
+  card.style.animationDelay = (k % 6) * 50 + 'ms';
+  card.classList.remove('pre');
+  card.classList.add('unfurl');
+}
+
+// 任何一张卡放完它那一下动画，就永久标记「已展开」：之后这张卡再怎么挪位置、
+// 被重新插入 DOM 都不会重播（CSS 动画在节点重新插入时是一定会重跑的）。
+$('#view').addEventListener('animationend', e => {
+  const c = e.target;
+  if (!c.classList || !c.classList.contains('wcard')) return;
+  c.classList.add('rev');
+  if (e.animationName === 'unfurl') revealed.add(c.dataset.id);
+});
+
+/** pane 藏着（hidden → 没有布局盒）时不要白量，等切回来看。 */
+function paneVisible(name) {
+  const p = PANES[name];
+  return !!p && p.offsetParent !== null;
+}
+
+/** 把当前正好落在视口里、还藏着没展开的卡片摊开。
+ *  这是观察器的替补：滚动、改窗口大小、标签页切回来时各兜一遍，
+ *  保证「看不见的空白卡」不会出现（观察器在后台标签页里根本不回调）。 */
+function revealInView() {
+  if (!revealGrid || !revealGrid.isConnected || !paneVisible('shelf')) return 0;
+  const h = window.innerHeight || document.documentElement.clientHeight;
+  let k = 0;
+  for (const c of revealGrid.querySelectorAll('.wcard.pre')) {
+    const r = c.getBoundingClientRect();
+    if (r.top >= h) continue;   // 还在下面，等滚到眼前再摊
+    revealOne(c, k++);          // 已经滚过去的也一并放开（快速拖动/跳转时不能留空白卡）
+  }
+  return k;
+}
+
+function revealOnScroll(grid) {
+  revealGrid = grid;
+  const hidden = !paneVisible('shelf');
+  // 先把眼前这一屏摊开（同步、不依赖任何异步回调）
+  if (!hidden) {
+    const inView = [...grid.querySelectorAll('.wcard')].filter(c => {
+      if (isRevealed(c)) return false;
+      const r = c.getBoundingClientRect();
+      return r.top < (window.innerHeight || 800) * .92;
+    });
+    inView.forEach((c, i) => revealOne(c, i));
+  }
+  // 剩下的先藏起来，等滚进来
+  grid.querySelectorAll('.wcard').forEach(c => {
+    if (!isRevealed(c)) c.classList.add('pre');
+  });
+  if ('IntersectionObserver' in window) {
+    if (revealIO) revealIO.disconnect();
+    revealIO = new IntersectionObserver(entries => {
+      let k = 0;
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        revealIO.unobserve(en.target);
+        revealOne(en.target, k++);
+      }
+    }, {rootMargin: '0px 0px -4% 0px', threshold: .06});
+    grid.querySelectorAll('.wcard.pre').forEach(c => revealIO.observe(c));
+  }
+}
+
+// 观察器失灵/后台标签页时，靠这三个事件把该展开的补上。
+// 这里不用 requestAnimationFrame 节流：标签页在后台时 rAF 一次都不会回调，
+// 用户切回来就会看见一整墙空白。改成「按时间节流 + 落定后再补一次」。
+let revealLast = 0, revealSettle = 0;
+window.addEventListener('scroll', () => {
+  const now = Date.now();
+  if (now - revealLast > 70) { revealLast = now; revealInView(); }
+  if (revealSettle) return;
+  revealSettle = setTimeout(() => {
+    revealSettle = 0; revealLast = Date.now(); revealInView();
+  }, 150);
+}, {passive: true});
+window.addEventListener('resize', revealInView);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) revealInView();
+});
+
+/** 键控复用：同一本书继续用老节点（封面已解码、摊开动画已放完），
+ *  只补新增的、只删消失的 —— 这是「点一下不闪」的关键一步。 */
+function fillGrid(grid, items) {
+  const have = new Map();
+  for (const c of [...grid.children]) have.set(c.dataset.id, c);
+  const order = [];
+  for (const b of items) {
+    const t = cardBits(b);
+    let c = have.get(t.id);
+    if (c) { have.delete(t.id); c = syncShelfCard(c, b, t); }
+    else c = shelfCard(b, t);
+    order.push(c);
+  }
+  have.forEach(c => c.remove());
+  const cur = [...grid.children];
+  if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
+  return grid;
+}
+
+function renderShelfGrid() {
+  const pane = PANES.shelf;
+  if (!pane) return;
+  const wrap = pane.querySelector('#shelfWrap');
+  if (!wrap) return;
+  if (shelfShown === 0) shelfShown = SHELF_BATCH;
+  const all = shelfAll();
+  const shown = all.slice(0, shelfShown);
+  setNote('shelf', all.length
+    ? (shown.length < all.length ? `${shown.length} / ${all.length} 本` : `共 ${all.length} 本`)
+    : '');
+  const scnt = pane.querySelector('#scnt');
+  if (scnt) scnt.textContent = (window.__sfilter || '').trim() ? `筛出 ${all.length} 本` : '';
+  $('#bgShelf').textContent = all.length ? all.length : '';
+
+  const oldMore = wrap.querySelector('.more');
+  if (oldMore) oldMore.remove();
+
+  if (!all.length) {
+    revealGrid = null;
+    wrap.innerHTML = (window.__sfilter || '').trim()
+      ? '<div class="emptyline">没有匹配的书</div>'
+      : (keySet ? '<div class="emptyline">书架是空的</div>' : notReady());
+    return;
+  }
+
+  // 键控复用：同一本书继续用老节点，只补新增的、只删消失的
+  let grid = wrap.querySelector('.sgrid');
+  let isNew = false;
+  if (!grid) {
+    grid = document.createElement('div');
+    grid.className = 'sgrid';
+    isNew = true;
+  }
+  fillGrid(grid, shown);
+  if (isNew) wrap.replaceChildren(grid);
+  revealOnScroll(grid);
+
+  if (shown.length < all.length) {
+    const more = document.createElement('div');
+    more.className = 'more';
+    const btn = document.createElement('button');
+    btn.textContent = `加载更多（还有 ${all.length - shown.length} 本）`;
+    btn.onclick = () => {
+      shelfShown += SHELF_BATCH * 2;
+      renderShelfGrid();
+    };
+    more.append(btn);
+    wrap.append(more);
+    // 滚到底自动加载，省得一直点
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(es => {
+        if (es.some(x => x.isIntersecting)) {
+          io.disconnect();
+          shelfShown += SHELF_BATCH * 2;
+          renderShelfGrid();
+        }
+      }, {rootMargin: '320px'});
+      io.observe(more);
+    }
+  }
+  paintProgress();
+}
+
+function wireShelfTools() {
+  const b = $('#sBatch');
+  if (b) {
+    b.textContent = document.body.classList.contains('batch') ? '退出批量' : '批量';
+    b.onclick = () => setBatch(!document.body.classList.contains('batch'));
+  }
+  const st = $('#sstate');
+  if (st) {
+    st.value = window.__sstate || '';
+    st.onchange = () => { window.__sstate = st.value; shelfShown = 0; renderShelfGrid(); };
+  }
+  paintBatch();
+}
+
+/* ── 划线笔记（多选 → flomo） ─────────── */
+
+let nbBooks = [], nbItems = [], nbSel = new Set(), nbOpen = null, nbTitle = '';
+
+async function renderNotebooks() {
+  const {p, body} = viewPane('notes', viewHeader('划线笔记'));
+  if (!keySet) { body.innerHTML = notReady(); return; }
+  // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白
+  if (!nbBooks.length) setHtml(body, '<div class="emptyline">读取中…</div>');
+  try {
+    const d = await wcall('/user/notebooks', {count: 100});
+    nbBooks = d.books || [];
+    setNote('notes', nbBooks.length
+      ? `${d.totalBookCount || nbBooks.length} 本 · 共 ${d.totalNoteCount || 0} 条` : '');
+    if (!nbBooks.length) { setHtml(body, '<div class="emptyline">还没有笔记</div>'); return; }
+    // 数字一个没变就别动 DOM —— 反复进这一屏时列表稳稳地留在那儿
+    const sig = nbBooks.map(b => `${(b.book || {}).title || b.bookId}|${b.noteCount || 0}`
+      + `/${b.reviewCount || 0}/${b.bookmarkCount || 0}`).join(',');
+    if (p.dataset.sig === sig && body.firstElementChild
+        && body.firstElementChild.className === 'wrrow') return;
+    p.dataset.sig = sig;
+    body.replaceChildren(...nbBooks.map(b => {
+      const info = b.book || {};
+      const row = document.createElement('div');
+      row.className = 'wrrow';
+      row.style.cursor = 'pointer';
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = info.title || b.bookId;
+      const ct = document.createElement('span');
+      ct.className = 'ct';
+      ct.textContent = `划线 ${b.noteCount || 0} · 想法 ${b.reviewCount || 0} · 书签 ${b.bookmarkCount || 0}`;
+      row.append(nm, ct);
+      row.onclick = () => openNotebook(b);
+      return row;
+    }));
+  } catch (e) {
+    body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
+  }
+}
+
+async function openNotebook(b) {
+  const info = b.book || {};
+  const title = info.title || b.bookId;
+  // 还是同一本、列表也已经读出来了：直接把它显示出来就行 —— 不重画、不再打接口，
+  // 连之前勾了哪些条目都还在原地。
+  const old = PANES.notebook;
+  if (old && old.dataset.book === String(b.bookId || '') && nbItems.length) {
+    paneEl('notebook');
+    return;
+  }
+  nbOpen = b;
+  nbTitle = title;
+  nbSel = new Set();
+  nbItems = [];
+  const {p, body, fresh} = viewPane('notebook', viewHeader(title,
+    '<button class="deed" id="nbBack" style="height:30px">返回列表</button>')
+    + `<div class="ntools">
+         <button class="deed" id="nbAll">全选</button>
+         <button class="deed" id="nbNone">清空</button>
+         <span class="cnt" id="nbCnt">读取中…</span>
+         <span class="grow"></span>
+         <input class="tag" id="nbTag" value="#读书笔记" placeholder="#标签">
+         <button class="deed" id="nbFlomo" style="height:30px">导入 flomo</button>
+       </div>`);
+  const list = body;
+  if (fresh) {
+    list.id = 'nbList';
+    p.querySelector('#nbBack').onclick = () => slideBack(renderNotebooks);
+    p.querySelector('#nbAll').onclick = () => { nbItems.forEach((_, i) => nbSel.add(i)); paintNotes(); };
+    p.querySelector('#nbNone').onclick = () => { nbSel.clear(); paintNotes(); };
+    p.querySelector('#nbFlomo').onclick = () => importToFlomo(nbTitle);
+  } else {
+    setHeadTitle('notebook', title);
+    list.replaceChildren();
+    const c = p.querySelector('#nbCnt');
+    if (c) c.textContent = '读取中…';
+  }
+  p.dataset.book = b.bookId || '';
+
+  try {
+    const [mk, rv] = await Promise.all([
+      wcall('/book/bookmarklist', {bookId: b.bookId}).catch(() => ({})),
+      wcall('/review/list/mine', {bookid: b.bookId}).catch(() => ({})),
+    ]);
+    const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
+    for (const x of (mk.updated || [])) {
+      if (x.markText) nbItems.push({text: x.markText, src: '划线', when: when(x.createTime)});
+    }
+    for (const x of (rv.reviews || [])) {
+      const r = x.review || x;
+      const t = r.content || r.abstract || '';
+      if (t) nbItems.push({text: t, src: '想法', when: when(r.createTime)});
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
+    return;
+  }
+  if (!nbItems.length) {
+    list.innerHTML = '<div class="emptyline">这本没有可展示的划线或想法</div>';
+    return;
+  }
+  paintNotes();
+}
+
+function paintNotes() {
+  const list = $('#nbList');
+  if (!list) return;
+  const frag = document.createDocumentFragment();
+  nbItems.forEach((it, i) => {
+    const row = document.createElement('label');
+    row.className = 'nitem' + (nbSel.has(i) ? ' on' : '');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = nbSel.has(i);
+    cb.onchange = () => {
+      if (cb.checked) nbSel.add(i); else nbSel.delete(i);
+      row.classList.toggle('on', cb.checked);
+      paintNbCnt();
+    };
+    const bd = document.createElement('div');
+    bd.className = 'bd';
+    const tx = document.createElement('div');
+    tx.className = 'tx';
+    tx.textContent = it.text;
+    const mt = document.createElement('div');
+    mt.className = 'mt';
+    const src = document.createElement('span');
+    src.className = 'src';
+    src.textContent = it.src;
+    mt.append(src, document.createTextNode(it.when ? ' · ' + it.when : ''));
+    bd.append(tx, mt);
+    row.append(cb, bd);
+    frag.append(row);
+  });
+  list.replaceChildren(frag);
+  paintNbCnt();
+}
+
+function paintNbCnt() {
+  const el = $('#nbCnt');
+  if (el) el.textContent = `共 ${nbItems.length} 条 · 已选 ${nbSel.size} 条`;
+}
+
+async function importToFlomo(title) {
+  if (!flomoSet) {
+    whisper('先在左上角设置里填 flomo 地址');
+    setPop(true);
+    return;
+  }
+  if (!nbSel.size) { whisper('先勾选要导入的条目'); return; }
+  const tag = ($('#nbTag').value || '').trim();
+  const items = [...nbSel].sort((a, b) => a - b).map(i => {
+    const it = nbItems[i];
+    return [it.text, '', `《${title}》`, tag].filter(Boolean).join('\n');
+  });
+  whisper(`正在导入 ${items.length} 条…`);
+  const r = await (await fetch('/api/flomo', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({items}),
+  })).json();
+  whisper(r.msg || (r.ok ? '已导入' : '导入失败'));
+}
+
+/** innerHTML 赋值会重建整棵子树并重播入场动画。内容没变就别写 —— 
+ *  「反复进同一个视图」因此完全静稳，这也是消除闪烁的一层保险。 */
+function setHtml(el, html) {
+  if (el && el.innerHTML !== html) el.innerHTML = html;
+}
+
+/* ── 阅读统计 ─────────────────────────── */
+
+let statsCache = {};          // mode → 已渲染的 HTML，重复进来不再闪白
+
+async function renderStatsView() {
+  const {p, body, fresh} = viewPane('stats', viewHeader('阅读统计',
+    '<span class="tabs" id="modeTabs">'
+    + ['weekly:本周', 'monthly:本月', 'annually:本年', 'overall:总计']
+        .map(x => { const [k, t] = x.split(':');
+          return `<button data-m="${k}">${t}</button>`; })
+        .join('') + '</span>'));
+  const tabs = [...p.querySelectorAll('#modeTabs button')];
+  const paintTabs = () => tabs.forEach(b =>
+    b.classList.toggle('on', b.dataset.m === (window.__mode || 'monthly')));
+  if (fresh) tabs.forEach(b => {
+    b.onclick = () => { window.__mode = b.dataset.m; paintTabs(); renderStatsView(); };
+  });
+  paintTabs();
+  const mode = window.__mode || 'monthly';
+  if (!keySet) { setHtml(body, notReady()); return; }
+  // 上次这一档的数据直接摆上来，不给「读取中…」占位闪一下
+  if (statsCache[mode]) setHtml(body, statsCache[mode]);
+  else body.innerHTML = '<div class="emptyline">读取中…</div>';
+  let d;
+  try { d = await wcall('/readdata/detail', {mode, baseTime: 0}); }
+  catch (e) { setHtml(body, `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`); return; }
+
+  const cmp = (typeof d.compare === 'number')
+    ? (d.compare >= 0 ? `+${Math.round(d.compare * 100)}%` : `${Math.round(d.compare * 100)}%`) : '—';
+  const box = (k, v) => `<div class="statbox"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const bg = [
+    box('总时长', hrs(d.totalReadTime)),
+    box('阅读天数', `${d.readDays || 0}<small>天</small>`),
+    box('日均', hrs(d.dayAverageReadTime)),
+    box('与上期', cmp),
+  ].join('');
+  const stat = (d.readStat || []).map(s => box(esc(s.stat), esc(s.counts))).join('');
+  const top = (d.readLongest || []).slice(0, 6).map(x => {
+    const info = x.book || x.albumInfo || {};
+    return `<div class="wrrow"><span class="nm">${esc(info.title || '')}</span>
+      <span class="ct">${Math.round((x.readTime || 0) / 60)} 分钟</span></div>`;
+  }).join('');
+  const html =
+    `<div class="statgrid">${bg}</div>`
+    + (stat ? `<div class="statgrid">${stat}</div>` : '')
+    + (d.preferTimeWord ? `<div class="emptyline" style="padding:6px 16px 12px">${esc(d.preferTimeWord)}</div>` : '')
+    + (top ? `<div class="wrrow" style="border-top:1px solid var(--line)">
+        <span class="nm" style="color:var(--ink-3);font-size:11.5px">读得最多的</span></div>${top}` : '');
+  statsCache[mode] = html;
+  if ((window.__mode || 'monthly') === mode) setHtml(body, html);
+}
+
+/* ── 为我推荐（一次 6 本，随容器缩放） ── */
+
+let pickList = [];          // 上一次的推荐：再进来先摆旧的，不闪「读取中…」
+
+function paintPick(body) {
+  setNote('pick', pickList.length ? `一次 ${pickList.length} 本` : '');
+  if (!pickList.length) { setHtml(body, '<div class="emptyline">暂时没有推荐</div>'); return; }
+  let grid = body.querySelector('.sgrid');
+  if (!grid) {
+    grid = document.createElement('div');
+    grid.className = 'sgrid';
+    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(168px, 100%), 1fr))';
+    body.replaceChildren(grid);
+  }
+  fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
+}
+
+async function renderPickView() {
+  const {body} = viewPane('pick', viewHeader('为我推荐'));
+  if (!keySet) { setHtml(body, notReady()); return; }
+  if (pickList.length) paintPick(body);
+  else body.innerHTML = '<div class="emptyline">读取中…</div>';
+  const key = x => (x.bookId || x.id || x.title || '');
+  const dedupe = (arr, seen) => arr.filter(x => {
+    const k = key(x);
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  try {
+    const seen = new Set();
+    let list = dedupe(((await wcall('/book/recommend', {count: 6})).books) || [], seen);
+    if (list.length < 6) {
+      const seed = (shelfBooks[0] || list[0] || {}).bookId;
+      if (seed) {
+        try {
+          const sim = await wcall('/book/similar', {bookId: seed, count: 12, maxIdx: 0});
+          const own = sim.booksimilar || sim;
+          list = list.concat(dedupe((own.books || []).map(x => x.book || x), seen));
+        } catch (e) { /* 补不齐不强求 */ }
+      }
+    }
+    pickList = list.slice(0, 6);
+    paintPick(body);
+  } catch (e) {
+    body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>
+      <div style="text-align:center;padding-bottom:18px">
+        <button class="deed" id="pickRetry" style="height:32px">再试一次</button></div>`;
+    const again = body.querySelector('#pickRetry');
+    if (again) again.onclick = renderPickView;
+  }
+}
+
+/* ── 搜索 ─────────────────────────────── */
+
+/* 「我的书架」这一域已经砍掉了：书架本来就一屏能看完，顶部还有筛选框，
+   搜索页只留「书城 + 划线内容」两类真正需要搜的东西。 */
+const SEARCH_HINTS = {
+  store: '在微信读书书城里搜（需要接口 Key）。搜到的书可在详情页「加入书架」，勾选多本后批量条里一次加完。',
+  notes: '在你的划线与想法正文里搜（需要先建一次笔记索引）。',
+};
+
+function renderSearchView() {
+  const scope = () => (window.__scope === 'notes' ? 'notes' : 'store');
+  const {p, body, fresh} = viewPane('search', viewHeader('搜索',
+    `<span class="tabs" id="scopeTabs">
+       <button data-s="store">书城</button>
+       <button data-s="notes">划线内容</button>
+     </span>
+     <span class="wrsearch" style="padding:0;border:0;margin-left:10px">
+       <input id="wrq" placeholder="想搜什么？" style="width:200px" autocomplete="off">
+       <button class="deed" id="wrgo" style="height:34px">搜索</button>
+       <button class="deed" id="wrweb" style="height:34px">在网页中搜</button>
+     </span>`));
+  // 控件都只认这张 pane 里的那一份，别被别的常驻视图抢走
+  const find = sel => p.querySelector(sel);
+  const tabs = [...p.querySelectorAll('#scopeTabs button')];
+  const q = () => find('#wrq').value.trim();
+  const web = kw => open('https://weread.qq.com/web/search/books?keyword=' + encodeURIComponent(kw),
+                         '_blank', 'noopener');
+  const paintTabs = () => tabs.forEach(b => b.classList.toggle('on', b.dataset.s === scope()));
+
+  const hint = () => {
+    setNote('search');
+    body.innerHTML = `<div class="emptyline" style="padding:24px 20px">${esc(SEARCH_HINTS[scope()])}</div>`;
+  };
+
+  const grid = items => {
+    let g = body.querySelector('.sgrid');
+    if (!g) {
+      g = document.createElement('div');
+      g.className = 'sgrid';
+      body.replaceChildren(g);
+    }
+    fillGrid(g, items);
+  };
+
+  async function runSearch() {
+    const kw = q();
+    const sc = scope();
+    if (sc === 'store' && !kw) { find('#wrq').focus(); return; }
+    if (sc === 'store' && !keySet) { web(kw); return; }
+    body.innerHTML = '<div class="emptyline">搜索中…</div>';
+
+    if (sc === 'notes') {
+      const st = await loadIdxState();
+      if (!st.count) {
+        body.replaceChildren(indexPrompt(
+          '划线搜索要在本地建一次索引（把你的划线与想法读进来，一次性，之后很快）。'));
+        return;
+      }
+      const d = await (await fetch('/api/notes_search?q=' + encodeURIComponent(kw) + '&limit=80')).json();
+      const items = d.data || [];
+      setNote('search', items.length ? `命中 ${d.total} 条` : '');
+      if (!items.length) { body.innerHTML = '<div class="emptyline">没搜到相关划线</div>'; return; }
+      const wall = document.createElement('div');
+      wall.className = 'wall';
+      wall.append(...items.map(x => {
+        const c = document.createElement('div');
+        c.className = 'qcard';
+        const t = document.createElement('div');
+        t.className = 't';
+        t.textContent = x.text;
+        const m = document.createElement('div');
+        m.className = 'm';
+        const k = document.createElement('span');
+        k.className = 'k';
+        k.textContent = x.kind;
+        m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
+        c.append(t, m);
+        c.onclick = () => {
+          window.__scope = 'notes';
+          renderDetailView(x.bookId, bookToReaderMap()[x.bookId] || '', x.title);
+        };
+        return c;
+      }));
+      body.replaceChildren(wall);
+      return;
+    }
+
+    // 书城
+    try {
+      const d = await wcall('/store/search', {keyword: kw, scope: 10});
+      const seen = new Set();
+      const books = [];
+      for (const g of (d.results || [])) {
+        for (const x of (g.books || [])) {
+          const bi = x.bookInfo || x.book || x;
+          const k = bi.bookId || bi.title;
+          if (!k || seen.has(k)) continue;
+          seen.add(k);
+          books.push(bi);
+          if (books.length >= 12) break;
+        }
+        if (books.length >= 12) break;
+      }
+      setNote('search', books.length ? `找到 ${books.length} 本` : '');
+      if (!books.length) { body.innerHTML = '<div class="emptyline">没搜到</div>'; return; }
+      grid(books);
+    } catch (e) {
+      body.innerHTML = `<div class="emptyline"><b>搜索失败</b>${esc(e.message)}</div>`;
+    }
+  }
+
+  if (fresh) {
+    tabs.forEach(b => {
+      b.onclick = () => { window.__scope = b.dataset.s; paintTabs(); hint(); };
+    });
+    find('#wrweb').onclick = () => { if (q()) web(q()); else whisper('先写个关键词'); };
+    find('#wrq').addEventListener('keydown', e => { if (e.key === 'Enter') find('#wrgo').click(); });
+    find('#wrgo').onclick = runSearch;
+    hint();
+  }
+  paintTabs();
+}
+
+/* ── 书籍详情页 ───────────────────────── */
+
+function backTo(nv) {
+  if (nv === 'detail' || nv === 'notebook') {   // 那块面板还在，直接把它显示出来就行
+    slideDir = 'pu';
+    paneEl(nv);
+    slideDir = 'pd';
+    return;
+  }
+  v = nv || 'shelf';
+  navBtns().forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  moveNavPill();
+  localStamp = '';
+  slideDir = 'pu';       // 「返回」就从上面接回来，和进去的方向对上
+  renderView();
+  slideDir = 'pd';
+}
+
+/** 详情骨架：形状照着真内容摆（封面 2:3 + 标题行 + 信息格子），
+ *  数据换上来时不会把整屏顶一下。 */
+function detailSkeleton() {
+  const cell = '<div class="it"><div class="k">&nbsp;</div><div class="v">'
+    + '<div class="skline" style="margin:4px 0 0; width:62%"></div></div></div>';
+  return `<div class="dtop"><div class="cv skel"></div><div class="tx">
+    <div class="skline" style="margin:0; width:44%; height:19px"></div>
+    <div class="skline" style="margin:10px 0 0; width:28%"></div>
+    <div class="skline" style="margin:18px 0 0; width:96%"></div>
+    <div class="skline" style="margin:8px 0 0; width:88%"></div>
+    <div class="skline" style="margin:8px 0 0; width:56%"></div>
+    <div class="kv">${cell.repeat(6)}</div>
+  </div></div>`;
+}
+
+async function renderDetailView(storeId, readerId, title) {
+  const {p, body, fresh} = viewPane('detail', viewHeader(title || '书籍详情',
+    '<button class="deed" id="dBack" style="height:30px">返回</button>'));
+  if (fresh) p.querySelector('#dBack').onclick = () => backTo('shelf');
+  setHeadTitle('detail', title || storeId || readerId);
+  setNote('detail');
+  // 每本书的内容都不同，这一屏该重建就重建 —— 但只重建自己，整面书架不再跟着抖
+  body.innerHTML = detailSkeleton();
+  const seq = (+p.dataset.seq || 0) + 1;
+  p.dataset.seq = seq;
+
+  let d = {};
+  try {
+    const r = await fetch('/api/detail?book=' + encodeURIComponent(storeId || '')
+      + '&reader=' + encodeURIComponent(readerId || ''));
+    d = (await r.json()).data || {};
+  } catch (e) {
+    if (+p.dataset.seq === seq) body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
+    return;
+  }
+  if (+p.dataset.seq !== seq) return;   // 期间又点开了别的书，这次结果作废
+  const info = d.info || {};
+  const pg = (d.progress || {}).book || {};
+  const nb = d.notes || {};
+  // 本地目录用阅读器 id，笔记索引用书架 bookId：两边都得认出来，否则详情页会显示「尚未抓取」
+  let id = readerId || (d.local && d.local.id) || '';
+  if (!id && d.reader) id = d.reader;
+  if (!id && storeId) id = bookToReaderMap()[storeId] || (local[storeId] ? storeId : '');
+  const mine = d.local || (id ? local[id] : null) || null;
+  const detailStore = storeId || d.bookId || '';
+  const notesKey = detailStore || id;
+  p.dataset.key = notesKey || '';   // 卡片回顾「返回」时按这个认书，别回到另一本的详情
+  const coverUrl = info.cover || (storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : '');
+  const pctv = typeof pg.progress === 'number' ? pg.progress : null;
+
+  const kv = (k, val) => `<div class="it"><div class="k">${k}</div><div class="v">${val}</div></div>`;
+  const when = ts => ts ? new Date(ts * 1000).toLocaleString('zh-CN',
+    {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '—';
+  const mins = sec => sec ? Math.round(sec / 60) + '<small>分</small>' : '—';
+
+  let t = '<div class="dtop">';
+  t += '<div class="cv">' + (coverUrl
+    ? `<img src="${esc(coverUrl)}" alt="" onerror="this.remove()">` : '') + '</div>';
+  t += '<div class="tx"><h2>' + esc(info.title || title || id) + '</h2>';
+  const byline = [info.author, info.publisher, info.publishTime ? String(info.publishTime).slice(0, 10) : '']
+    .filter(Boolean).join(' · ');
+  t += '<div class="au">' + esc(byline) + '</div>';
+  if (info.intro) t += '<div class="intro">' + esc(info.intro) + '</div>';
+  t += '<div class="kv">';
+  t += kv('分类', esc(info.category || '—'));
+  t += kv('阅读进度', pctv === null ? '—' : pctv + '<small>%</small>');
+  t += kv('最近阅读', when(pg.updateTime));
+  t += kv('已读时长', mins(pg.readingTime));
+  t += kv('划线 / 想法 / 书签',
+    `${nb.noteCount || 0} / ${nb.reviewCount || 0} / ${nb.bookmarkCount || 0}`);
+  t += kv('本地 Markdown', mine
+    ? `已抓取 ${mine.chapters} 章${mine.done ? ' · 完整' : ''}`
+    : '<span style="color:var(--ink-3)">尚未抓取</span>');
+  if (info.wordCount) t += kv('总字数', esc(info.wordCount));
+  t += '</div>';
+  if (pctv !== null) {
+    t += `<div class="pwrap"><div class="lb"><span>${pg.summary ? '当前读到：' + esc(String(pg.summary).slice(0, 30)) : '阅读进度'}</span><span>${pctv}%</span></div>
+      <div class="bg"><i style="width:${Math.max(1, Math.min(100, pctv))}%"></i></div></div>`;
+  }
+  t += '</div></div>';
+  body.innerHTML = t;
+
+  const acts = document.createElement('div');
+  acts.className = 'dacts';
+  const mk = (label, fn, cls) => {
+    const b = document.createElement('button');
+    b.className = 'deed' + (cls ? ' ' + cls : '');
+    b.style.height = '32px';
+    b.textContent = label;
+    b.onclick = fn;
+    return b;
+  };
+  const deep = info.deepLink || (id ? 'https://weread.qq.com/web/reader/' + id : '');
+  acts.append(
+    mk('源网站', () => deep && open(deep, '_blank', 'noopener')));
+  // 只有拿到书城短 id 才给「加入书架」——阅读器长 id 打不进那个接口
+  if (/^\d{5,20}$/.test(String(detailStore || ''))) {
+    acts.append(shelfBtn(detailStore, info.title || title));
+  }
+  acts.append(
+    mk(mine ? '补全图片' : '开始抓取', async () => {
+      if (mine) {
+        const r = await post('images', {book: id});
+        whisper(r.ok ? '正在补齐图片' : r.msg);
+      } else if (await beginFetch(id || storeId, title)) {
+        backTo('shelf');
+      }
+    }),
+    mk('卡片回顾', () => renderReview(notesKey, info.title || title, 'book')),
+    mk('导出 Anki 卡包', () => exportApkg(notesKey, id, info.title || title)),
+    mk('复制划线', async () => {
+      const items = await notesOf(notesKey);
+      if (!items.length) { whisper('这本没有索引到划线'); return; }
+      const text = items.map(x => x.text + '\n\n《' + x.title + '》').join('\n\n———\n\n');
+      try { await navigator.clipboard.writeText(text); whisper(`已复制 ${items.length} 条`); }
+      catch (e) { whisper('复制未成功'); }
+    }),
+    mk('重新读取', () => renderDetailView(detailStore, id, info.title || title))
+  );
+  if (mine) {
+    acts.append(
+      mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id))),
+      mk('正文', () => clip('/api/md?book=' + encodeURIComponent(id)
+        + '&name=' + encodeURIComponent(info.title || title || id))),
+      mk('目录', async () => { const r = await post('reveal', {book: id}); if (!r.ok) whisper(r.msg); })
+    );
+  }
+  body.append(acts);
+}
+
+/* ── 笔记索引 / 卡片 ──────────────────── */
+
+let idxState = {built_at: 0, count: 0, running: false};
+let idxTimer = null;
+
+async function loadIdxState() {
+  try { idxState = (await (await fetch('/api/notes_index')).json()).data || idxState; }
+  catch (e) { /* ignore */ }
+  paintIdxNote();
+  return idxState;
+}
+
+/** 索引跑起来后每 2.5s 看一次：所有写着「笔记索引：…」的地方都要跟着动。
+ *  原来只盯 $('#idxNote') 一个 id，而页面上同一个 id 出现过三次（设置面板 +
+ *  两个视图的空状态），$ 永远命中第一个（藏在设置里的）——视图里那颗
+ *  「开始建立索引」按钮点了没反应，进度也不动。现在按 data-idx-note 找全部。 */
+function watchIndex() {
+  if (idxTimer) clearInterval(idxTimer);
+  document.querySelectorAll('[data-idx-go]').forEach(b => { b.disabled = true; });
+  idxTimer = setInterval(async () => {
+    const st = await loadIdxState();
+    if (!st.running) {
+      clearInterval(idxTimer); idxTimer = null;
+      whisper(`索引好了 · ${st.count || 0} 条`);
+      document.querySelectorAll('[data-idx-go]').forEach(b => b.disabled = false);
+      if (v === 'notes' || v === 'random' || v === 'search') renderView();
+    }
+  }, 2500);
+}
+
+/** 「还没有索引」的空状态：按钮绑在自己那个节点上，不再靠全局 id */
+function indexPrompt(text) {
+  const wrap = document.createElement('div');
+  const tip = document.createElement('div');
+  tip.className = 'emptyline';
+  tip.innerHTML = `<b>还没有笔记索引</b>${text}`;
+  const row = document.createElement('div');
+  row.style.cssText = 'text-align:center;padding:2px 16px 18px';
+  const btn = document.createElement('button');
+  btn.className = 'deed';
+  btn.style.height = '32px';
+  btn.textContent = '开始建立索引';
+  btn.dataset.idxGo = '1';
+  btn.onclick = () => { btn.disabled = true; buildIndex(); };
+  const note = document.createElement('span');
+  note.dataset.idxNote = '1';
+  note.style.cssText = 'margin-left:10px;font-size:11.5px;color:var(--ink-3)';
+  row.append(btn, note);
+  wrap.append(tip, row);
+  paintIdxNote();
+  return wrap;
+}
+
+async function buildIndex() {
+  const r = await (await fetch('/api/notes_index', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rebuild: false}),
+  })).json();
+  whisper(r.msg || '开始建立索引');
+  watchIndex();
+}
+
+async function notesOf(bookId) {
+  try {
+    return (await (await fetch('/api/notes_of?book=' + encodeURIComponent(bookId))).json()).data || [];
+  } catch (e) { return []; }
+}
+
+async function exportApkg(storeId, readerId, title) {
+  // 不再先问「建过索引没」：后端拿不到本地划线时会直接只为这一本去拉，
+  // 所以导出卡包不会被全量索引挡住（用户报的「跳转去建索引」就是这么来的）。
+  whisper('正在打包…');
+  const ok = await clip('/api/apkg?book=' + encodeURIComponent(storeId || readerId)
+    + '&title=' + encodeURIComponent(title || ''), (title || 'cards') + '.apkg');
+  if (ok) whisper('卡包已开始下载');
+}
+
+/* ── 卡片回顾（端内） ─────────────────── */
+
+let rv = {items: [], i: 0, right: 0, show: false};
+
+async function renderReview(bookId, title, kind) {
+  const {p, body, fresh} = viewPane('review', viewHeader('卡片回顾',
+    '<button class="deed" id="rvBack" style="height:30px">返回</button>'));
+  if (fresh) {
+    const box = document.createElement('div');
+    box.className = 'review';
+    body.append(box);
+    p.querySelector('#rvBack').onclick = () => backTo(p.dataset.backTo || 'shelf');
+  }
+  // 返回到哪一处按这次点进来的地方算：随机漫步回随机漫步，
+  // 从详情页点进来的回详情页（那块面板还在，直接显示就行）
+  p.dataset.backTo = kind === 'random' ? 'random'
+    : (PANES.detail && PANES.detail.dataset.key === String(bookId || '') ? 'detail' : 'shelf');
+  const box = p.querySelector('.review');
+  box.innerHTML = '<div class="emptyline">读取中…</div>';
+  const items = bookId ? await notesOf(bookId) : [];
+  if (!items.length) {
+    box.innerHTML = '<div class="emptyline"><b>这本还没有可回顾的卡片</b>'
+      + '需要先建一次笔记索引（在「划线笔记」或「搜索」里可建）。</div>';
+    return;
+  }
+  rv = {items, i: 0, right: 0, show: false};
+  paintReview();
+}
+
+function paintReview() {
+  const box = PANES.review && PANES.review.querySelector('.review');
+  if (!box) return;
+  if (rv.i >= rv.items.length) {
+    box.innerHTML = `<div class="emptyline"><b>这一轮走完了</b>共 ${rv.items.length} 张，标记「会」${rv.right} 张。</div>
+      <div class="acts"><button class="deed" id="rvAgain">再来一轮</button></div>`;
+    box.querySelector('#rvAgain').onclick = () => { rv.i = 0; rv.right = 0; rv.show = false; paintReview(); };
+    return;
+  }
+  const it = rv.items[rv.i];
+  box.innerHTML =
+    `<div class="cnt">${rv.i + 1} / ${rv.items.length}</div>
+     <div class="card">
+       <div class="q">${esc(it.text)}</div>
+       ${rv.show ? `<div class="a">${esc(it.kind)} · 《${esc(it.title)}》${it.at ? ' · ' + new Date(it.at * 1000).toLocaleDateString('zh-CN') : ''}</div>` : ''}
+     </div>
+     <div class="acts">
+       ${rv.show ? '' : '<button class="deed" id="rvShow">看出处</button>'}
+       <button class="deed" id="rvNo">不熟</button>
+       <button class="deed sure" id="rvYes">记得</button>
+     </div>`;
+  const show = box.querySelector('#rvShow');
+  if (show) show.onclick = () => { rv.show = true; paintReview(); };
+  box.querySelector('#rvNo').onclick = () => { rv.i++; rv.show = false; paintReview(); };
+  box.querySelector('#rvYes').onclick = () => { rv.right++; rv.i++; rv.show = false; paintReview(); };
+}
+
+/* ── 随机漫步 ─────────────────────────── */
+
+async function renderRandomView() {
+  const {p, body, fresh} = viewPane('random', viewHeader('随机漫步',
+    '<button class="deed" id="rwMore" style="height:30px">换一批</button>'));
+
+  const draw = async () => {
+    const btn = p.querySelector('#rwMore');
+    if (btn) btn.disabled = true;
+    let items = [];
+    try { items = ((await (await fetch('/api/notes_random?n=9')).json()).data) || []; }
+    catch (e) { items = []; }
+    if (btn) btn.disabled = false;
+    if (!items.length) { setHtml(body, '<div class="emptyline">还没有卡片</div>'); return; }
+    paintRandomWall(body, items);
+  };
+  if (fresh) p.querySelector('#rwMore').onclick = draw;
+
+  const st = await loadIdxState();
+  if (!st.count) {
+    body.replaceChildren(indexPrompt(
+      '随机漫步要从你的划线与想法里抽，先建一次索引（一次性，之后很快）。'));
+    return;
+  }
+  setNote('random', `从 ${st.count} 条里随机抽`);
+  // 已经抽过一批就留着不动 —— 每次进这一屏都重抽，正是「点一下闪一下」的老毛病。
+  // 想换内容点「换一批」。
+  if (!body.firstElementChild || body.querySelector('[data-idx-go], .emptyline')) draw();
+}
+
+async function paintRandomWall(body, items) {
+  const wall = document.createElement('div');
+  wall.className = 'wall qwall';               // 随机漫步的卡更宽，两列正好
+  wall.append(...items.map(x => {
+    const c = document.createElement('div');
+    c.className = 'qcard';
+    const t = document.createElement('div');
+    t.className = 't';
+    t.textContent = x.text;
+    const m = document.createElement('div');
+    m.className = 'm';
+    const k = document.createElement('span');
+    k.className = 'k';
+    k.textContent = x.kind;
+    m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
+    c.append(t, m);
+    c.onclick = () => renderReview(x.bookId, x.title, 'random');
+    return c;
+  }));
+  body.replaceChildren(wall);
+  if (!prefersReduced() && wall.animate) {
+    wall.animate([{opacity: 0, transform: 'translate3d(0,10px,0)'}, {opacity: 1, transform: 'none'}],
+      {duration: 380, easing: SPRING});
+  }
+}
+
+/* ── 批量操作 ─────────────────────────── */
+
+let batch = new Set();
+
+function setBatch(on) {
+  document.body.classList.toggle('batch', on);
+  if (!on) batch.clear();
+  paintBatch();
+  renderShelfGrid();
+}
+
+function paintBatch() {
+  const el = $('#batchN');
+  if (el) el.textContent = `已选 ${batch.size} 本`;
+  const bar = $('#batchbar');
+  if (bar) [...bar.querySelectorAll('button')].forEach(b => {
+    if (b.dataset.b !== 'off') b.disabled = batch.size === 0;
+  });
+}
+
+async function runBatch(kind) {
+  const ids = [...batch];
+  if (!ids.length) { whisper('先勾选书'); return; }
+  if (kind === 'state') {
+    const st = $('#batchState').value;
+    const r = await (await fetch('/api/book_state', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({books: ids, state: st}),
+    })).json();
+    whisper(r.msg || '已更新');
+    await drawState(true);
+    return;
+  }
+  if (kind === 'zip') {
+    whisper(`正在打包 ${ids.length} 本…`);
+    await clip('/api/zip-multi?books=' + encodeURIComponent(ids.join(',')), '微信读书（多选打包）.zip');
+    return;
+  }
+  if (kind === 'del') {
+    sheet({
+      title: '删除本地缓存',
+      text: `将删除选中的 ${ids.length} 本的本地 Markdown 与图片（微信读书里的划线笔记不受影响，随时可重新抓取）。`,
+      actions: [
+        { label: '确认删除', lead: true, run: async () => {
+          const r = await (await fetch('/api/delete_many', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({books: ids}),
+          })).json();
+          whisper(r.msg || '已删除');
+          batch.clear();
+          await drawState(true);
+        } },
+        { label: '算了' },
+      ],
+    });
+    return;
+  }
+  if (kind === 'shelf') {
+    // 加书架认的是书城短 id；卡片 id 可能是阅读器长 id，先换一遍
+    const ids = [];
+    for (const x of [...batch]) {
+      const s = (cardIds.get(x) || {}).store;
+      if (/^\d{5,20}$/.test(String(s || '')) && !onOwnShelf(s)) ids.push(String(s));
+    }
+    if (!ids.length) { whisper('选中的书都没带可添加的编号（或已在书架上）'); return; }
+    // 勾选就是意图，不再弹一层确认——直接加，加完在进展里说结果
+    addToShelf(ids, '');
+    return;
+  }
+  if (kind === 'fetch') {
+    // 一本一本排队：后端同一时刻只跑一个取书任务
+    const localIds = new Set(Object.keys(local));
+    const todo = ids.filter(x => !localIds.has(x));
+    if (!todo.length) { whisper('选中的都已抓取过了'); return; }
+    sheet({
+      title: '批量抓取',
+      text: `将按顺序抓取 ${todo.length} 本（后端一次只能跑一本，会一本接一本）。可以先去忙别的，进度在右下角。`,
+      actions: [
+        { label: '开始', lead: true, run: () => queueFetch(todo) },
+        { label: '算了' },
+      ],
+    });
+  }
+}
+
+let fetchQueue = [];
+async function queueFetch(list) {
+  fetchQueue = list.slice();
+  pumpQueue();
+}
+
+async function pumpQueue() {
+  if (!fetchQueue.length) return;
+  const id = fetchQueue.shift();
+  const b = shelfAll().find(x => (x.bookId || x.id) === id) || {};
+  const r = await post('export', {book: id});
+  if (!r.ok) { whisper(r.msg); return; }
+  startTask(id, b.title || id);
+  // 等这一本结束（或用户中止）再放下一个
+  const wait = setInterval(async () => {
+    const s = await (await fetch('/api/state')).json();
+    if (!s.task.running) {
+      clearInterval(wait);
+      await drawState(true);
+      if (fetchQueue.length) setTimeout(pumpQueue, 2000);
+      else whisper('批量抓取已走完');
+    }
+  }, 3000);
+}
+
+/* ── 启动 ─────────────────────────────── */
+renderView();
+moveNavPill();      // 胶囊先就位，别等第一次点侧边栏时才凭空冒出来
+window.addEventListener('resize', moveNavPill);   // 换宽度时按钮行高会变，跟着重算
+setInterval(() => drawState(), 2600);
+drawState(true);
+// 索引状态一上来就报一次：不然设置里那行「笔记索引：—」要等到用户进某个视图才更新；
+// 如果上一轮还在跑（比如刷新前点了建立），顺带把进度轮询接上。
+loadIdxState().then(st => { if (st.running) watchIndex(); });
+</script>
+</body>
+</html>
