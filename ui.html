@@ -375,6 +375,7 @@
     transform:translateX(-50%) translateY(7px);
     padding:9px 18px; border-radius:999px; font-size:12.5px;
     background:rgba(28,37,54,.92); color:#fff; opacity:0; pointer-events:none;
+    max-width:min(74vw, 560px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
     box-shadow:0 16px 34px -16px rgba(28,37,54,.75);
     transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1);
@@ -1377,6 +1378,16 @@ async function post(action, extra) {
   });
   return r.json();
 }
+/** 从 Content-Disposition 里取服务端给的文件名（RFC 5987 的 filename* 优先）。
+ *  调用点没传名字时用得上 —— 免得每个按钮各自维护一遍文件名，也免得都落成 export。 */
+function nameFromDisposition(cd) {
+  if (!cd) return '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) { try { return decodeURIComponent(star[1].trim()); } catch (e) { /* 落回下一档 */ } }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1].trim() : '';
+}
+
 /** 下载：先 fetch 成 blob 再落盘。
  *  原来直接给 <a href> 导航，服务端一旦报错（返回的是纯文本原因），
  *  浏览器会把那行字当成页面打开 —— 用户看到的「跳转」就是这么来的。 */
@@ -1391,6 +1402,8 @@ async function clip(href, name) {
     whisper(((await r.text()) || '').slice(0, 70) || ('没能取到文件（' + r.status + '）'));
     return false;
   }
+  // 没给名字就问服务端要 —— 这几个下载接口都带了 Content-Disposition。
+  if (!name) name = nameFromDisposition(r.headers.get('Content-Disposition')) || 'export';
   const blob = await r.blob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3307,9 +3320,11 @@ async function renderDetailView(storeId, readerId, title) {
   );
   if (mine) {
     acts.append(
-      mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id))),
+      mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id),
+        (info.title || title || id) + '.zip')),
       mk('正文', () => clip('/api/md?book=' + encodeURIComponent(id)
-        + '&name=' + encodeURIComponent(info.title || title || id))),
+        + '&name=' + encodeURIComponent(info.title || title || id),
+        (info.title || title || id) + '.md')),
       mk('目录', async () => { const r = await post('reveal', {book: id}); if (!r.ok) whisper(r.msg); })
     );
   }
