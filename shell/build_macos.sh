@@ -42,6 +42,7 @@ APP_FILES=(
   shelf_add.py
   book_export.py
   book_import.py
+  sync.py
   requirements.txt
 )
 APP_DIRS=(
