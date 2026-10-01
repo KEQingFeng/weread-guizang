@@ -31,6 +31,12 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 - **Foreign-language reading support**: long-select any passage to translate it to Chinese or copy the original; single-click an English word to get a pop-up with its meaning and usage (click-to-look-up is English-only; other languages use long-select).
 - **Dual-source reading time**: WeChat Reading time and local (Guizang) time are tracked separately and merged into a single unified total, shown side by side so you can see how the parts combine.
 - **Standalone local shelf**: displayed separately from the WeChat Reading shelf, listing both exported and imported books; locate any book's file in one click, and import your own Markdown / TXT / EPUB / PDF.
+- **Article clipping**: paste a WeChat Official Account article link and its main text is parsed into the shelf as a book. Clipped articles run through the same chapter splitting and table of contents as fetched books, so EPUB / PDF export, locating the file and every reader interaction work on them too, and you can jump back to the original link after reading.
+- **Notes while reading**: select a passage in the text to highlight, bold, underline or strike it, or attach an annotation. The note rail on the right and the body jump to each other — clicking a note returns you to the exact sentence without losing your place. Both the rail and the table of contents collapse away, leaving only the text.
+- **Two kinds of notes, kept apart**: quick highlights with a one-line thought (light, in bulk) and standalone note entries (long, able to quote other passages in the book). Select-and-note: write the thought in the floating panel and the original text plus its position are attached when you save.
+- **Highlight colours are semantic tags**: point / question / quotable / to-check / idea, one colour each. The colour says what you intend to do with the sentence, it is not decoration.
+- **Templates, mind map, export**: start from an official or your own reading-note template, draw the whole set of notes as one mind map (SVG) from its outline, and export to Markdown. Notes are written into the book's own folder (`notes.json` / `notes.md` / `mindmap.svg`) rather than a database, so copying the book copies its notes.
+- **Two shelf layouts**: waterfall (the scroll unfurls card by card) and stack (one book enlarged, opening and closing left and right like a folding screen, driven by the arrow keys). Hovering a card only plays the animation; a second click reveals "Fetch" and "Details".
 - **EPUB / PDF export**: convert exported books to general e-book formats; EPUB preserves illustrations and chapter structure.
 - **WebDAV / OneDrive cloud sync**: sync reading time, reading records, and book files to your own cloud drive (Jianguoyun, Nextcloud, OneDrive, and other WebDAV services); the three categories can be toggled separately, and credentials stay on your machine.
 - **In-app AI agent assistant**: call it from a bubble in the lower-right corner; ask from a selection without copy-pasting.
@@ -51,7 +57,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 ### Option 1: Download the macOS app
 
-[**Download Guizang-0.9.7.dmg**](安装包/归藏-0.9.7.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
+[**Download Guizang-0.9.8.dmg**](安装包/归藏-0.9.8.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
 
 1. Double-click the dmg and drag **归藏.app** into Applications.
 2. On first launch, if you see **"归藏" is damaged and can't be opened. You should move it to the Trash.**, this is macOS blocking an unsigned app, not a corrupted file. Run:
@@ -258,6 +264,18 @@ Key decisions in the fetch engine and their reasons:
 - **Image downloads force IPv4.** On macOS, urllib tries IPv6 first; when the route is unavailable, every image stalls for about 120 seconds.
 
 ## Changelog
+
+**0.9.8**
+
+- Article clipping added: paste a WeChat Official Account link and the main text is parsed into the shelf and read directly. Clipping feeds the existing chapter-splitting and catalog pipeline, so EPUB / PDF export, file location and the whole reader work on clipped articles as well. Only the body text is taken: scripts and styles are dropped wholesale, script-style URLs (`javascript:` / `data:` / `vbscript:`) are discarded, localhost and private-network addresses are refused, and anti-bot interstitials are recognised and reported instead of being filed as content.
+- Right-hand note rail in the reader: select a passage to highlight, bold, underline or strike it, or leave an annotation. The rail and the body jump to each other without losing your place, and both the rail and the table of contents collapse to leave only the text.
+- Two kinds of notes kept apart: quick highlights with a one-line thought, versus standalone entries that can run long and quote other passages. Select-and-note writes the thought straight into a floating panel and attaches the source text and its chapter on save.
+- Highlight colours act as semantic tags: point / question / quotable / to-check / idea.
+- Markdown in notes: headings levels 1-5, bold, strikethrough and tables (pick the grid of rows and columns), with a floating toolbar on a long selection. Official or self-made templates, an SVG mind map generated from the outline, and Markdown export. Everything is written into the book's own directory (`notes.json` / `notes.md` / `mindmap.svg`), never into a database.
+- Shelf display switch added: waterfall (card-by-card scroll unfurl) and stack (one book enlarged, opening and shutting left and right like a folding screen, arrow keys included). Hovering a card gives motion only; clicking again reveals Fetch and Details.
+- Detail page slimmed down: the complete package plus the Text / EPUB / PDF / Contents buttons are gone — those actions now live in the reader.
+- Fixed: stopping a fetch still reported the book as already exported and blocked a retry. The completion flag is now set only when every chapter file is actually on disk. Afterwards the card offers Resume, and the detail page and the task log offer Re-fetch from scratch, which deletes the partial files and the leftover browser temporary files first.
+- Details: the reader footer degrades in three tiers by column width, the minimum window size is raised to 480x620, and the stacked-card fan narrows to the stage width so no card sits outside the window while the hint tells you to click it.
 
 **0.9.7**
 

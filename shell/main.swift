@@ -138,7 +138,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         super.init()
 
         window.title = APP_TITLE
-        window.minSize = NSSize(width: 460, height: 600)
+        window.minSize = NSSize(width: 480, height: 620)
         window.center()
         window.setFrameAutosaveName("guizang.window")   // 记住位置与大小
         window.contentView = web

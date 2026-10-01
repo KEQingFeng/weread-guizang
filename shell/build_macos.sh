@@ -42,6 +42,8 @@ APP_FILES=(
   shelf_add.py
   book_export.py
   book_import.py
+  book_notes.py
+  clip_article.py
   sync.py
   requirements.txt
 )
