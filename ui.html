@@ -935,6 +935,10 @@
   .rdpick:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); outline:none}
   .rdlist{flex:1; overflow:auto; overscroll-behavior:contain; padding:4px 8px 16px;
     scrollbar-width:thin}
+  .rdlist::-webkit-scrollbar{width:7px}
+  .rdlist::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .rdlist:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
   .rdch{display:flex; gap:8px; width:100%; align-items:flex-start; text-align:left;
     padding:7px 9px; border:0; border-radius:9px; background:transparent; cursor:pointer;
     font:inherit; font-size:12.5px; line-height:1.5; color:var(--ink-2);
@@ -951,10 +955,14 @@
   /* 右栏：正文。四行——顶部阅读条、进度线、正文（自己滚）、底部翻页条。 */
   .rdmain{display:grid; grid-template-rows:auto auto minmax(0,1fr) auto;
     min-width:0; min-height:0}
+  /* 正文一旦往下滚，顶/底两条各自浮起一道很淡的投影，把「内容在动、条不动」说出来。 */
+  .rdmain.scrolled .rdbar{box-shadow:0 8px 16px -16px rgba(20,24,32,.55)}
+  .rdmain.scrolled .rdfoot{box-shadow:0 -8px 16px -16px rgba(20,24,32,.55)}
   /* 顶部一条：左边当前章节面包屑，右边「专注 / 设置」两颗小钮，读时抬头就知道在哪。 */
   .rdbar{position:relative; display:flex; align-items:center; gap:9px;
     padding:6px 12px 6px 16px; flex:none;
-    border-bottom:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.3)}
+    border-bottom:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.3);
+    transition:background-color .34s ease, box-shadow .22s ease}
   .rdcrumb{font-size:12px; font-weight:550; color:var(--rd-ink2, var(--ink-2));
     min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .rdcrumb .ix{color:var(--ink-3); font-variant-numeric:tabular-nums; margin-right:7px}
@@ -998,13 +1006,22 @@
     transition:opacity .2s ease}
   .rdnav{transition:opacity .24s ease .06s}
   body.reading.focus .rdin{max-width:min(96ch, 100%)}
-  .rdscroll{overflow:auto; overscroll-behavior:contain; scroll-behavior:smooth;
-    background:var(--rd-bg)}
+  /* 正文自己滚。这里刻意不设 scroll-behavior:smooth：换章时会把 scrollTop 归零，
+     若带平滑就会「从底部一路滑回顶部」扫过上一章的字。需要平滑的地方（空格/Home/End）
+     都在 JS 里显式传 behavior:'smooth'，不靠这条 CSS。滚动条收细、hover 才显形。 */
+  .rdscroll{overflow:auto; overscroll-behavior:contain;
+    background:var(--rd-bg); scrollbar-width:thin;
+    transition:background-color .34s ease}
+  .rdscroll::-webkit-scrollbar{width:7px; height:7px}
+  .rdscroll::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .rdscroll:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
   .rdin{max-width:var(--rd-w); margin:0 auto; padding:30px 34px 64px;
-    transition:max-width .24s var(--spring)}
+    transition:max-width .24s var(--spring), color .34s ease}
   .rdfoot{display:flex; align-items:center; gap:10px; padding:9px 16px;
     border-top:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.32);
-    font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+    font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums;
+    transition:background-color .34s ease, box-shadow .22s ease}
   .rdfoot .grow{flex:1}
   .rdpos{white-space:nowrap}
   /* 底部导出：md / epub / pdf 三档贴成一组，中间细线分格，看着像一枚控件。 */
@@ -1020,31 +1037,61 @@
   .rdbar-mini i{display:block; height:100%; width:0; background:var(--accent);
     opacity:.55; transition:width .12s linear}
   .rdhint{padding:72px 24px; text-align:center; color:var(--ink-3); font-size:12.5px; line-height:1.9}
+  /* 换章读取：不再是一行「正在读取…」，而是几道同宽的字形骨架微微流光，
+     数据到了直接换上去，正文区的高度不会先塌再撑。 */
+  .rdskel{max-width:var(--rd-w); margin:0 auto; padding:38px 34px 64px}
+  .rdskel i{display:block; height:13px; border-radius:7px; margin:0 0 15px;
+    background:linear-gradient(100deg, var(--surface-2) 32%, var(--line-2) 50%, var(--surface-2) 68%);
+    background-size:220% 100%; animation:shimmer 1.6s linear infinite}
+  .rdskel i.h{height:22px; width:46%; margin-top:6px; margin-bottom:22px}
+  .rdskel i.s{width:62%}
+
+  /* 阅读器的「框」——顶栏、底栏、目录条目——不当正文选：拖过去是滚动，不是反蓝一片。
+     正文（.md）当然照常可选，划词小条就指着它。 */
+  .rdbar, .rdfoot, .rdch, .rdcrumb, .rdmeta, .rdpos, .rdnavhd, .rdskel{user-select:none}
 
   /* 正文排版：抓回来的是纯 Markdown，按「好读」调，不抢界面本身的静。
      字号/行距/字体/墨色全部读 .rdwrap 上的阅读变量，设置面板一改就整体生效。 */
   .md{color:var(--rd-ink); font-size:var(--rd-fs); line-height:var(--rd-lh);
-    font-family:var(--rd-font); word-wrap:break-word}
+    font-family:var(--rd-font); transition:color .34s ease;
+    /* 中文长句里夹 URL/英文常见，普通 break-word 断得生硬；overflow-wrap 只在
+       实在塞不下时才断，anywhere 收窄兜底，尽量保住整词。 */
+    overflow-wrap:break-word; word-break:normal}
+  .md ::selection{background:color-mix(in srgb, var(--accent) 26%, transparent)}
+  .md ::-moz-selection{background:color-mix(in srgb, var(--accent) 26%, transparent)}
   .md > :first-child{margin-top:0}
+  /* 标题后不落单：标题跟在上一段尾或顶到下一页边缘时，尽量和后续正文同页，
+     免得出现「一个孤零零的标题杵在末尾」。hanging-punctuation 让中文标点悬挂在
+     版心外，行首行尾的引号/句号不再把整行往里挤（WKWebView/Safari 认）。 */
   .md h1,.md h2,.md h3,.md h4{line-height:1.42; font-weight:600; letter-spacing:-.01em;
-    margin:1.7em 0 .62em}
+    margin:1.7em 0 .62em; break-after:avoid; page-break-after:avoid; text-wrap:balance}
   .md h1{font-size:22px}
   .md h2{font-size:19px}
   .md h3{font-size:16.5px}
   .md h4{font-size:15px; color:var(--rd-ink2)}
-  .md p{margin:0 0 1.06em}
+  /* 段落排字：text-wrap:pretty 让浏览器少留「末行只剩一两个字」的孤字；
+     orphans/widows 管住换页时段的断裂。中文标点悬挂（首末引号句号）出格更整齐。 */
+  .md p{margin:0 0 1.06em; text-wrap:pretty; orphans:3; widows:3;
+    hanging-punctuation:first last}
   .md a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(47,127,240,.32);
     transition:border-color .16s ease}
   .md a:hover{border-bottom-color:var(--accent)}
   .md img{max-width:100%; height:auto; display:block; margin:1.15em auto; border-radius:12px;
     box-shadow:0 8px 26px -14px rgba(20,24,32,.45)}
+  /* 图未到位时先留个淡影，加载完再化入——长章里图片慢慢铺，不再是「啪」地裂开一块。 */
+  .md img.mfade{opacity:0}
+  .md img.mfade.in{opacity:1; transition:opacity .5s ease}
   .md blockquote{margin:1.15em 0; padding:.15em 0 .15em 16px;
     border-left:3px solid var(--accent-soft); color:var(--rd-ink2)}
   .md blockquote p:last-child{margin-bottom:0}
   .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em;
     background:var(--surface-2); padding:.12em .4em; border-radius:5px}
   .md pre{background:var(--surface-2); padding:14px 16px; border-radius:12px;
-    overflow:auto; margin:1.15em 0}
+    overflow:auto; margin:1.15em 0; scrollbar-width:thin}
+  .md pre::-webkit-scrollbar{height:7px}
+  .md pre::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .md pre:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
   .md pre code{background:none; padding:0; font-size:12.5px; line-height:1.72}
   .md ul,.md ol{margin:0 0 1.06em; padding-left:1.5em}
   .md li{margin:.3em 0}
@@ -1052,6 +1099,14 @@
   .md table{border-collapse:collapse; width:100%; margin:1.15em 0; font-size:13.5px}
   .md th,.md td{border:1px solid var(--rd-rule); padding:7px 10px; text-align:left; vertical-align:top}
   .md th{background:var(--surface-2); font-weight:600}
+  /* 宽表格在窄屏/专注模式下会顶破版心：外面套一层横向滚动壳（rdFixMedia 里加），
+     表格自己撑满内层、超出就横滑，正文版心宽度不动，滚动条与正文同款细样式。 */
+  .md .twrap{overflow-x:auto; margin:1.15em 0; scrollbar-width:thin}
+  .md .twrap table{margin:0}
+  .md .twrap::-webkit-scrollbar{height:7px}
+  .md .twrap::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .md .twrap:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
   /* 章节之间换页时的轻微淡入：让「切章」像翻页，而不是闪一下。 */
   .rdin.fade{animation:rdfade .32s ease both}
   @keyframes rdfade{from{opacity:0; transform:translate3d(0,6px,0)} to{opacity:1; transform:none}}
@@ -4890,7 +4945,7 @@ function wireReader(p) {
   });
   // scroll 不冒泡，用捕获阶段听：每一章正文滚到哪，顶部进度线跟着走。
   p.addEventListener('scroll', e => {
-    if (e.target && e.target.id === 'rdScroll') { rdProgress(); selPopHide(); }
+    if (e.target && e.target.id === 'rdScroll') { rdProgressSoon(); selPopHide(); }
   }, true);
 }
 
@@ -4994,6 +5049,17 @@ function rdProgress() {
   const a = p.querySelector('#rdProg'), b = p.querySelector('#rdProg2');
   if (a) a.style.width = pct + '%';
   if (b) b.style.width = pct + '%';
+  // 顶/底两条的浮影只在正文真的离开顶上时出现，滚回顶部就收掉。
+  const main = sc.closest('.rdmain');
+  if (main) main.classList.toggle('scrolled', sc.scrollTop > 2);
+}
+
+/** 滚动事件一秒可能上百发，每发都算一遍进度会把主线程喂饱；这里一帧最多算一次。 */
+let rdProgTick = false;
+function rdProgressSoon() {
+  if (rdProgTick) return;
+  rdProgTick = true;
+  requestAnimationFrame(() => { rdProgTick = false; rdProgress(); });
 }
 
 /** 专注模式：收起左栏目录，正文独占一栏到底；按钮状态与 body 上的类保持一致。 */
@@ -5074,7 +5140,7 @@ async function rdGo(i) {
   if (pos) pos.textContent = (i + 1) + ' / ' + RD.chapters.length;
   rdFootState();
 
-  // 命中缓存：直接铺，连「正在读取…」都不闪一下 —— 翻过的章再翻就是瞬时。
+  // 命中缓存：直接铺，连骨架都不闪一下 —— 翻过的章再翻就是瞬时。
   const cached = rdCache.get(rdCacheKey(RD.book, ch.file));
   if (cached !== undefined) {
     rdPaint(bg, cached);
@@ -5082,7 +5148,7 @@ async function rdGo(i) {
     return;
   }
 
-  if (bg) bg.innerHTML = '<div class="rdhint">正在读取…</div>';
+  if (bg) bg.innerHTML = rdSkelHTML();
   rdProgress();
 
   let d;
@@ -5099,6 +5165,16 @@ async function rdGo(i) {
   rdCachePut(RD.book, ch.file, d.md || '');
   rdPaint(bg, d.md || '');
   rdPreload(i);
+}
+
+/** 换章读取时的字形骨架：几道同宽的条，微微流光，替掉过去那行静态的「正在读取…」。 */
+function rdSkelHTML() {
+  return '<div class="rdskel">'
+    + '<i class="h"></i>'
+    + '<i></i><i></i><i class="s"></i>'
+    + '<i></i><i></i><i class="s"></i>'
+    + '<i></i><i></i>'
+    + '</div>';
 }
 
 /** 把一章正文铺进正文区：淡化淡入 + 修图/链接 + 回到顶部 + 进度归位。 */
@@ -5131,6 +5207,11 @@ function rdPreload(i) {
 function rdFixMedia(root) {
   root.querySelectorAll('img').forEach(im => {
     im.loading = 'lazy';
+    im.decoding = 'async';
+    // 淡入要挂给每一张图——包括外链与 data: 图，所以放在下面提前 return 之前。
+    im.classList.add('mfade');
+    if (im.complete && im.naturalWidth) im.classList.add('in');
+    else im.addEventListener('load', () => im.classList.add('in'), {once: true});
     const raw = im.getAttribute('src') || '';
     if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) {
       im.referrerPolicy = 'no-referrer';
@@ -5145,6 +5226,15 @@ function rdFixMedia(root) {
   root.querySelectorAll('a').forEach(a => {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
+  });
+  // 宽表格套横向滚动壳：表格自己撑满内层，超出就横滑，不顶破版心。
+  // 幂等——重铺正文时若已是壳内表格就跳过，免得越套越深。
+  root.querySelectorAll('table').forEach(tb => {
+    if (tb.parentElement && tb.parentElement.classList.contains('twrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'twrap';
+    tb.parentNode.insertBefore(wrap, tb);
+    wrap.appendChild(tb);
   });
 }
 
@@ -5182,8 +5272,8 @@ async function rdDownload(kind) {
   whisper(ok ? ('已导出 ' + kind.toUpperCase()) : '导出未完成');
 }
 
-/* 读书时的键盘：←/→ 或 [ ] 翻章，空格/Shift+空格翻屏，Home/End 到顶/底，
-   F 专注，Esc 先关设置面板、没有面板才退回。
+/* 读书时的键盘：←/→ 或 [ ] 翻章，空格/Shift+空格翻屏，PageUp/PageDown 同样翻屏，
+   Home/End 到顶/底，F 专注，Esc 先关设置面板、没有面板才退回。
    只在阅读态生效；焦点在输入框/下拉里时放行，别抢输入；带修饰键的组合键
    （Cmd+← 之类是系统/浏览器的）一律不碰。 */
 document.addEventListener('keydown', e => {
@@ -5199,10 +5289,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'f' || e.key === 'F') {
     rdSetFocus(!document.body.classList.contains('focus')); e.preventDefault();
   }
-  else if (e.key === ' ' || e.key === 'Spacebar') {
+  else if (e.key === ' ' || e.key === 'Spacebar'
+      || e.key === 'PageDown' || e.key === 'PageUp') {
     if (t && t.tagName === 'BUTTON') return;          // 按钮自己要响应空格，别抢
     if (sc) {
-      sc.scrollBy({top: (e.shiftKey ? -1 : 1) * Math.round(sc.clientHeight * .86),
+      const back = e.shiftKey || e.key === 'PageUp';
+      sc.scrollBy({top: (back ? -1 : 1) * Math.round(sc.clientHeight * .86),
         behavior: 'smooth'});
       e.preventDefault();
     }

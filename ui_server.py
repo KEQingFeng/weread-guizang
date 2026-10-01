@@ -41,7 +41,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.6"
+VERSION = "0.9.7"
 
 
 def py():
