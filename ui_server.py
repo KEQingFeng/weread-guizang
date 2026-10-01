@@ -9,6 +9,7 @@
        两者都由 platform_compat.venv_python 自动解析，也可用 GUIZANG_PYTHON 指定）
 """
 import argparse
+import base64
 import glob
 import hashlib
 import io
@@ -31,13 +32,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 import platform_compat as pc
+import book_export
+import book_import
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.1"
+VERSION = "0.9.3"
 
 
 def py():
@@ -68,7 +71,10 @@ def script(name):
 # 数据落在哪由 platform_compat 一处说了算：源码直接跑 = 项目目录本身，
 # 装成 app = 壳通过 GUIZANG_DATA 指到用户目录（包体不写东西）。
 DATA_DIR = pc.data_dir(REPO)
-OUT_DIR = os.path.join(DATA_DIR, "output")
+# 书库：取回的书、图片、合并稿都在这儿（界面「书架」读的就是它）。
+# 装成 app 之后壳会把 GUIZANG_BOOKS 指到用户文档下的「归藏」，直接能在访达里翻；
+# 源码直接跑则退回数据目录下的 output/，行为与从前一致。见 platform_compat.books_dir。
+OUT_DIR = pc.books_dir(REPO)
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 LOGIN_STATE = os.path.join(CACHE_DIR, "login_state.json")
 DOWNLOAD_DIR = os.path.join(CACHE_DIR, "downloads")
@@ -180,6 +186,39 @@ def safe_book_dir(book_id):
     if not d.startswith(os.path.realpath(OUT_DIR) + os.sep):
         return None
     return d if os.path.isdir(d) else None
+
+
+def ensure_books_dir():
+    """把书库目录建出来，并把老位置里的书搬过来一次。
+
+    0.9.1 及更早把书存在 ~/Library/Application Support/归藏/output —— 藏得深，
+    用户基本找不到。0.9.3 起改存用户文档下的「归藏」，取过的书一眼可见。
+    升级时若新位置还空着、老位置却有书，就整目录搬过去；不搬的话用户升完级
+    会以为「我的书全没了」。只在新书库不存在（或为空）时搬，绝不动已有内容的书库。
+    """
+    try:
+        os.makedirs(OUT_DIR, exist_ok=True)
+    except OSError:
+        return
+    old = os.path.join(DATA_DIR, "output")
+    if os.path.realpath(old) == os.path.realpath(OUT_DIR) or not os.path.isdir(old):
+        return
+    try:
+        if os.listdir(OUT_DIR):          # 新书库已经有东西，别去覆盖
+            return
+        moved = 0
+        for name in os.listdir(old):
+            if name.startswith("."):
+                continue
+            try:
+                shutil.move(os.path.join(old, name), os.path.join(OUT_DIR, name))
+                moved += 1
+            except OSError:
+                pass
+        if moved:
+            log(f"--- 已把 {moved} 项旧书从数据目录搬进书库：{OUT_DIR} ---")
+    except OSError:
+        pass
 
 
 # ---------- 书架（文件夹 / 归类 / 排序） ----------
@@ -1060,6 +1099,12 @@ def list_books():
                 meta = json.load(open(mp, encoding="utf-8"))
             except Exception:
                 meta = {}
+        # 导入的本地书没有 raw/，字数落在 meta.chars 上（取回来的书才有 raw/）
+        if not chars:
+            try:
+                chars = int(meta.get("chars") or 0)
+            except Exception:
+                chars = 0
         # 目录总章数：拿来做「取回多少」的百分比分母
         total = 0
         cat = os.path.join(d, "_catalog.json")
@@ -1068,6 +1113,9 @@ def list_books():
                 total = len(json.load(open(cat, encoding="utf-8")))
             except Exception:
                 total = 0
+        # 导入的本地书没有「目录/已取」这层差别，总数＝现有章数
+        if total < len(chapters):
+            total = len(chapters)
         # 引擎实时进度（翻了多少页、还在不在跑）——进度条靠它才会在「一章内部」继续走
         progress = {}
         pp = os.path.join(d, "_progress.json")
@@ -1086,13 +1134,18 @@ def list_books():
             "chars": chars,
             "updated_at": os.path.getmtime(d),
             "done": bool(meta.get("done")),
+            # 来源：微信读书取回来的（默认）还是用户自己导进来的（local）。
+            # 前端书架据此分组显示；local 的书没有原书链接，deep 置空。
+            "source": meta.get("source") or "weread",
+            "format": meta.get("format") or "",
             "progress": {k: progress.get(k) for k in
                          ("pages", "chapters", "session_chars", "running",
                           "budget_left", "stalled", "updated_at")
                          if progress.get(k) is not None},
             "folder": lib["assign"].get(name) or "",
             "state": (lib.get("state") or {}).get(name) or "",
-            "deep": f"https://weread.qq.com/web/reader/{name}",
+            "deep": "" if meta.get("source") == "local"
+                    else f"https://weread.qq.com/web/reader/{name}",
             # 前端据此决定要不要请求封面：没有就不请求，免得满屏 404
             "cover": os.path.isfile(cover_path(name)),
         })
@@ -1196,6 +1249,42 @@ def meta_title(book_id):
         except Exception:
             pass
     return book_id
+
+
+def export_book(kind, book_id):
+    """把一本书导成 EPUB / PDF，落在 DOWNLOAD_DIR 里，返回成品路径。
+
+    kind = "epub" | "pdf"。没章节就返回 None（让路由给个准话）；真正导出时
+    抛的异常不在这儿吞 —— 上层要把它原样回给用户，比笼统的「导出失败」有用。
+    书名与作者跟 /api/md、/api/zip 一个规矩：都从 meta.json 取，取不到退回书 id。
+    封面只在本地已经缓存下来时才嵌进 EPUB（ensure_cover 要联网，导出这条路
+    不该被网络卡住；有就用，没有就排个文字封面，EPUB 允许）。
+    """
+    d = safe_book_dir(book_id)
+    if not d:
+        return None
+    ch_dir = os.path.join(d, "chapters")
+    if not (os.path.isdir(ch_dir)
+            and any(f.endswith(".md") for f in os.listdir(ch_dir))):
+        return None
+    meta = {}
+    mp = os.path.join(d, "meta.json")
+    if os.path.exists(mp):
+        try:
+            meta = json.load(open(mp, encoding="utf-8"))
+        except Exception:
+            pass
+    title = meta.get("title") or book_id
+    author = meta.get("author") or ""
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    dest = os.path.join(DOWNLOAD_DIR, f"{book_id}.{kind}")
+    if kind == "epub":
+        cp = cover_path(book_id)
+        return book_export.build_epub(d, dest, title=title, author=author,
+                                      cover=cp if os.path.isfile(cp) else None)
+    if kind == "pdf":
+        return book_export.build_pdf(d, dest, title=title, author=author)
+    return None
 
 
 def content_disp(name, ext):
@@ -1379,6 +1468,9 @@ def start_task(kind, argv, book=None, env_extra=None):
                      "started_at": time.time(), "exit_code": None})
     log(f"--- 启动 {kind}" + (f" · {book}" if book else "") + " ---")
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    # 引擎里 output/ 是相对路径，这里明确指到书库，保证「写进去的」和
+    # 「书架读的」是同一个地方（不然装成 app 后引擎会写到源码目录旁边）。
+    env["GUIZANG_OUTPUT"] = OUT_DIR
     if env_extra:
         env.update(env_extra)
     try:
@@ -1725,6 +1817,36 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(f, self.wfile)
             return
 
+        if path in ("/api/epub", "/api/pdf"):
+            # 跟 /api/zip 一条路子：先落盘再决定是回 JSON 还是直接下流。
+            # PDF 走铬内核打印，没装好先拦一道，别让用户点了半分钟才报错。
+            kind = path.rsplit("/", 1)[1]
+            book = q.get("book", [""])[0]
+            if kind == "pdf" and not chromium_ready():
+                return self._send(400, "text/plain; charset=utf-8",
+                                  "导出 PDF 要用到内置的铬内核，它还没装好")
+            try:
+                dest = export_book(kind, book)
+            except Exception as e:
+                return self._send(500, "text/plain; charset=utf-8",
+                                  f"导出没做成：{e}")
+            if not dest:
+                return self._send(404, "text/plain; charset=utf-8",
+                                  "这本书还没有可导出的章节")
+            size = os.path.getsize(dest)
+            if q.get("json", [""])[0] in ("1", "true"):
+                return self._json({"ok": True, "path": dest, "size": size,
+                                   "title": meta_title(book), "kind": kind})
+            mime = "application/epub+zip" if kind == "epub" else "application/pdf"
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", content_disp(meta_title(book), kind))
+            self.end_headers()
+            with open(dest, "rb") as f:
+                shutil.copyfileobj(f, self.wfile)
+            return
+
         return self._send(404, "text/plain; charset=utf-8", "not found")
 
     def do_POST(self):
@@ -1758,6 +1880,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "msg": "开始建立笔记索引"})
             return self._json({"ok": True, "msg": "索引已是最新",
                                "count": len(load_notes_index().get("items") or [])})
+
+        if u.path == "/api/import":
+            # 把用户手里的书收进书库：前端读成 base64 再 POST 过来（不经过 multipart，
+            # 保持「只认 application/json」这条统一的入口约定）。
+            raw = (body or {}).get("data") or ""
+            name = str((body or {}).get("name") or "").strip()
+            if not raw:
+                return self._json({"ok": False, "msg": "没有收到文件内容"}, 400)
+            try:
+                blob = base64.b64decode(raw, validate=False)
+            except Exception:
+                return self._json({"ok": False, "msg": "文件内容解码失败"}, 400)
+            try:
+                info = book_import.import_book(
+                    OUT_DIR, name, blob,
+                    title=str((body or {}).get("title") or "").strip(),
+                    author=str((body or {}).get("author") or "").strip(),
+                    cover_dir=COVER_DIR,
+                )
+            except ValueError as e:
+                return self._json({"ok": False, "msg": str(e)}, 400)
+            except Exception as e:
+                traceback.print_exc()
+                return self._json({"ok": False, "msg": "导入失败：%s" % (str(e)[:160])}, 500)
+            log(f"导入本地书：{info['title']}（{info['label']}，{info['chapters']} 章）")
+            return self._json({"ok": True, "book": info,
+                               "msg": f"已导入《{info['title']}》，共 {info['chapters']} 章"})
 
         if u.path == "/api/book_state":
             ids = (body or {}).get("books") or []
@@ -1974,6 +2123,12 @@ class Handler(BaseHTTPRequestHandler):
             pc.open_in_file_manager(d)
             return self._json({"ok": True, "msg": "已在文件管理器打开"})
 
+        # 打开整个书库根目录：本地书库那一屏用，和「定位某本书」区分开
+        if action == "openbooks":
+            ensure_books_dir()
+            pc.open_in_file_manager(OUT_DIR)
+            return self._json({"ok": True, "msg": "已打开书库文件夹"})
+
         if action == "folder.new":
             name = (body.get("name") or "").strip()[:40]
             if not name:
@@ -2079,9 +2234,11 @@ def main():
     ap.add_argument("--port", type=int, default=8770)
     args = ap.parse_args()
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-    # 先把这两行打出来：平台不对时，一眼就能看出用的是哪个解释器、浏览器装在哪
+    ensure_books_dir()
+    # 先把这几行打出来：平台不对时，一眼就能看出用的是哪个解释器、浏览器装在哪
     print(f"  解释器  : {py()}", flush=True)
     print(f"  浏览器  : {MS_PLAYWRIGHT}", flush=True)
+    print(f"  书库    : {OUT_DIR}", flush=True)
     for p in range(args.port, args.port + 20):
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)

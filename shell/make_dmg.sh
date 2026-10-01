@@ -37,6 +37,9 @@ echo "  版本  $VERSION"
 # 会被 Gatekeeper 直接判死。
 ditto "$APP" "$STAGE_APP"
 cp "$README" "$STAGE/首次打开必读.txt"
+# 那份必读的头一行也带上真实版本号：源文件里是个占位，落盘时按实际版本改写，
+# 免得包里标着 1.0.0、文件名却是 0.9.3，用户一眼就看出对不上。
+sed -i '' "1s/.*/归藏 $VERSION · 首次打开必读/" "$STAGE/首次打开必读.txt"
 ln -s /Applications "$STAGE/应用程序"
 
 # 先把上一次可能挂着的同名卷卸掉，免得 hdiutil 报「资源忙」

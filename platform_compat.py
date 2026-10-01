@@ -34,6 +34,44 @@ def data_dir(repo):
     return os.path.expanduser(d) if d else repo
 
 
+APP_TITLE = "归藏"
+
+
+def books_dir(repo):
+    """取回的书落在哪（界面「书架」读的就是这里）。
+
+    默认跟数据目录走：源码直接跑时就是项目下的 output/，行为与从前一模一样。
+    装成 app 之后壳会把 GUIZANG_BOOKS 指向用户看得见的「文档/归藏」——
+    取过的书、图片、合并稿全在那儿，用户能直接在访达里翻，不用钻进
+    ~/Library/Application Support 这种藏起来的地方。
+    """
+    d = (os.environ.get("GUIZANG_BOOKS") or "").strip()
+    if d:
+        return os.path.expanduser(d)
+    return os.path.join(data_dir(repo), "output")
+
+
+def default_books_place():
+    """首次安装时给你的书库位置：用户文档目录下的「归藏」。
+
+    Windows 与 macOS 都在「文档」里；其余平台退回用户主目录，别乱猜。
+    """
+    home = os.path.expanduser("~")
+    if IS_WIN or IS_MAC:
+        return os.path.join(home, "Documents", APP_TITLE)
+    return os.path.join(home, APP_TITLE)
+
+
+def output_dir():
+    """引擎（export_precise.py）该把书往哪写。
+
+    引擎里 output/ 是相对 cwd 的，壳/后端通过 GUIZANG_OUTPUT 把它指到
+    books_dir；没设就退回原来的相对路径，源码直接跑不受影响。
+    """
+    d = (os.environ.get("GUIZANG_OUTPUT") or "").strip()
+    return os.path.expanduser(d) if d else "output"
+
+
 def venv_dir(repo):
     """虚拟环境的位置。跟 data_dir 走，不跟源码走。"""
     return os.path.join(data_dir(repo), ".venv")

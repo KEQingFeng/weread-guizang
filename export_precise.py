@@ -24,6 +24,10 @@ import platform_compat as pc
 
 USER_DATA_DIR = os.path.join("cache", "browser_profile")
 
+# 书往哪写。默认还是相对 cwd 的 output/（源码直接跑时不变）；壳/后端会用
+# GUIZANG_OUTPUT 把它指到用户看得见的「文档/归藏」，见 platform_compat.output_dir。
+OUTPUT_DIR = pc.output_dir()
+
 # 抓取本身不需要可见窗口（正文靠 hook Canvas 抓，翻页靠合成按键），
 # 且可见窗口一旦被误关就会整场中断。所以默认无头；要盯着过程用 --headed。
 HEADLESS = True
@@ -1278,7 +1282,8 @@ async def main(book_id):
         faulthandler.dump_traceback_later(60, repeat=True, exit=False)
         print("  (EXPORT_DEBUG 已开：每 60s 倾倒一次调用栈)")
     os.makedirs(USER_DATA_DIR, exist_ok=True)
-    book_dir = os.path.join("output", book_id)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    book_dir = os.path.join(OUTPUT_DIR, book_id)
     md_dir = os.path.join(book_dir, "chapters")
     raw_dir = os.path.join(book_dir, "raw")
     img_dir = os.path.join(book_dir, "images")
@@ -1401,7 +1406,7 @@ async def main(book_id):
     book_title = book_title or BOOK_INFO["title"] or meta.get("title") or book_id
     if book_title == "未知": book_title = book_id
     safe = re.sub(r'[<>:"/\\|?*]', '_', book_title)
-    merged = os.path.join("output", f"{safe}.md")
+    merged = os.path.join(OUTPUT_DIR, f"{safe}.md")
     with open(merged, "w") as out:
         out.write(f"# {book_title}\n\n**{book_author}**\n\n---\n\n")
         for fn in total_files:
@@ -1409,7 +1414,7 @@ async def main(book_id):
             out.write("\n\n---\n\n")
     # 早先认不出书名时留下过「<书号>.md」这份合并文件。书名认出来之后它就是同一本书的
     # 另一份拷贝（两份内容一样、名字不一样，翻起来最容易搞混），所以顺手清掉旧的。
-    stale = os.path.join("output", f"{book_id}.md")
+    stale = os.path.join(OUTPUT_DIR, f"{book_id}.md")
     if safe != book_id and os.path.isfile(stale):
         try:
             os.remove(stale)
