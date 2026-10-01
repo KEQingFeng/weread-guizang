@@ -34,6 +34,8 @@ from urllib.parse import urlparse, parse_qs, unquote
 import platform_compat as pc
 import book_export
 import book_import
+import book_notes
+import clip_article
 import sync as cloudsync
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +43,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.7"
+VERSION = "0.9.8"
 
 
 def py():
@@ -1340,6 +1342,11 @@ def list_books():
                 progress = json.load(open(pp, encoding="utf-8"))
             except Exception:
                 progress = {}
+        # 「谁在跑」只有一个真源：进程还在不在。引擎被强制结束时，_progress.json 里会
+        # 留下一个 running:true，界面据此把这本书永远标成「正在取」，卡片上的按钮一个都不出
+        # —— 用户报的「中止之后不能再取书」有一半是这里来的。
+        if progress.get("running") and not (TASK.get("running") and TASK.get("book") == name):
+            progress = {**progress, "running": False, "stale": True}
         books.append({
             "id": name,
             "title": meta.get("title") or name,
@@ -1350,18 +1357,22 @@ def list_books():
             "chars": chars,
             "updated_at": os.path.getmtime(d),
             "done": bool(meta.get("done")),
-            # 来源：微信读书取回来的（默认）还是用户自己导进来的（local）。
-            # 前端书架据此分组显示；local 的书没有原书链接，deep 置空。
+            # 来源：微信读书取回来的（默认）、用户自己导进来的（local）、剪藏来的
+            # 一篇文章（clip）。前端书架据此分组显示。
             "source": meta.get("source") or "weread",
             "format": meta.get("format") or "",
+            # 剪藏的书带原文地址：卡片上的「看原文」和详情页都要用
+            "url": meta.get("url") or "",
+            # 本地笔记条数：卡片上那行「划了 N 段 · 记了 M 条」
+            "notes": notes_counts(d),
             "progress": {k: progress.get(k) for k in
                          ("pages", "chapters", "session_chars", "running",
-                          "budget_left", "stalled", "updated_at")
+                          "budget_left", "stalled", "stale", "updated_at")
                          if progress.get(k) is not None},
             "folder": lib["assign"].get(name) or "",
             "state": (lib.get("state") or {}).get(name) or "",
-            "deep": "" if meta.get("source") == "local"
-                    else f"https://weread.qq.com/web/reader/{name}",
+            # 深链：微信书回原书阅读器，剪藏的文章回它的原文，导入的本地书没有来路
+            "deep": book_deep_link(name, meta),
             # 前端据此决定要不要请求封面：没有就不请求，免得满屏 404
             "cover": os.path.isfile(cover_path(name)),
         })
@@ -1595,6 +1606,9 @@ def book_outline(book_id):
     return {"id": book_id,
             "title": meta.get("title") or book_id,
             "author": meta.get("author") or "",
+            # 阅读器顶栏要据此决定要不要给「看原文」：剪来的文章有来路，取回的书没有
+            "source": meta.get("source") or "weread",
+            "url": meta.get("url") or "",
             "done": bool(meta.get("done")),
             "chapters": chapters,
             "images": images}
@@ -1647,6 +1661,61 @@ def write_meta(book_id, title, author, done):
                 "done": bool(done), "updated_at": time.time()})
     with open(mp, "w", encoding="utf-8") as f:
         json.dump(cur, f, ensure_ascii=False, indent=2)
+
+
+# 一次「没跑完」会留下什么：章节 md、raw 页缓存、图片、目录快照、进度快照，
+# 外加引擎在书库根上写的那份合并稿。EPUB/PDF/ZIP 成品落在下载目录和 cache 里，
+# 不在书目录，所以不在清理范围 —— 清残稿不该顺手把用户已经拿走的成品也带走。
+RESIDUE_DIRS = ("chapters", "raw", "images")
+RESIDUE_FILES = ("_catalog.json", "_progress.json")
+
+
+def reset_book_output(book_id):
+    """抹掉一本「取到一半」的书的残稿，给「清掉重取」让路。
+
+    只清产物，不清身份：meta.json 留着（书名和作者在里面，丢了它卡片会退化成
+    一串书号），只把 done 置回 False；notes.json（用户自己的划线与笔记）和
+    library.json 里的归类、状态标签一概不动。取书失败不该让人连带丢笔记。
+    """
+    d = safe_book_dir(book_id)
+    if not d:
+        return {"ok": False, "msg": "找不到这本书的导出目录，直接取书就行"}
+    removed = 0
+    for sub in RESIDUE_DIRS:
+        p = os.path.join(d, sub)
+        if os.path.isdir(p):
+            removed += sum(len(fs) for _, _, fs in os.walk(p))
+            shutil.rmtree(p)
+        elif os.path.exists(p):
+            os.remove(p)
+            removed += 1
+    for f in RESIDUE_FILES:
+        p = os.path.join(d, f)
+        if os.path.isfile(p):
+            os.remove(p)
+            removed += 1
+    # 合并稿有两份可能的名字：按书名的和早期按书号的，都清掉，免得留一份过期的全本假象
+    for name in (meta_title(book_id), book_id):
+        stray = os.path.join(OUT_DIR, re.sub(r'[<>:"/\\|?*]', "_", str(name)) + ".md")
+        if (os.path.isfile(stray)
+                and os.path.realpath(stray).startswith(os.path.realpath(OUT_DIR) + os.sep)):
+            try:
+                os.remove(stray)
+                removed += 1
+            except OSError:
+                pass
+    mp = os.path.join(d, "meta.json")
+    meta = {}
+    if os.path.exists(mp):
+        try:
+            meta = json.load(open(mp, encoding="utf-8"))
+        except Exception:
+            meta = {}
+    meta.update({"done": False, "updated_at": time.time()})
+    _write_json(mp, meta)
+    log(f"清掉《{meta.get('title') or book_id}》上次没跑完的残稿：{removed} 个文件")
+    return {"ok": True, "removed": removed, "title": meta.get("title") or book_id,
+            "msg": f"已清掉上次剩下的 {removed} 个文件"}
 
 
 # ---------- task runner ----------
@@ -1737,6 +1806,93 @@ def stop_task():
     threading.Thread(target=_finish_stop, args=(proc,), daemon=True).start()
     log("--- 已请求停止，正在把在手的内容落盘 ---")
     return True, "正在收尾（把手上这一章落盘就退），已导出的内容不会丢"
+
+
+# ---------- 剪藏与本地笔记 ----------
+# 两件事都寄生在「书」这个已有结构上：剪回来的文章是一本 source=clip 的书，
+# 笔记是同一目录里的 notes.json / notes.md / mindmap.svg。这样详情页、阅读器、
+# 导出 EPUB/PDF、云同步、在访达里定位这些现成能力一行都不用改就能吃下新功能，
+# 也不必为剪藏和笔记各开一套存储 —— 用户要的是「文件都在我那个文件夹里」。
+
+MAX_CLIP_URLS = 20        # 一次最多剪这么多篇，多了容易被对方站点限流
+
+
+def book_meta(book_id):
+    """读一本书的 meta.json。读不到回空表，兜底交给调用方（列表页允许没 meta）。"""
+    d = safe_book_dir(book_id)
+    if not d:
+        return {}
+    try:
+        with open(os.path.join(d, "meta.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        return m if isinstance(m, dict) else {}
+    except Exception:
+        return {}
+
+
+def book_deep_link(book_id, meta):
+    """这本书「回得去的地方」：微信书是原书阅读器，剪藏文章是原文，导入的书没有。
+
+    原来写死在列表里，判据只有一个 local；加剪藏之后一共有三种来路，
+    抽成一个函数比在字典字面量里套三元表达式好读。
+    """
+    src = meta.get("source") or "weread"
+    if src == "clip":
+        return meta.get("url") or ""
+    if src == "local":
+        return ""
+    return "https://weread.qq.com/web/reader/%s" % book_id
+
+
+def clip_targets(body):
+    """从请求里收链接：单条 url 和批量 urls 都认，去重去空、封顶。
+
+    剪藏是这台机器主动去访问外网，所以入口只认这一个函数拿到的链接 ——
+    scheme 和内网地址由 clip_article.fetch 再挡一道，两层各管一件事。
+    """
+    raw = list(body.get("urls") or []) if isinstance(body.get("urls"), list) else []
+    one = str(body.get("url") or "").strip()
+    if one:
+        raw.insert(0, one)
+    out, seen = [], set()
+    for x in raw:
+        u = str(x.get("url") if isinstance(x, dict) else x or "").strip()
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:MAX_CLIP_URLS]
+
+
+_NOTES_COUNTS = {}
+
+
+def notes_counts(book_dir):
+    """书架上那句「划了 12 段 · 记了 3 条」。
+
+    /api/state 是轮询的，所以按 (mtime, size) 缓一份：没改过的书不重复解析 JSON。
+    """
+    p = os.path.join(book_dir, book_notes.NOTES_FILE)
+    try:
+        st = os.stat(p)
+    except OSError:
+        return {"marks": 0, "entries": 0}
+    key = (int(st.st_mtime), st.st_size)
+    hit = _NOTES_COUNTS.get(book_dir)
+    if hit and hit[0] == key:
+        return hit[1]
+    out = {"marks": 0, "entries": 0}
+    try:
+        with open(p, encoding="utf-8") as f:
+            doc = json.load(f)
+        if isinstance(doc, dict):
+            out = {"marks": len(doc.get("marks") or []),
+                   "entries": len(doc.get("entries") or [])}
+    except Exception:
+        pass
+    if len(_NOTES_COUNTS) > 500:
+        _NOTES_COUNTS.clear()
+    _NOTES_COUNTS[book_dir] = (key, out)
+    return out
 
 
 # ---------- http ----------
@@ -2067,6 +2223,56 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(f, self.wfile)
             return
 
+        if path == "/api/mynotes":
+            # 这本书的本地笔记：原文（含服务端补齐的 id / 时间戳）+ 那几支笔的定义。
+            # 标签和颜色由后端给，前端不写死 —— 以后加一种颜色只改一处。
+            book = q.get("book", [""])[0]
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"}, 404)
+            meta = book_meta(book)
+            doc = book_notes.load_notes(d)
+            return self._json({
+                "ok": True, "book": book,
+                "title": meta.get("title") or book,
+                "author": meta.get("author") or "",
+                "source": meta.get("source") or "weread",
+                "url": meta.get("url") or "",
+                "doc": doc, "counts": book_notes.counts(doc),
+                "tags": list(book_notes.TAGS), "kinds": list(book_notes.KINDS),
+                "exported": os.path.isfile(os.path.join(d, book_notes.EXPORT_MD)),
+                "mapped": os.path.isfile(os.path.join(d, book_notes.EXPORT_MAP)),
+            })
+
+        if path == "/api/mynotes/map":
+            # 笔记 → 思维导图。顺手把 SVG 落进书目录（用户要「文件都在文件夹里」），
+            # 再把图形文本回给前端画 <img>；图是我们自己生成的，不含外部脚本。
+            book = q.get("book", [""])[0]
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"}, 404)
+            cut = q.get("cut", ["tag"])[0]
+            if cut not in ("tag", "chapter", "entry"):
+                cut = "tag"
+            meta = book_meta(book)
+            try:
+                res = book_notes.mindmap(d, book_notes.load_notes(d), meta=meta,
+                                         titles=book_notes.chapter_titles(d),
+                                         book_label=meta.get("title") or book, cut=cut)
+            except Exception as e:
+                return self._json({"ok": False, "msg": "思维导图没画出来：%s" % str(e)[:140]})
+            try:
+                with open(res["path"], encoding="utf-8") as f:
+                    svg = f.read()
+            except Exception:
+                svg = ""
+            res.update({"ok": True, "svg": svg, "cut": cut})
+            return self._json(res)
+
+        if path == "/api/note_tpl":
+            return self._json({"ok": True,
+                               "items": book_notes.templates(CACHE_DIR)})
+
         return self._send(404, "text/plain; charset=utf-8", "not found")
 
     def do_POST(self):
@@ -2303,6 +2509,118 @@ class Handler(BaseHTTPRequestHandler):
             if okn:
                 return self._json({"ok": True, "msg": f"导入 {okn} 条，另有 {len(fails)} 条失败：{fails[0]}"})
             return self._json({"ok": False, "msg": f"都没成功：{fails[0] if fails else '未知原因'}"})
+
+        if u.path == "/api/clip":
+            # 剪藏：粘贴链接 → 解析正文 → 收成书架里的一本书。
+            # 三种模式：preview 只解析不入架（先让人确认抓对了），save 收单篇，
+            # batch 一次收多篇。前端主用 preview + 逐篇 save —— 这样每篇落架就能
+            # 立刻在列表里出现，进度是「第 3/20 篇」而不是转半分钟圈。
+            mode = str((body or {}).get("mode") or "preview").strip()
+            urls = clip_targets(body)
+            if not urls:
+                return self._json({"ok": False, "msg": "先粘贴至少一个文章链接"})
+            if mode == "batch":
+                try:
+                    res = clip_article.clip_many(OUT_DIR, urls, cover_dir=COVER_DIR)
+                except Exception as e:
+                    return self._json({"ok": False, "msg": "剪不动：%s" % str(e)[:160]})
+                for info in res["ok"]:
+                    log(f"剪藏入库：{info['title']}（{info.get('site') or ''}，"
+                        f"{info.get('words') or info['chars']} 字）")
+                return self._json({
+                    "ok": bool(res["ok"]), "done": res["done"], "failed": res["failed"],
+                    "books": res["ok"], "fail": res["fail"],
+                    "msg": (f"剪好 {res['done']} 篇"
+                            + (f"，{res['failed']} 篇没成：{res['fail'][0]['msg']}"
+                               if res["fail"] else "")) if res["ok"]
+                    else (res["fail"][0]["msg"] if res["fail"] else "一篇都没成")})
+            url = urls[0]
+            try:
+                if mode == "save":
+                    info = clip_article.save_clip(
+                        OUT_DIR, url,
+                        title=str((body or {}).get("title") or "").strip(),
+                        author=str((body or {}).get("author") or "").strip(),
+                        cover_dir=COVER_DIR)
+                else:
+                    art = clip_article.extract(url)
+                    return self._json({"ok": True, "preview": {
+                        "title": art["title"], "author": art["author"],
+                        "site": art["site"], "date": art["date"], "cover": art["cover"],
+                        "url": art["url"], "words": art["words"],
+                        "head": art["markdown"][:900]}})
+            except Exception as e:
+                # 抓取失败全是 ValueError 带的人话（要验证 / 没正文 / 内网地址），
+                # 原样递出去；真出意外也不让连接断掉
+                msg = str(e)[:200]
+                log(f"--- 剪藏失败：{msg} ---")
+                return self._json({"ok": False, "msg": msg or "这一篇剪不出来"})
+            log(f"剪藏入库：{info['title']}（{info.get('site') or ''}，{info['chars']} 字）")
+            return self._json({"ok": True, "book": info,
+                               "msg": f"已剪进书架：《{info['title']}》{info['chars']} 字"})
+
+        if u.path == "/api/mynotes":
+            # 存这本书的笔记。落盘后把「服务端认得的版本」回给前端 —— id 和时间戳
+            # 是补齐过的，前端拿返回值覆盖自己的状态，就不会出现「我这边有条没 id」
+            # 这种对不上的情况。
+            book = str((body or {}).get("book") or "")
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书，笔记没地方放"})
+            doc = (body or {}).get("doc")
+            if not isinstance(doc, dict):
+                return self._json({"ok": False, "msg": "笔记内容看起来不对，没有保存"})
+            try:
+                book_notes.save_notes(d, doc)
+            except Exception as e:
+                return self._json({"ok": False, "msg": "存不下：%s" % str(e)[:140]})
+            saved = book_notes.load_notes(d)
+            _NOTES_COUNTS.pop(d, None)       # 计数缓存作废，书架下一次刷新就是新数字
+            return self._json({"ok": True, "doc": saved,
+                               "counts": book_notes.counts(saved)})
+
+        if u.path == "/api/mynotes/export":
+            # 导出 notes.md 到书目录。读的是**已保存**的版本：前端点导出前要先存一次，
+            # 免得导出的内容和屏幕上看到的不一样，还让人以为笔记丢了。
+            book = str((body or {}).get("book") or "")
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"})
+            doc = book_notes.load_notes(d)
+            if book_notes.counts(doc) == {"marks": 0, "entries": 0}:
+                return self._json({"ok": False, "msg": "这本书还没有笔记，先划两句再导"})
+            meta = book_meta(book)
+            try:
+                res = book_notes.export_notes(d, doc, meta=meta,
+                                              titles=book_notes.chapter_titles(d),
+                                              book_label=meta.get("title") or book)
+            except Exception as e:
+                return self._json({"ok": False, "msg": "导出没做成：%s" % str(e)[:140]})
+            return self._json({"ok": True, "path": res["path"], "dir": d,
+                               "chars": res["chars"], "counts": book_notes.counts(doc),
+                               "msg": f"已导出 notes.md（{res['chars']} 字），就放在这本书的文件夹里"})
+
+        if u.path == "/api/note_tpl":
+            # 模板：官方那几套不能删，用户自己写的存进 cache（跨书共用一套模板库）。
+            if (body or {}).get("del"):
+                return self._json(book_notes.delete_template(CACHE_DIR,
+                                                             str((body or {}).get("del"))))
+            tpl = (body or {}).get("save")
+            if isinstance(tpl, dict):
+                out = book_notes.save_template(CACHE_DIR, tpl)
+                if out.get("ok"):
+                    out["items"] = book_notes.templates(CACHE_DIR)
+                return self._json(out)
+            use = (body or {}).get("apply")
+            if isinstance(use, dict):
+                tid = str(use.get("id") or "")
+                tpl = book_notes.get_template(CACHE_DIR, tid)
+                if not tpl:
+                    return self._json({"ok": False, "msg": "没找到这个模板"})
+                return self._json({"ok": True,
+                                   "body": book_notes.apply_template(tpl, use)})
+            return self._json({"ok": False, "msg": "没说要干什么：存、删还是套"})
+
         return self._send(404, "text/plain; charset=utf-8", "not found")
 
     def _action(self, body):
@@ -2370,6 +2688,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "msg": "没能从里面认出书籍编号，看看是不是粘错了"})
             ok, msg = start_task("export", [py(), script("export_precise.py"), book_id], book=book_id)
             return self._json({"ok": ok, "msg": msg, "id": book_id})
+
+        if action == "export.fresh":
+            # 「清掉重取」：上次中止留下的残稿先抹平，再从头取一遍。
+            # 顺序很重要 —— 先看有没有任务在跑，再动文件。反过来的话，
+            # 清完却起不来任务（start_task 会回「已有任务在运行」），
+            # 用户手里就只剩一本被清空的书，比原来更糟。
+            book_id = extract_book_id(book)
+            if not book_id:
+                return self._json({"ok": False, "msg": "没能从里面认出书籍编号，看看是不是粘错了"})
+            with _lock:
+                if TASK["running"]:
+                    return self._json({"ok": False,
+                                       "msg": "已经有任务在跑，先中止它再清稿重取"})
+            r = reset_book_output(book_id)
+            if not r.get("ok"):
+                return self._json(r)
+            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id], book=book_id)
+            return self._json({"ok": ok, "id": book_id, "removed": r.get("removed", 0),
+                               "msg": (r["msg"] + " · " + msg) if ok else msg})
 
         if action == "images":
             book_id = (book or "").strip()

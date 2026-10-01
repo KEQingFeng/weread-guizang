@@ -555,23 +555,28 @@ def _write_json(path, obj):
     os.replace(tmp, path)
 
 
-def _make_book_dir(dest_root, title):
-    """在书库里开一个安全命名的目录：imp_<slug>_<hex>。"""
+def _make_book_dir(dest_root, title, prefix="imp"):
+    """在书库里开一个安全命名的目录：<prefix>_<slug>_<hex>。
+
+    prefix 是可传的：导入自己的文件用 imp_，剪藏一篇文章用 clip_。书架据此就能
+    一眼分清「这本书是从哪来的」，而行号、章节、图片那些结构仍然完全一样。
+    """
     os.makedirs(dest_root, exist_ok=True)
     slug = re.sub(r"[^0-9A-Za-z_\-]", "", title or "")[:18]
-    bid = "imp_%s_%s" % (slug or "book", uuid.uuid4().hex[:8])
+    bid = "%s_%s_%s" % (prefix or "imp", slug or "book", uuid.uuid4().hex[:8])
     d = os.path.join(dest_root, bid)
     os.makedirs(d, exist_ok=True)
     return d, bid
 
 
-def import_book(dest_root, filename, data, title="", author="", cover_dir=None):
+def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
+                book_id_prefix="imp", source="local"):
     """把一份文件收进 dest_root，返回「像取回来的书」的元信息。
 
     产出的目录结构跟引擎落盘完全一致（chapters/*.md + images/ + meta.json +
     _catalog.json + _progress.json），所以阅读器、导出 EPUB/PDF、在文件管理器里
-    定位这些现成能力一行都不用改；只有 meta.source = "local" 用来和微信读书来的
-    书区分，前端据此分开显示。
+    定位这些现成能力一行都不用改；只有 meta.source（"local" 或 "clip"）用来和
+    微信读书来的书区分，前端据此分开显示。
     """
     if not data:
         raise ValueError("这份文件是空的")
@@ -606,7 +611,7 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None):
     if not chapters:
         raise ValueError("这份文件里没读出正文，换一份再试")
 
-    d, bid = _make_book_dir(dest_root, title)
+    d, bid = _make_book_dir(dest_root, title, book_id_prefix)
     ch_dir = os.path.join(d, "chapters")
     os.makedirs(ch_dir, exist_ok=True)
     catalog, total_chars = [], 0
@@ -643,7 +648,7 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None):
         "title": title,
         "author": author,
         "done": True,
-        "source": "local",
+        "source": source or "local",
         "format": fmt,
         "chars": total_chars,
         "imported_at": time.strftime("%Y-%m-%d %H:%M:%S"),

@@ -603,6 +603,14 @@
   }
   .hoveract button{pointer-events:auto}
   .wcard:hover .hoveract{opacity:1}
+  /* 掠过时再来一道斜着扫过去的光：指针还没停稳也能看出「它理我了」。
+     伪元素是 hover 时才建的，所以每次掠进去都会重放一遍，不用 JS 插手。 */
+  .wcard:hover .hoveract::after{
+    content:''; position:absolute; top:0; bottom:0; width:44%; left:-48%;
+    background:linear-gradient(104deg,transparent,rgba(255,255,255,.32),transparent);
+    animation:sheen .86s var(--spring) forwards;
+  }
+  @keyframes sheen{to{left:120%}}
   .hoveract button{
     height:30px; padding:0 15px; border:0; border-radius:8px; cursor:pointer;
     font:inherit; font-size:12.5px; font-weight:550; color:#fff;
@@ -810,6 +818,56 @@
   }
   .more button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
 
+  /* ── 剪藏文章 ───────────────────────────
+     粘贴框 + 逐条结果。行结构与划线列表一致（左边说清是什么，右边说清到哪一步了），
+     状态用文字加色彩区分，不靠图标 —— 界面里不出现 emoji。 */
+  .clipin{padding:13px 15px 0}
+  .clipta{
+    display:block; width:100%; box-sizing:border-box; min-height:92px; max-height:34vh;
+    padding:11px 13px; border-radius:11px; outline:none; resize:vertical;
+    border:1px solid var(--line-2); background:var(--surface-2);
+    font:inherit; font-size:12.5px; line-height:1.75; color:var(--ink);
+    word-break:break-all;
+  }
+  .clipta::placeholder{color:var(--ink-3)}
+  .clipta:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .clipin .stools{padding:11px 0 12px; border-bottom:1px solid var(--line)}
+  .cliprow{display:flex; align-items:flex-start; gap:12px; padding:12px 15px; border-top:1px solid var(--line)}
+  .cliprow:first-child{border-top:0}
+  .cliprow .bd{flex:1; min-width:0}
+  .cliprow .nm{
+    font-size:12.5px; color:var(--ink); line-height:1.5;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .cliprow .nm.pending{color:var(--ink-3)}
+  .cliprow .sub{margin-top:3px; font-size:11px; color:var(--ink-3); line-height:1.5}
+  .cliprow .sub.bad{color:var(--err)}
+  .cliprow .st{
+    flex:none; margin-top:1px; padding:2px 8px; border-radius:7px; font-size:10.5px;
+    background:rgba(127,140,160,.14); color:var(--ink-3);
+  }
+  .cliprow .st.doing{background:var(--accent-soft); color:var(--accent)}
+  .cliprow .st.done{background:rgba(60,150,95,.15); color:#2f7d4f}
+  .cliprow .st.bad{background:rgba(200,85,74,.13); color:var(--err)}
+  .cliprow .acts{flex:none; display:flex; gap:6px; align-items:center}
+  .cliprow .acts button{
+    height:26px; padding:0 11px; border-radius:8px; cursor:pointer; font:inherit; font-size:11.5px;
+    border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease;
+  }
+  .cliprow .acts button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .cliprow .acts button:active{transform:scale(.95)}
+  .cliprow .acts button:disabled{opacity:.4; cursor:default; background:transparent; color:var(--ink-3)}
+  .cliprow .acts button:disabled:hover{background:transparent; color:var(--ink-3); border-color:var(--line-2)}
+  .cliprow .acts button.on{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .ch2{
+    padding:20px 15px 9px; font-size:11.5px; color:var(--ink-3);
+    letter-spacing:.04em; text-transform:none;
+  }
+  @media (prefers-color-scheme:dark){
+    .cliprow .st.done{color:#7fd3a0}
+  }
+
   /* ── 划线笔记：多选与导入 ─────────────── */
   .ntools{display:flex; align-items:center; gap:9px; padding:11px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
   .ntools .cnt{font-size:11.5px; color:var(--ink-3)}
@@ -843,6 +901,85 @@
      不关的话点一下筛选（节点换位）整墙卡会一起重放一遍。 */
   .wcard.rev{animation:none; opacity:1}
   /* 侧边栏切换的整块交接改走 Web Animations API，见 slideView() */
+
+  /* ── 书架样式二：左右叠卡（折叠屏那一下）────────
+     一张摆在正中放大，后面的往右侧转着叠出去。翻书不用 keyframes：
+     每张卡的位置就是「它离当前那张有几张」，改类名交给 transition 去补间 ——
+     前面那张折着飞去左边，后面那张从右侧展开到位，一出一进正好对上「这边出来
+     那边就折走了」。动画全部交给状态类，所以这儿把入场/滚动摊开动画关掉。 */
+  .sstack{position:relative; width:min(880px,100%); margin:0 auto; padding:22px 16px 6px}
+  .sstage{position:relative; height:clamp(430px,64vh,600px); --sw:min(292px,58vw);
+    perspective:1400px; perspective-origin:62% 42%;
+    container-type:inline-size; container-name:sst}
+  /* 居中的负边距要用 calc 取半宽：min(-146px,-29vw) 会挑「更负」的那个，
+     宽 292 的卡被推开 417px，正面那张直接歪到左边去了（实测中心偏 164px）。 */
+  .sstage>.wcard{position:absolute; left:50%; top:0; width:var(--sw);
+    margin-left:calc(var(--sw) / -2); opacity:0; pointer-events:none;
+    animation:none; box-shadow:var(--shadow);
+    transition:transform .56s var(--spring), opacity .4s ease, box-shadow .4s ease;
+    will-change:transform, opacity}
+  .sstage>.wcard.pre,.sstage>.wcard.unfurl,.sstage>.wcard.rev{animation:none}
+  /* 扇形张多开是按「卡自己的宽度」算的百分比 —— 舞台一窄，右边那点空地就不够分了。
+     实测过一遍：1440 宽时最后一张右缘 1355 还在窗口里，1024 就 1147（越窗 123px），
+     760 越 147px，480（窗最小 480）整张 s3 直接看不见 —— 可提示语写的是
+     「点右侧那几张直接跳过去」。所以按舞台自己量三档收扇，越窄步长越小；
+     舞台 ≤520 只摊两张：摊不开时宁可少一张，也别让人去点看不见的地方。
+     800 / 740 / 520 三个点是拿「这张卡右缘 ≤ 窗口右缘」反推的，不是拍脑袋。
+     容器查询改不动 .sstage 自己，变量只能落在卡上。 */
+  .sstage>.wcard{--f1:62%; --f2:112%; --f3:152%}
+  @container sst (max-width:800px){.sstage>.wcard{--f1:56%; --f2:80%; --f3:92%}}
+  @container sst (max-width:740px){.sstage>.wcard{--f1:40%; --f2:60%; --f3:72%}}
+  @container sst (max-width:520px){.sstage>.wcard{--f1:26%; --f2:44%; --f3:44%}}
+  .sstage>.wcard.s0{opacity:1; pointer-events:auto; z-index:20;
+    transform:translate3d(0,0,0) rotateY(0deg) scale(1)}
+  /* 后面看得见的那几张也得能点（点它就翻过去）。基座里 pointer-events:none 是给
+     opacity:0 那几张兜底的，别把它们也一起放开 —— 点一团空气不该有反应。 */
+  .sstage>.wcard.s1{opacity:.86; z-index:19; pointer-events:auto; cursor:pointer;
+    transform:translate3d(var(--f1),10px,-40px) rotateY(-24deg) scale(.93)}
+  .sstage>.wcard.s2{opacity:.62; z-index:18; pointer-events:auto; cursor:pointer;
+    transform:translate3d(var(--f2),20px,-80px) rotateY(-32deg) scale(.87)}
+  .sstage>.wcard.s3{opacity:.38; z-index:17; pointer-events:auto; cursor:pointer;
+    transform:translate3d(var(--f3),30px,-110px) rotateY(-38deg) scale(.82)}
+  .sstage>.wcard.s1:hover{transform:translate3d(var(--f1),6px,-40px) rotateY(-20deg) scale(.955)}
+  .sstage>.wcard.s2:hover{transform:translate3d(var(--f2),14px,-80px) rotateY(-27deg) scale(.895)}
+  .sstage>.wcard.s3:hover{transform:translate3d(var(--f3),22px,-110px) rotateY(-33deg) scale(.845)}
+  /* 最窄那一档（480 的窗，舞台实测 418）三张真的摊不开：按算出来的步长，
+     s3 的右缘还要越窗 49px。那就只留两张能看见、能点 —— 第三张收进阴影里。 */
+  @container sst (max-width:520px){
+    .sstage>.wcard.s3{opacity:0; pointer-events:none;
+      transform:translate3d(var(--f3),26px,-100px) rotateY(-36deg) scale(.8)}
+  }
+  .sstage>.wcard.saway{opacity:0; z-index:16;
+    transform:translate3d(190%,38px,-140px) rotateY(-44deg) scale(.78)}
+  /* 已经翻过去的那张：折到左边去了，往回翻时它就从这里飞回来 */
+  .sstage>.wcard.sgone{opacity:0; z-index:15;
+    transform:translate3d(-178%,16px,-90px) rotateY(40deg) scale(.76)}
+  .sstage>.wcard.tap.s0{transform:translate3d(0,0,0) scale(.982)}
+  .sstage>.wcard.s0:hover{transform:translate3d(0,-4px,0) scale(1.012)}
+  .sstage>.wcard .mt{padding:12px 13px 14px}
+  .sstage>.wcard .mt .n{font-size:14.5px; margin-top:1px}
+  .sstage>.wcard .mt .a{font-size:11.5px; margin-top:5px; white-space:normal}
+  .snav{display:flex; align-items:center; justify-content:center; gap:14px; padding:6px 0 12px}
+  .snav .sp{font-size:11.5px; color:var(--ink-3); letter-spacing:.05em; min-width:74px; text-align:center}
+  .snav button{width:34px; height:34px; flex:none; border:1px solid var(--line-2); border-radius:50%;
+    cursor:pointer; font:inherit; font-size:14px; line-height:1; color:var(--ink-2);
+    display:grid; place-items:center; background:rgba(var(--glass-rgb), calc(var(--frost) * .6));
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); box-shadow:var(--sheen);
+    transition:transform .2s var(--spring), color .16s ease, border-color .16s ease}
+  .snav button:hover{color:var(--accent); border-color:rgba(47,127,240,.32)}
+  .snav button:active{transform:scale(.9)}
+  .snav button[disabled]{opacity:.32; cursor:default; transform:none}
+  .sstack .shinth{font-size:11px; color:var(--ink-3); text-align:center; padding:0 0 10px}
+
+  /* 瀑布 / 叠卡 那两颗切换钮 */
+  .stools .smode{display:inline-flex; gap:2px; padding:2px; flex:none; border-radius:9px;
+    border:1px solid var(--line-2);
+    background:rgba(var(--glass-rgb), calc(var(--frost) * .45))}
+  .stools .smode button{height:26px; padding:0 12px; border:0; border-radius:7px; cursor:pointer;
+    font:inherit; font-size:11.5px; color:var(--ink-3); background:transparent;
+    transition:background .18s ease, color .18s ease}
+  .stools .smode button:hover{color:var(--ink-2)}
+  .stools .smode button.on{background:var(--accent-soft); color:var(--accent); font-weight:600}
   .bar{animation:arrive .5s cubic-bezier(.2,.9,.28,1) both}
   .split > *{animation:arrive .58s cubic-bezier(.2,.9,.28,1) both}
   .split > *:nth-child(1){animation-delay:.04s}
@@ -874,7 +1011,14 @@
      剩下的交给内部 flex——.vbody 吃掉表头之外的高度，.rdwrap 再 100% 填满。
      表头高矮都不影响贴底。 */
   .rdwrap{
-    display:grid; grid-template-columns:252px minmax(0,1fr);
+    display:grid;
+    /* 三栏都能各自缩回：目录（左）/ 正文（中）/ 笔记（右）。
+       宽度只写在这两个变量上，折叠时改的是变量 —— grid-template-columns 拿到新的
+       轨宽才有一段可插值的过渡（见下面那条 transition）；直接切 display 就会
+       「啪」地跳，那种一边推开一边合上的感觉全没了。 */
+    grid-template-columns:var(--rd-nav-w) minmax(0,1fr) var(--rd-note-w);
+    --rd-nav-w:252px;
+    --rd-note-w:0px;
     height:100%; min-height:0; margin:0;
     border-top:1px solid var(--line);
     /* 阅读偏好（字号/行距/栏宽/字体/底色）由「阅读器设置」面板写进这几个变量，
@@ -907,11 +1051,21 @@
   body.reading #view > .vpane[data-pane="read"]{height:calc(100vh - 106px); min-height:0}
   /* main 默认下留白 96px（给悬浮 dock 让位）；阅读时不需要，收到 22px 才能贴底。 */
   @media (min-width:841px){ body.reading main{padding-bottom:22px} }
+  /* 阅读器是三栏（目录 / 正文 / 笔记），1080 的居中宽度切完只剩 270 出头的正文，
+     字还没看两行就换行了。读书时把舞台放宽，正文才配得上一本书。 */
+  body.reading main{max-width:min(1440px, 100%)}
   /* 右下角的「任务」进度 dock 是抓取用的，读书时既不相关又会压住正文右下角；
      淡出并让出点击（用 opacity 而非 display，进出阅读时有一小段过渡，不突兀）。
      右下角那颗 Agent 气泡窄，落在正文列外的留白里，保持常驻。 */
   .dock{transition:opacity .28s var(--spring), transform .28s var(--spring)}
   body.reading .dock{opacity:0; pointer-events:none; transform:translateY(8px)}
+  /* 专注模式是「只出现书籍的内容」：这时连左侧那条应用导航也让开，
+     整屏都是书。退出还是那三下 —— F、再点一次「专注」、或返回。 */
+  .shell, .side{transition:grid-template-columns .3s var(--spring), gap .3s var(--spring),
+    opacity .22s ease, transform .28s var(--spring)}
+  body.reading.focus .shell{grid-template-columns:0px minmax(0,1fr); gap:0}
+  body.reading.focus .side{opacity:0; pointer-events:none; transform:translateX(-12px);
+    overflow:hidden}
   /* 左栏：全书目录。表头（书名/章节数/筛选）钉在栏顶，列表自己滚。 */
   .rdnav{display:flex; flex-direction:column; min-height:0; min-width:0;
     border-right:1px solid var(--line); background:rgba(255,255,255,.22)}
@@ -958,9 +1112,12 @@
   /* 正文一旦往下滚，顶/底两条各自浮起一道很淡的投影，把「内容在动、条不动」说出来。 */
   .rdmain.scrolled .rdbar{box-shadow:0 8px 16px -16px rgba(20,24,32,.55)}
   .rdmain.scrolled .rdfoot{box-shadow:0 -8px 16px -16px rgba(20,24,32,.55)}
-  /* 顶部一条：左边当前章节面包屑，右边「专注 / 设置」两颗小钮，读时抬头就知道在哪。 */
+  /* 顶部一条：左边当前章节面包屑，右边几颗小钮，读时抬头就知道在哪。
+     min-width:0 + flex-wrap 是防压垮：这一条住在中间那一格里，右边笔记栏一摊开，
+     格子会窄到装不下整排钮；不写这两条，钮会溢出到笔记栏的页签上，
+     把「划线 / 条目」那两颗盖住 —— 看着像页签坏了。 */
   .rdbar{position:relative; display:flex; align-items:center; gap:9px;
-    padding:6px 12px 6px 16px; flex:none;
+    padding:6px 12px 6px 16px; flex:none; min-width:0; flex-wrap:wrap;
     border-bottom:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.3);
     transition:background-color .34s ease, box-shadow .22s ease}
   .rdcrumb{font-size:12px; font-weight:550; color:var(--rd-ink2, var(--ink-2));
@@ -998,14 +1155,279 @@
   .rdseg button:hover{color:var(--ink)}
   .rdseg button.on{background:var(--solid); color:var(--ink); font-weight:600;
     box-shadow:0 1px 3px rgba(20,24,32,.14)}
-  /* 专注模式：把左栏目录收走，正文居中一栏到底，最大化每屏的字。
+  /* 专注模式：把左右两栏都收走，正文居中一栏到底，最大化每屏的字。
      用 grid 而不是 display，宽度变化才有一小段过渡，不会「啪」地跳。 */
   .rdwrap{transition:grid-template-columns .32s var(--spring)}
-  body.reading.focus .rdwrap{grid-template-columns:0 minmax(0,1fr)}
-  body.reading.focus .rdnav{overflow:hidden; opacity:0; pointer-events:none;
-    transition:opacity .2s ease}
+  .rdwrap.notes{--rd-note-w:332px}
+  .rdwrap.nonav{--rd-nav-w:0px}
+  body.reading.focus .rdwrap{--rd-nav-w:0px; --rd-note-w:0px}
+  body.reading.focus .rdnav, .rdwrap.nonav .rdnav{overflow:hidden; opacity:0;
+    pointer-events:none; transition:opacity .2s ease}
   .rdnav{transition:opacity .24s ease .06s}
   body.reading.focus .rdin{max-width:min(96ch, 100%)}
+  /* 右栏笔记：左读右记。栏宽由上面 .rdwrap.notes 决定，这里只管栏内。
+     收起来时轨宽变 0，栏里的东西靠 overflow 裁掉，不是一下消失。 */
+  .rdnotes{display:flex; flex-direction:column; min-height:0; min-width:0;
+    overflow:hidden; border-left:1px solid var(--line);
+    background:rgba(255,255,255,.22); transition:opacity .24s ease .06s,
+    background-color .34s ease}
+  .rdwrap:not(.notes) .rdnotes{opacity:0; pointer-events:none; transition:opacity .18s ease}
+  .rdwrap[data-rdtheme="night"] .rdnotes{background:rgba(255,255,255,.035)}
+  .rdwrap[data-rdtheme="paper"] .rdnotes{background:rgba(246,239,224,.5)}
+  /* 顶部：两个页签 + 收起。页签上的数字就是「这本书我记了多少」，不用点进去数。 */
+  .nttabs{display:flex; align-items:center; gap:4px; flex:none;
+    padding:8px 9px 7px; border-bottom:1px solid var(--line)}
+  .nttabs button{border:0; border-radius:8px; background:transparent; cursor:pointer;
+    font:inherit; font-size:12px; color:var(--ink-2); height:26px; padding:0 9px;
+    display:inline-flex; align-items:center; gap:5px; white-space:nowrap;
+    transition:background .16s ease, color .16s ease}
+  .nttabs button:hover{background:var(--surface-2); color:var(--ink)}
+  .nttabs button.on{background:var(--accent-soft); color:var(--accent); font-weight:600}
+  .nttabs b{font-weight:600; font-size:11px; font-variant-numeric:tabular-nums;
+    color:var(--ink-3)}
+  .nttabs button.on b{color:var(--accent)}
+  .nttabs .grow{flex:1}
+  /* 标签筛选：一支笔一行片，点了就只看这一类。最后那颗「只在本章」是范围开关。 */
+  .ntchips{display:flex; flex-wrap:wrap; gap:4px; flex:none; padding:8px 9px 6px}
+  .ntchip{display:inline-flex; align-items:center; gap:5px; height:23px; padding:0 8px;
+    border:1px solid var(--line-2); border-radius:99px; background:rgba(255,255,255,.5);
+    cursor:pointer; font:inherit; font-size:11.5px; color:var(--ink-2); white-space:nowrap;
+    transition:border-color .16s ease, background .16s ease, color .16s ease}
+  .ntchip:hover{border-color:var(--line-2); background:var(--surface-2); color:var(--ink)}
+  .ntchip.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft);
+    font-weight:600}
+  .ntchip i{width:8px; height:8px; border-radius:99px; background:var(--mkc, var(--ink-3));
+    flex:none; box-shadow:0 0 0 1px rgba(0,0,0,.06) inset}
+  .ntbody{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain;
+    padding:2px 8px 14px; scrollbar-width:thin}
+  .ntbody::-webkit-scrollbar{width:7px}
+  .ntbody::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .ntbody:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
+  /* 一条划线 = 一道色边 + 原文 + 那句想法 + 出处。整行可点，点了就跳回正文那句。 */
+  .ntrow{position:relative; display:block; width:100%; text-align:left; cursor:pointer;
+    border:1px solid transparent; border-radius:10px; padding:8px 9px 8px 12px; margin:0 0 2px;
+    background:transparent; font:inherit; color:var(--ink-2);
+    transition:background .16s ease, border-color .16s ease}
+  .ntrow:hover{background:var(--surface-2)}
+  .ntrow.on{border-color:var(--accent); background:var(--accent-soft)}
+  .ntrow .cbar{position:absolute; left:4px; top:10px; bottom:10px; width:3px;
+    border-radius:99px; background:var(--mkc, var(--ink-3))}
+  .ntrow .q{font-size:12.5px; line-height:1.6; color:var(--ink); display:-webkit-box;
+    -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; word-break:break-word}
+  .ntrow .memo{margin-top:5px; padding:6px 8px; border-radius:8px; background:var(--surface-2);
+    font-size:12px; line-height:1.62; color:var(--ink); white-space:pre-wrap;
+    word-break:break-word}
+  .ntrow .nfoot{display:flex; align-items:center; gap:7px; margin-top:6px;
+    font-size:10.5px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .ntrow .nfoot .nch{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .ntrow .nfoot .grow{flex:1}
+  .ntrow .nk{flex:none; padding:1px 6px; border-radius:99px; background:var(--surface-2);
+    color:var(--ink-2); font-size:10px}
+  /* 行上动作：平时不占视线，hover 或键盘聚焦才浮出来。 */
+  .ntrow .nacts{display:flex; gap:3px; margin-top:6px; opacity:0; max-height:0;
+    overflow:hidden; transition:opacity .16s ease, max-height .18s var(--spring)}
+  .ntrow:hover .nacts, .ntrow:focus-within .nacts, .ntrow.on .nacts{opacity:1; max-height:30px}
+  .ntrow .nacts button{border:1px solid var(--line-2); border-radius:7px; background:rgba(255,255,255,.6);
+    cursor:pointer; font:inherit; font-size:11px; color:var(--ink-2); height:22px; padding:0 8px;
+    transition:background .14s ease, color .14s ease, border-color .14s ease}
+  .ntrow .nacts button:hover{background:var(--surface-2); color:var(--ink)}
+  .ntrow .nacts button.del:hover{background:#fdeceb; border-color:#f6c9c5; color:#b3352c}
+  .ntempty{padding:26px 14px; text-align:center; color:var(--ink-3); font-size:12px; line-height:1.9}
+  /* 底部一行：存盘状态。笔记就住在这本书的文件夹里，这里说一声，免得担心丢了。 */
+  .ntfoot{flex:none; padding:7px 11px; border-top:1px solid var(--line);
+    font-size:10.5px; color:var(--ink-3); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; font-variant-numeric:tabular-nums}
+  .ntfoot.busy{color:var(--accent)}
+  .ntfoot.bad{color:#b3352c}
+  /* ── 条目编辑器 / 思维导图 / 模板 ─────────────────────
+     这两样都比右栏宽得多：条目要写长文（标题、表格、引用别处），导图要看整棵树。
+     所以各开一层浮窗，写完了再把结果落回这本书的文件夹里。 */
+  .ntlay{position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:24px;
+    background:rgba(20,26,38,.40); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
+    opacity:0; pointer-events:none; transition:opacity .22s ease}
+  .ntlay.open{opacity:1; pointer-events:auto}
+  .ntlay>section{display:flex; flex-direction:column; width:min(1040px,100%);
+    max-height:min(760px,100%); border-radius:var(--r); overflow:hidden;
+    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
+    backdrop-filter:blur(var(--blur)) saturate(180%); border:1px solid var(--line);
+    box-shadow:var(--shadow), var(--sheen); transform:translateY(12px) scale(.986);
+    transition:transform .28s var(--spring)}
+  .ntlay.open>section{transform:none}
+  .ntlay.narrow>section{width:min(680px,100%)}
+  /* 条目编辑器是写长文的地方：给个稳当高度，不然两行字就缩成一张小卡，
+     写着写着框子往下掉，预览也跟着抖。 */
+  #ntEdLayer>section{height:min(660px,86vh)}
+  .edhd{display:flex; align-items:center; gap:8px; flex:none; padding:11px 13px;
+    border-bottom:1px solid var(--line)}
+  .edhd .edttl{flex:1; min-width:0; border:0; background:transparent; font:inherit;
+    font-size:15px; font-weight:600; color:var(--ink); padding:5px 6px; border-radius:8px;
+    transition:background .16s ease, box-shadow .16s ease}
+  .edhd .edttl::placeholder{color:var(--ink-3); font-weight:500}
+  .edhd .edttl:focus{outline:none; background:var(--surface-2);
+    box-shadow:inset 0 0 0 1px var(--line-2)}
+  /* 只有编辑器那层的标题是输入框；模板和导图层拿它当个死标题用。 */
+  .edhd .edttl.hard{flex:none; font-size:14px; cursor:default; padding:5px 2px}
+  .edhd .edttl.hard:focus{background:transparent; box-shadow:none}
+  .rdseg-fit{flex:none}
+  .mapbar .grow{flex:1}
+  .edhd .grow{flex:1}
+  /* 工具条：一排小方块，按「结构 → 字面 → 插入 → 这套书的活儿」分组。
+     组与组之间一道细竖线，眼睛找得到边界，不必把十八颗钮数一遍。 */
+  .edtools{display:flex; align-items:center; gap:3px; flex:none; flex-wrap:wrap;
+    padding:6px 12px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.24)}
+  .edtools button{border:1px solid transparent; border-radius:7px; background:transparent;
+    cursor:pointer; font:inherit; font-size:11.5px; color:var(--ink-2); height:26px;
+    min-width:27px; padding:0 7px; display:inline-flex; align-items:center; gap:4px;
+    white-space:nowrap; transition:background .14s ease, color .14s ease,
+    border-color .14s ease, transform .12s ease}
+  .edtools button:hover{background:var(--surface-2); color:var(--ink)}
+  .edtools button:active{transform:scale(.94)}
+  .edtools button.on{background:var(--accent-soft); border-color:transparent;
+    color:var(--accent); font-weight:600}
+  /* 工具条里的分隔是一根 1px 细线。.sep 这个类名设置页也在用（那儿是一行小节标题，
+     带 padding 和入场动画），不在这儿按死，细线会被撑成一块灰。 */
+  .edtools .sep{display:block; padding:0; animation:none; width:1px; height:16px;
+    background:var(--line-2); margin:0 5px; flex:none}
+  .edtools .sp{flex:1}
+  .edtools b{font-weight:700}
+  .edtools i{font-style:italic}
+  .edtools s{text-decoration:line-through}
+  /* 标签色：五支笔就是五个小圆点，选中哪个哪个描一圈；和右栏筛选片、正文划线同一套色。 */
+  .edtools .dots{display:inline-flex; align-items:center; gap:3px; flex:none}
+  .edtools .modes{display:inline-flex; gap:3px; flex:none}
+  .edtools button.dot{min-width:24px; width:24px; padding:0; justify-content:center;
+    position:relative}
+  .edtools button.dot::before{content:''; width:12px; height:12px; border-radius:99px;
+    background:var(--mkc, var(--ink-3)); box-shadow:0 0 0 1px rgba(0,0,0,.10) inset}
+  .edtools button.dot.on{background:var(--surface-2)}
+  .edtools button.dot.on::after{content:''; position:absolute; inset:3px; border-radius:99px;
+    border:1.5px solid var(--mkc, var(--accent))}
+  /* align-items 不写死 stretch，两栏会按各自内容的高度缩在顶上：
+     输入框只剩两三行高、预览一小截，下面整片是空的。 */
+  .edbody{flex:1; min-height:0; display:grid; align-items:stretch;
+    grid-template-columns:minmax(0,1fr) 0;
+    transition:grid-template-columns .3s var(--spring)}
+  .edbody.split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .edbody.view{grid-template-columns:0 minmax(0,1fr)}
+  .edta{min-width:0; border:0; resize:none; outline:none; padding:18px 20px 40px;
+    background:transparent; color:var(--ink); font:13px/1.85 ui-monospace,"SF Mono",Menlo,monospace;
+    overflow:auto; scrollbar-width:thin}
+  .edta::placeholder{color:var(--ink-3)}
+  .edpv{min-width:0; overflow:auto; border-left:1px solid var(--line);
+    padding:16px 20px 40px; scrollbar-width:thin; background:rgba(255,255,255,.2)}
+  .edbody.split .edpv, .edbody.view .edpv{border-left:1px solid var(--line)}
+  .edbody.view .edta{overflow:hidden}
+  /* 条目底下的引用区：一句原文 + 出处，点一下就翻回那一章那一句。 */
+  .edrefs{flex:none; border-top:1px solid var(--line); padding:8px 13px 10px;
+    display:flex; flex-wrap:wrap; gap:5px; max-height:132px; overflow:auto}
+  .edrefs:empty{display:none}
+  .edref{display:inline-flex; align-items:center; gap:6px; max-width:100%; height:25px;
+    padding:0 4px 0 8px; border:1px solid var(--line-2); border-radius:99px;
+    background:rgba(255,255,255,.5); cursor:pointer; font:inherit; font-size:11px;
+    color:var(--ink-2); transition:border-color .14s ease, background .14s ease}
+  .edref:hover{border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
+  .edref em{font-style:normal; max-width:230px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap}
+  .edref span{flex:none; font-size:10px; color:var(--ink-3); padding-right:2px}
+  .edref b{flex:none; width:16px; height:16px; border-radius:99px; border:0; background:transparent;
+    cursor:pointer; color:var(--ink-3); font-size:13px; line-height:16px}
+  .edref b:hover{background:#fdeceb; color:#b3352c}
+  .edrefs .refhint{font-size:11px; color:var(--ink-3); line-height:1.6}
+  /* 「存为模板」的表单：开在模板抽屉里（不用 sheet —— 这层浮窗比 #veil 还高，
+     弹窗问话会垫在底下看不见）。 */
+  .tplform{padding:4px 13px 12px; display:flex; flex-direction:column; gap:8px}
+  .tplform input,.tplform textarea{width:100%; border:1px solid var(--line-2); border-radius:9px;
+    background:rgba(255,255,255,.55); color:var(--ink); font:inherit; font-size:12.5px;
+    padding:8px 10px; outline:none; transition:border-color .16s ease, box-shadow .16s ease}
+  .tplform textarea{min-height:170px; resize:vertical; font:12px/1.75 ui-monospace,"SF Mono",Menlo,monospace}
+  .tplform input:focus,.tplform textarea:focus{border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft)}
+  .tplform .tplhint{font-size:11px; color:var(--ink-3); line-height:1.65}
+  .tplform .acts{display:flex; gap:8px; justify-content:flex-end}
+  /* 表格发生器：选几乘几就是选几个格子，不必打字。 */
+  .edgrid{position:relative}
+  .edpop{position:absolute; z-index:5; top:32px; left:0; padding:10px; border-radius:12px;
+    border:1px solid var(--line-2); background:var(--solid); box-shadow:var(--shadow);
+    display:none}
+  .edpop.open{display:block; animation:none}
+  .edpop .gh{font-size:11px; color:var(--ink-3); margin:0 0 7px; text-align:center;
+    font-variant-numeric:tabular-nums}
+  .edpop .tb{display:grid; grid-template-columns:repeat(8,17px); gap:2px}
+  .edpop .tb i{width:17px; height:15px; border-radius:3px; background:var(--surface-2);
+    cursor:pointer; transition:background .1s ease}
+  .edpop .tb i.hit{background:color-mix(in srgb, var(--accent) 62%, transparent)}
+  .edpop .cap{margin:8px 0 0; font-size:11px; color:var(--ink-2); text-align:center}
+  /* 模板抽屉：官方在前、自定义在后，右边留一颗「删」给自定义那几套。 */
+  .edtpl{max-height:min(520px,80vh); overflow:auto; padding:6px 4px 10px}
+  .tplrow{display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left;
+    border:1px solid transparent; border-radius:12px; padding:10px 11px; cursor:pointer;
+    background:transparent; font:inherit; color:var(--ink); transition:background .16s ease,
+    border-color .16s ease}
+  .tplrow:hover{background:var(--surface-2); border-color:var(--line-2)}
+  .tplrow .tn{font-size:13px; font-weight:600}
+  .tplrow .td{font-size:11.5px; color:var(--ink-2); line-height:1.62; margin-top:3px}
+  .tplrow .tg{flex:1; min-width:0}
+  .tplrow .badge{flex:none; font-size:10px; color:var(--ink-3); border:1px solid var(--line-2);
+    border-radius:99px; padding:1px 7px; margin-top:1px}
+  .tplrow .del{flex:none; border:1px solid var(--line-2); border-radius:8px; background:transparent;
+    cursor:pointer; font:inherit; font-size:11px; color:var(--ink-3); height:22px; padding:0 8px}
+  .tplrow .del:hover{background:#fdeceb; border-color:#f6c9c5; color:#b3352c}
+  .tplhd{padding:13px 15px 4px; font-size:11.5px; color:var(--ink-3); letter-spacing:.04em}
+  /* 导图看片：SVG 自己画，缩放交给一个滑杆；切刀（按标签/章节/条目）在顶上。 */
+  .mapbar{display:flex; align-items:center; gap:7px; flex:none; padding:9px 13px;
+    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-2)}
+  .mapbar .grow{flex:1}
+  .mapstage{flex:1; min-height:0; overflow:auto; display:grid; place-items:center;
+    padding:16px; background:rgba(255,255,255,.28); scrollbar-width:thin}
+  .mapstage img{max-width:none; border-radius:10px; background:transparent;
+    transition:transform .2s var(--spring)}
+  .mapstage.busy::after{content:'正在画…'; color:var(--ink-3); font-size:12.5px}
+  .mapstage.busy img{display:none}
+  .nttabs{flex-wrap:wrap}
+  /* 条目行：正文用 Markdown 渲染出来的样子看两行，比原来那串展平的纯文本好认。 */
+  .ntrow .pvs{margin-top:5px; padding:6px 8px; border-radius:8px; background:var(--surface-2);
+    font-size:11.5px; line-height:1.6; color:var(--ink-2); max-height:76px; overflow:hidden}
+  .ntrow .pvs > :first-child{margin-top:0}
+  .ntrow .pvs > :last-child{margin-bottom:0}
+  .ntrow .pvs p{margin:0 0 5px}
+  .ntrow .pvs ul,.ntrow .pvs ol{margin:0 0 5px; padding-left:16px}
+  .ntrow .pvs h1,.ntrow .pvs h2,.ntrow .pvs h3,.ntrow .pvs h4,.ntrow .pvs h5{
+    font-size:12px; margin:6px 0 4px; color:var(--ink)}
+  .ntrow .pvs code{font-size:10.5px}
+  .ntrow .pvs pre{display:none}
+  .ntrow .pvs table{font-size:10.5px}
+  .ntrow .refs{display:flex; flex-wrap:wrap; gap:4px; margin-top:6px}
+  .ntrow .rf{display:inline-flex; align-items:center; gap:5px; max-width:100%; height:21px;
+    padding:0 7px; border-radius:99px; border:1px solid var(--line-2); background:rgba(255,255,255,.5);
+    cursor:pointer; font:inherit; font-size:10.5px; color:var(--ink-2);
+    transition:border-color .14s ease, background .14s ease}
+  .ntrow .rf:hover{border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
+  .ntrow .rf em{font-style:normal; max-width:150px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap}
+  /* 正文里的划线：颜色就是那支笔（--mkc 由 JS 按标签写上去）。
+     只改背景/文字装饰，不动盒模型 —— 加个 padding 就会把行距顶歪。 */
+  .md mark.gzmk{background:none; color:inherit; border-radius:3px; cursor:pointer;
+    -webkit-box-decoration-break:clone; box-decoration-break:clone;
+    transition:box-shadow .18s ease, background-color .18s ease}
+  .md mark.gzmk.k-highlight{background:var(--mkc, #ffd45e);
+    background:color-mix(in srgb, var(--mkc, #ffd45e) 78%, transparent)}
+  .md mark.gzmk.k-bold{font-weight:700}
+  .md mark.gzmk.k-underline{text-decoration:underline;
+    text-decoration-color:var(--mkc, currentColor); text-decoration-thickness:2px;
+    text-underline-offset:3px}
+  .md mark.gzmk.k-strike{text-decoration:line-through;
+    text-decoration-color:var(--mkc, currentColor)}
+  .md mark.gzmk.k-note{border-bottom:1px dashed var(--mkc, var(--accent))}
+  .md mark.gzmk.k-note::after{content:''; display:inline-block; width:5px; height:5px;
+    border-radius:99px; background:var(--mkc, var(--accent)); margin:0 3px 0 4px;
+    vertical-align:2px}
+  .md mark.gzmk:hover{box-shadow:0 0 0 2px var(--surface-2)}
+  .md mark.gzmk.on{box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent)}
+  @keyframes ntflash{0%,100%{box-shadow:0 0 0 0 transparent}
+    28%{box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent)}
+    70%{box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent)}}
+  .md mark.gzmk.flash{animation:ntflash 1.15s var(--spring) 1}
   /* 正文自己滚。这里刻意不设 scroll-behavior:smooth：换章时会把 scrollTop 归零，
      若带平滑就会「从底部一路滑回顶部」扫过上一章的字。需要平滑的地方（空格/Home/End）
      都在 JS 里显式传 behavior:'smooth'，不靠这条 CSS。滚动条收细、hover 才显形。 */
@@ -1031,6 +1453,28 @@
     padding:0 12px; background:transparent; font-weight:600; letter-spacing:.03em}
   .rddl .deed:first-child{border-left:none}
   .rddl .deed:hover{background:var(--surface-2)}
+  /* 底栏这一组挤不挤，跟窗口多宽没关系 —— 目录栏一收、笔记栏一摊，中间那栏
+     就窄了。所以把「底栏自己」设成容器，量的是它自己的宽度。别用 .rdmain：
+     那上面挂着 position:absolute 的设置浮层，套上 containment 会把它们重新钉位。
+     两条实测注记：① 这排东西摊开要 443px，所以降级点定在 470 / 400，不是拍脑袋；
+     ② 容器查询管不到容器自己（改自己的 gap / flex-wrap 会被浏览器丢掉，怕成循环），
+        所以每一档都只动里面的孩子：先藏百分比、再收字距，最后连进度条也收掉。 */
+  .rdfoot{container-type:inline-size; container-name:rdf}
+  @container rdf (max-width:470px){
+    .rdfoot .rdpos{display:none}
+    .rddl .deed{padding:0 8px}
+  }
+  @container rdf (max-width:400px){
+    .rdfoot .rdbar-mini{display:none}
+    .rddl .deed{padding:0 5px; letter-spacing:0}
+  }
+  /* 再窄就非但桌面窗口了（.app 的窗最小 480，正文栏最少也有 440 上下）。
+     留一档兜底：翻章两颗收到最小，导出组允许收缩，280 也不用把「文件夹」裁一半。 */
+  @container rdf (max-width:340px){
+    .rdfoot>#rdPrev,.rdfoot>#rdNext{padding:0 6px}
+    .rddl{flex:0 1 auto; min-width:0; overflow:hidden}
+    .rddl .deed{padding:0 4px}
+  }
   /* 底部进度条：一根细的百分比，读长章时知道自己还剩多少。 */
   .rdbar-mini{width:64px; height:4px; border-radius:99px; background:var(--surface-2);
     overflow:hidden; flex:none}
@@ -1048,7 +1492,8 @@
 
   /* 阅读器的「框」——顶栏、底栏、目录条目——不当正文选：拖过去是滚动，不是反蓝一片。
      正文（.md）当然照常可选，划词小条就指着它。 */
-  .rdbar, .rdfoot, .rdch, .rdcrumb, .rdmeta, .rdpos, .rdnavhd, .rdskel{user-select:none}
+  .rdbar, .rdfoot, .rdch, .rdcrumb, .rdmeta, .rdpos, .rdnavhd, .rdskel,
+  .nttabs, .ntchips, .ntfoot{user-select:none}
 
   /* 正文排版：抓回来的是纯 Markdown，按「好读」调，不抢界面本身的静。
      字号/行距/字体/墨色全部读 .rdwrap 上的阅读变量，设置面板一改就整体生效。 */
@@ -1127,6 +1572,47 @@
   .selpop .selbar button:hover{background:rgba(255,255,255,.14)}
   .selpop .selbar button:active{background:rgba(255,255,255,.22)}
   .selpop .selbar button + button{box-shadow:-.5px 0 0 rgba(255,255,255,.14)}
+  /* 笔那一排：颜色就是语义（论点/疑问/可引用/待查/灵感），所以按钮本体是一枚色片，
+     不写字 —— 一排六个文字按钮会把小条撑到比正文还宽。 */
+  .selpop .selpens{display:flex; align-items:center; gap:3px; padding:4px 7px 5px;
+    border-top:1px solid rgba(255,255,255,.1)}
+  .selpop .selpens button{border:0; border-radius:7px; background:transparent; cursor:pointer;
+    color:#f4f5f7; font:inherit; font-size:11.5px; font-weight:600; height:24px; padding:0 7px;
+    white-space:nowrap; transition:background .14s ease, box-shadow .14s ease}
+  .selpop .selpens button:hover{background:rgba(255,255,255,.14)}
+  .selpop .selpens button + button{box-shadow:none}
+  .selpop .selpens .pen{width:26px; padding:0; position:relative}
+  .selpop .selpens .pen i{display:block; width:15px; height:15px; margin:0 auto;
+    border-radius:5px; background:var(--mkc); box-shadow:0 0 0 1px rgba(255,255,255,.22) inset}
+  .selpop .selpens .pen:hover i{box-shadow:0 0 0 1.5px rgba(255,255,255,.6) inset}
+  .selpop .selpens .sep{display:block; padding:0; animation:none; width:1px; height:16px;
+    background:rgba(255,255,255,.16); margin:0 3px}
+  /* 划词即记：小条里直接写想法，存下来自动带上原文与出处。 */
+  .selpop .selnote{width:min(300px, 86vw); padding:10px 11px 11px}
+  .selpop .selnote .q{font-size:11.5px; line-height:1.55; color:rgba(255,255,255,.62);
+    max-height:44px; overflow:hidden; word-break:break-word;
+    border-left:2px solid var(--mkc, rgba(255,255,255,.3)); padding-left:7px; margin-bottom:8px}
+  .selpop .selnote textarea{width:100%; box-sizing:border-box; min-height:56px; resize:vertical;
+    border:1px solid rgba(255,255,255,.18); border-radius:9px; background:rgba(255,255,255,.08);
+    color:#f7f8fa; font:inherit; font-size:12.5px; line-height:1.6; padding:7px 9px; outline:none;
+    transition:border-color .16s ease, background .16s ease}
+  .selpop .selnote textarea:focus{border-color:rgba(255,255,255,.42); background:rgba(255,255,255,.12)}
+  .selpop .selnote .row{display:flex; align-items:center; gap:4px; margin-top:8px}
+  .selpop .selnote .row .grow{flex:1}
+  .selpop .selnote .kinds{display:flex; gap:3px}
+  .selpop .selnote .kinds button{border:1px solid rgba(255,255,255,.18); border-radius:7px;
+    background:transparent; color:rgba(255,255,255,.75); cursor:pointer; font:inherit;
+    font-size:11px; height:23px; padding:0 7px; transition:background .14s ease, color .14s ease,
+    border-color .14s ease}
+  .selpop .selnote .kinds button:hover{background:rgba(255,255,255,.12); color:#fff}
+  .selpop .selnote .kinds button.on{background:#fff; color:#191c22; border-color:#fff;
+    font-weight:600}
+  .selpop .selnote .go{border:0; border-radius:8px; background:#f2f4f8; color:#1a1e26;
+    cursor:pointer; font:inherit; font-size:12px; font-weight:600; height:26px; padding:0 12px}
+  .selpop .selnote .go:hover{background:#fff}
+  .selpop .selnote .cancel{border:0; background:transparent; color:rgba(255,255,255,.6);
+    cursor:pointer; font:inherit; font-size:11.5px; height:26px; padding:0 6px}
+  .selpop .selnote .cancel:hover{color:#fff}
   .selpop .selcard{padding:11px 14px 12px; width:max-content; max-width:min(380px,84vw);
     max-height:min(340px,60vh); overflow:auto; line-height:1.66; font-size:13px;
     white-space:pre-wrap; word-break:break-word}
@@ -1145,6 +1631,11 @@
     /* 窄窗本来就一栏，专注模式不能再把栏压成 0，只把目录片收掉。 */
     body.reading.focus .rdwrap{grid-template-columns:minmax(0,1fr)}
     body.reading.focus .rdnav{display:none}
+    body.reading.focus .rdnotes{display:none}
+    .rdwrap.nonav .rdnav{display:none}
+    /* 笔记栏在窄窗叠到正文下面；单列布局里轨宽压不成 0，所以直接收整块。 */
+    .rdnotes{display:none; border-left:0; border-top:1px solid var(--line)}
+    .rdwrap.notes .rdnotes{display:flex}
     .rdnav{border-right:0; border-bottom:1px solid var(--line)}
     .rdlist{display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 10px 10px}
     .rdch{flex:none; max-width:210px; border:1px solid var(--line-2); background:rgba(255,255,255,.5)}
@@ -1176,6 +1667,8 @@
   .wcard:hover .tag, .wcard.hasTag .tag{opacity:1; transform:none}
   .wcard .tag.go{background:rgba(43,140,240,.92); color:#fff}
   .wcard .tag.have{background:rgba(47,191,168,.92); color:#fff}
+  /* 中止/没跑完：琥珀色「没取完 N 章」，跟「已存全」的薄荷绿分开，用户一眼知道还能续 */
+  .wcard .tag.part{background:rgba(232,168,62,.94); color:#241a06}
 
   /* 封面缺失/加载失败时的书脊：色相由书 id 稳定派生，错落但不花 */
   .wcard .cv .spine{--h:212; position:absolute; inset:0; display:grid; place-items:center;
@@ -1362,6 +1855,12 @@
   @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .dtop .cv{background:linear-gradient(150deg,#232a38,#1c222e)} }
   html[data-theme="dark"] .dtop .cv{background:linear-gradient(150deg,#232a38,#1c222e)}
   .dtop .cv img{width:100%; height:100%; object-fit:cover; display:block}
+  /* 能读的书：封面本身就是入口，抬一下就进去了 */
+  .dtop .cv.go{cursor:pointer;
+    transition:transform .34s var(--spring), box-shadow .3s ease}
+  .dtop .cv.go:hover{transform:translateY(-4px) scale(1.025);
+    box-shadow:var(--shadow), 0 18px 42px -20px rgba(20,28,44,.5)}
+  .dtop .cv.go:active{transform:translateY(-1px) scale(.995)}
   .dtop .tx{flex:1; min-width:240px}
   .dtop h2{margin:0; font-size:21px; font-weight:600; letter-spacing:-.01em; line-height:1.3}
   .dtop .au{font-size:13px; color:var(--ink-2); margin-top:6px}
@@ -1806,6 +2305,14 @@
           </svg>
           本地书库<span class="badge" id="bgLocal"></span>
         </button>
+        <button data-v="clip">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8.4 5.1a2.6 2.6 0 0 1 3.7 3.7l-4.2 4.2a1.8 1.8 0 0 1-2.6-2.6l3.9-3.9"/>
+            <path d="M11.2 9.7 15 13.5"/>
+            <path d="M6.2 14.9h.01M9.9 16.4h.01"/>
+          </svg>
+          剪藏文章<span class="badge" id="bgClip"></span>
+        </button>
         <button data-v="notes">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 15.5 5 12l7-7a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3l-7 7z"/>
@@ -1886,6 +2393,64 @@
   </div>
 </div>
 
+<!-- 条目编辑器 / 模板 / 思维导图：三层浮窗共用一套壳（.ntlay），内容大半由 JS 填。
+     为什么不开在右栏里：条目要写长文（一到五级标题、表格、引用别处的话），导图要看整棵树，
+     332px 的栏装不下；写完的东西仍旧落回这本书的文件夹。 -->
+<div class="ntlay" id="ntEdLayer">
+  <section role="dialog" aria-modal="true" aria-label="写一条笔记">
+    <div class="edhd">
+      <input class="edttl" id="ntEdTitle" placeholder="这条笔记的标题" spellcheck="false"
+        autocomplete="off" aria-label="笔记标题">
+      <button class="deed" id="ntEdSave" type="button" title="保存（⌘/Ctrl + S）">保存</button>
+      <button class="deed" id="ntEdClose" type="button" title="关闭（Esc）">关闭</button>
+    </div>
+    <div class="edtools" id="ntEdTools"></div>
+    <div class="edbody" id="ntEdBody">
+      <textarea class="edta" id="ntEdTa" placeholder="用 Markdown 写。选中几个字再点上面的钮，就变成 **粗体** 或 `代码`。"
+        spellcheck="false"></textarea>
+      <div class="edpv md" id="ntEdPv"></div>
+    </div>
+    <div class="edrefs" id="ntEdRefs"></div>
+  </section>
+</div>
+
+<div class="ntlay narrow" id="ntTplLayer">
+  <section role="dialog" aria-modal="true" aria-label="读书笔记模板">
+    <div class="edhd">
+      <span class="edttl hard">读书笔记模板</span>
+      <span class="grow"></span>
+      <button class="deed" id="ntTplNew" type="button" title="把编辑器里这篇存成一套自己的模板">
+        存为模板</button>
+      <button class="deed" id="ntTplClose" type="button">关闭</button>
+    </div>
+    <div class="edtpl" id="ntTplList"></div>
+  </section>
+</div>
+
+<div class="ntlay" id="ntMapLayer">
+  <section role="dialog" aria-modal="true" aria-label="笔记思维导图">
+    <div class="edhd">
+      <span class="edttl hard">思维导图</span>
+      <span class="grow"></span>
+      <button class="deed" id="ntMapDir" type="button" title="mindmap.svg 就存在这本书的文件夹里">
+        打开所在文件夹</button>
+      <button class="deed" id="ntMapDl" type="button" title="另存一份 SVG 图片">存一份 SVG</button>
+      <button class="deed" id="ntMapClose" type="button">关闭</button>
+    </div>
+    <div class="mapbar">
+      <span>中心是这本书，一级分支</span>
+      <div class="rdseg rdseg-fit" id="ntMapCut">
+        <button data-v="tag">按标签</button>
+        <button data-v="chapter">按章节</button>
+        <button data-v="entry">按条目</button>
+      </div>
+      <span class="grow"></span>
+      <span id="ntMapInfo"></span>
+    </div>
+    <div class="mapstage" id="ntMapStage"><img id="ntMapImg" alt="这本书的笔记思维导图"></div>
+  </section>
+</div>
+
 <!-- 右下角小 Agent：一颗常驻气泡，点开是一块对话面板。
      面板里不预置任何「示例回答」—— 说话的是你自己在设置里配的接口，没配就先在这儿说清怎么配。 -->
 <button class="agent none" id="agent" type="button" aria-label="读书小助手" title="读书小助手">
@@ -1919,7 +2484,7 @@
 <script>
 const $ = s => document.querySelector(s);
 
-let running = false, lastStarted = null, tick = null, busyLog = false;
+let running = false, runningBook = '', lastStarted = null, tick = null, busyLog = false;
 let local = {};            // 已导出的书：bookId → 统计（含 total，用来算百分比）
 let stateMap = {};         // 阅读状态标签：id → 想读/在读/读完（没抓取的书也能标）
 let tasks = [];            // 右下角任务记录（localStorage 持久化）
@@ -2171,14 +2736,8 @@ async function clip(href, name) {
   return true;
 }
 
-/** 导出 EPUB / PDF：服务端现做现给，PDF 要打印整本、EPUB 要打包，先吱一声，
- *  免得用户以为点空了。文件名走服务端的 Content-Disposition（用书名），不自己拼。 */
-async function exportBook(kind, id, name) {
-  if (!id) return;
-  whisper('正在生成 ' + kind.toUpperCase() + '…');
-  const ok = await clip('/api/' + kind + '?book=' + encodeURIComponent(id), '');
-  whisper(ok ? ('已导出 ' + kind.toUpperCase()) : '导出未完成');
-}
+/* 导出走阅读器底栏那一组（MD / EPUB / PDF / 完整包 / 文件夹），见 rdDownload。
+   原来详情页也有一排，用户说那些都该在阅读器里办，就并到那一处去了。 */
 /* ── 本地映射 + 任务记录 ───────────────── */
 
 const TASK_KEY = 'guizang_tasks_v1';
@@ -2201,7 +2760,7 @@ const pctHold = {};
 function pct(id) {
   const b = local[id];
   if (!b) return 0;
-  if (b.done) { pctHold[id] = 100; return 100; }
+  if (bookFull(b)) { pctHold[id] = 100; return 100; }
   if (!b.total) return -1;
   const pr = b.progress || {};
   let p = (b.chapters / b.total) * 100;
@@ -2235,7 +2794,8 @@ function paintDock() {
     st.className = 'st' + (t.state === 'done' ? ' ok' : t.state === 'fail' ? ' bad' : '');
     const p = pct(t.book);
     st.textContent = t.state === 'running' ? (p < 0 ? '抓取中' : p + '%')
-      : t.state === 'done' ? '导出成功' : '未走完';
+      : t.state === 'done' ? '导出成功'
+        : (local[t.book] && local[t.book].chapters ? '没取完 ' + local[t.book].chapters + ' 章' : '未走完');
     row.append(n, st);
     row.onclick = () => showTaskLog(t);
     return row;
@@ -2249,6 +2809,12 @@ async function showTaskLog(t) {
       label: '中止', keep: true,
       run: async () => { const r = await post('stop'); whisper(r.ok ? '已请求中止' : r.msg); },
     });
+  } else if (t.state === 'fail') {
+    // 没走完的那条就地给恢复入口：接着取（引擎断点续传）与清掉重取。
+    // 原来这里只有一句「未走完」，用户想知道「那我怎么办」只能回书架上找按钮 ——
+    // 而那张卡片当时又正好因为状态卡住不给按钮，就成了死路。
+    acts.unshift({ label: '清掉重取', run: () => refetchFresh(t.book, t.title) });
+    acts.unshift({ label: '接着取', lead: true, run: () => beginFetch(t.book, t.title) });
   }
   // 记录就在眼前时，就地给一个清除入口（不用回到那条小横条上找）
   acts.push({ label: '清除记录', keep: true, run: askClearLog });
@@ -2281,6 +2847,35 @@ async function beginFetch(id, title) {
   whisper('开始取书 · ' + (title || id));
   await drawState(true);
   return true;
+}
+
+/** 清掉重取 —— 上次中止/没跑完留下的残稿先抹平，再从头取一遍。
+ *  这是破坏性动作（要删文件），所以确认一次，并把「会删掉多少章」写在话里；
+ *  顺手给一条「接着取」的退路：引擎本身断点续传，多数时候续取更快也更省。 */
+async function refetchFresh(id, title) {
+  closeSheet();                    // 从任务记录里点进来的，先收掉那层弹层再问
+  const b = local[id];
+  const n = b ? (b.chapters || 0) : 0;
+  if (!n) {                        // 盘上根本没残稿，那就没什么可清的
+    await beginFetch(id, title);
+    return;
+  }
+  sheet({
+    title: '清掉重取 · ' + (title || id),
+    text: `《${title || id}》上次没取完，盘上还剩 ${n} 章和 ${b.images || 0} 张图。`
+      + '清掉重取会把这份残稿删干净再从头取一遍；你自己的划线与笔记不受影响。'
+      + '如果只是想接着上次往下取，点旁边的「接着取」更快也更省。',
+    actions: [
+      { label: '接着取', run: () => beginFetch(id, title) },
+      { label: '清掉重取', lead: true, run: async () => {
+        const r = await post('export.fresh', {book: id});
+        if (!r.ok) { whisper(r.msg); return; }
+        startTask(id, title);
+        whisper('重新取书 · ' + (title || id));
+        await drawState(true);
+      } },
+    ],
+  });
 }
 
 /** 阅读器 id 与书架 bookId 是两套命名空间：书架的 deepLink 里 v= 就是阅读器 id */
@@ -2346,6 +2941,18 @@ function daysAgo(ts) {
 
 /** 一张书架卡里「会变」的判断，集中一处：建卡和原位刷新共用同一套口径，
  *  免得刷新的时候两处算出不一样的东西。 */
+/* 「取完没」不能只信引擎写下的 done —— 早先的版本在中止时也会把 done 落盘，
+   那本书从此就顶着「已存全」：卡片不给续取、详情不给重取，用户报的
+   「终止取书后仍然显示已抓取，并且不能重新取书」就是这么来的。
+   目录总章数（total）是已知的，拿它兜住这个谎 —— 盘上章数没到目录数就当作没取完。
+   total 为 0（目录还没建好、导入的本地书）时不做这个判断，免得把全本误伤成半本。 */
+function bookShort(mine) {
+  return !!(mine && mine.total && (mine.chapters || 0) < mine.total);
+}
+function bookFull(mine) {
+  return !!(mine && mine.done && !bookShort(mine));
+}
+
 function cardBits(b) {
   // 兼容两种来源：微信书架（bookId/deepLink/cover 是 URL）与本地已取回（id/deep/cover 是布尔）
   const readerId = readerIdOf(b);
@@ -2356,10 +2963,12 @@ function cardBits(b) {
   const storeId = b.bookId || readerToBookMap()[readerId] || id;
   const detailStore = b.bookId || readerToBookMap()[readerId] || '';
   const detailReader = readerId || (mine && mine.id) || (detailStore ? '' : id);
-  const busy = tasks.some(t => t.book === id && t.state === 'running');
+  const busy = running && runningBook === id;
+  const part = !!(mine && mine.chapters && !bookFull(mine));   // 取到一半（中止、没跑完，或 done 说了谎）
   const stt = stateOf(b);
   const bits = [];
-  if (mine) bits.push(`已取回 ${mine.chapters} 章`);
+  if (mine) bits.push(part ? `只取了 ${mine.chapters}${mine.total ? '/' + mine.total : ''} 章`
+                            : `已取回 ${mine.chapters} 章`);
   else if (b.author || b.category) bits.push(b.author || b.category);
   if (stt) bits.push(stt);
   const ago = daysAgo(b.readUpdateTime);
@@ -2367,22 +2976,23 @@ function cardBits(b) {
   // 登记这张卡的两套 id：批量勾选记的是卡片 id，加书架要的是书城短 id
   cardIds.set(id, {store: storeId, reader: readerId, title: b.title || ''});
   return {
-    readerId, id, storeId, detailStore, detailReader, mine, busy, stt,
+    readerId, id, storeId, detailStore, detailReader, mine, busy, part, stt,
     coverUrl: typeof b.cover === 'string' ? b.cover
       : (b.cover ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
-    // 骨架形状：只有这两件事会让卡片结构变化（进度条、取书↔正文）
-    shape: (busy ? 'b' : '-') + (mine ? 'm' : '-'),
+    // 骨架形状：只有这三件事会让卡片结构变化（进度条、取书↔正文、取完↔没取完）
+    shape: (busy ? 'b' : '-') + (mine ? (part ? 'p' : 'm') : '-'),
     tagText: busy ? '正在取'
-      : mine ? (mine.done ? '已存全' : `已取 ${mine.chapters || 0} 章`)
+      : part ? `没取完 ${mine.chapters}${mine.total ? '/' + mine.total : ''} 章`
+      : mine ? '已存全'
         : b.finishReading ? '读完' : '',
-    tagCls: busy ? 'go' : mine ? 'have' : '',
+    tagCls: busy ? 'go' : part ? 'part' : mine ? 'have' : '',
     meta: bits.join(' · '),
   };
 }
 
 function shelfCard(b, bits) {
   const t = bits || cardBits(b);
-  const {id, mine, busy, coverUrl, detailStore, detailReader} = t;
+  const {id, mine, busy, part, coverUrl, detailStore, detailReader} = t;
   const el = document.createElement('article');
   el.className = 'wcard';
   el.dataset.id = id;
@@ -2438,7 +3048,9 @@ function shelfCard(b, bits) {
     tag.className = 'tag' + (t.tagCls ? ' ' + t.tagCls : '');
     tag.textContent = t.tagText;
     el.append(tag);
-    if (busy) el.classList.add('hasTag');   // 正在跑的那本常驻显示，进度一眼找得到
+    // 正在取的那本、以及「取到一半」的那本，徽标常驻：进度和缺口都要一眼找得到，
+    // 不该藏在 hover 后面（用户报的「不知道哪本没取完」就是这么来的）
+    if (busy || part) el.classList.add('hasTag');
   }
 
   if (busy) {
@@ -2448,15 +3060,10 @@ function shelfCard(b, bits) {
     cv.append(bar);
   }
 
-  // 悬停只出一个按钮：查看详情（用户要求统一）
+  // 悬停不再挂按钮（用户要求）：鼠标经过只给动效反馈，点一下才摊开动作条。
+  // 这一层留着当「掠过的高光」，样式在 CSS 里。
   const act = document.createElement('div');
   act.className = 'hoveract';
-  if (!busy) {
-    const btn = document.createElement('button');
-    btn.textContent = '查看详情';
-    btn.onclick = e => { e.stopPropagation(); toggleCard(); };
-    act.append(btn);
-  }
 
   const strip = document.createElement('div');
   strip.className = 'strip';
@@ -2467,14 +3074,15 @@ function shelfCard(b, bits) {
     x.onclick = e => { e.stopPropagation(); fn(); closeAllCards(); };
     return x;
   };
-  // 卡上只留两个动作（用户要求）：详情 + 取书；已经取回来的换成「正文」。
-  // 完整包 / 源网站 / 目录 / 补全图片这些收进详情页，需要再点进去拿。
-  strip.append(mk('详情', () => renderDetailView(detailStore, detailReader, b.title)));
-  if (mine) {
-    strip.append(mk('正文', () => openReader(id, b.title || id, 'shelf')));
-  } else {
-    strip.append(mk('取书', () => beginFetch(id, b.title)));
+  // 点开只给两个动作（用户要求）：一本 → 取书 / 正文 / 续取，加一个查看详情。
+  // 正在跑的那本不给出「取书」，免得点了被后端一句「已有任务在运行」顶回来；
+  // 取到一半的书主按钮是「续取」（引擎本来就断点续传），「清掉重取」收在详情页与任务记录里。
+  if (!busy) {
+    const done = bookFull(mine);
+    strip.append(mk(done ? '正文' : (mine ? '续取' : '取书'),
+      () => done ? openReader(id, b.title || id, 'shelf') : beginFetch(id, b.title)));
   }
+  strip.append(mk('查看详情', () => renderDetailView(detailStore, detailReader, b.title)));
 
   const mt = document.createElement('div');
   mt.className = 'mt';
@@ -2482,8 +3090,10 @@ function shelfCard(b, bits) {
   n.className = 'n';
   n.textContent = b.title || id;
   n.style.cursor = 'pointer';
-  n.title = '看详情';
-  n.onclick = e => { e.stopPropagation(); renderDetailView(detailStore, detailReader, b.title); closeAllCards(); };
+  n.title = '点开动作';
+  // 书名不再一步跳到详情页（用户要求：点到书只看动效，再点才出动作条）。
+  // 和封面是同一个开关，免得同一张卡上两种点击有两种走向。
+  n.onclick = e => { e.stopPropagation(); toggleCard(); };
   const a = document.createElement('div');
   a.className = 'a';
   a.textContent = t.meta;
@@ -2534,7 +3144,7 @@ function syncShelfCard(el, b, bits) {
     x.textContent = t.tagText;
     el.append(x);
   }
-  el.classList.toggle('hasTag', t.busy);
+  el.classList.toggle('hasTag', t.busy || t.part);
   const a = el.querySelector('.mt .a');
   if (a && a.textContent !== t.meta) a.textContent = t.meta;
   const cbox = el.querySelector('.pick input');
@@ -2582,6 +3192,10 @@ async function drawState(force) {
 
   const t = s.task || {};
   running = !!t.running;
+  // 后端同时只跑一个任务，所以「谁在跑」= task.book。卡片上的「正在取」以它为唯一
+  // 真源：原来用的是右下角那条 localStorage 记录，一旦那条记录卡在 running（收尾时
+  // 正好关了页面），卡片就永远显示「正在取」且再也点不动 —— 用户说的「终止后不能再取」。
+  runningBook = running ? String(t.book || '') : '';
   loggedIn = !!(s.login && s.login.logged_in);
   keySet = !!(s.weread && s.weread.key_set);
   flomoSet = !!(s.flomo && s.flomo.url_set);
@@ -2596,16 +3210,24 @@ async function drawState(force) {
     startTask(t.book, b ? b.title : t.book);
   }
 
-  // 任务收尾：以「书是否标为已导完」为主判据，退出码为辅
+  // 任务收尾：只认书自己的完成标记。
+  // 「退出码 0」不能再当成功的证据 —— 用户中止时引擎是把手上那章落盘、收尾写好
+  // meta 才退的，退出码当然是 0，于是界面报「导出成功」，用户按全本去用才发现缺了一半。
+  // 引擎只在真翻到目录末项时才置 done，所以 done 才是那句实话。
   let flipped = false;
   for (const task of tasks) {
     if (task.state !== 'running') continue;
-    if (running) continue;                      // 还有任务在跑就先不判
+    if (running && runningBook === task.book) continue;   // 这一本还在跑，先不判
     const b = local[task.book];
-    const ok = !!(b && b.done) || (t.book === task.book && t.exit_code === 0);
+    const ok = bookFull(b);
     task.state = ok ? 'done' : 'fail';
+    if (ok) task.partial = false;
+    // 没取完但盘上留了半本：标出来，卡片和详情据此给「续取 / 清掉重取」
+    else if (b && b.chapters) task.partial = true;
     flipped = true;
     if (ok) whisper('导出成功 · ' + (task.title || task.book));
+    else whisper('这次没取完 · ' + (task.title || task.book)
+                 + (b && b.chapters ? `（已存 ${b.chapters} 章，可续取）` : ''));
   }
   if (flipped) saveTasks();
   paintDock();
@@ -2677,6 +3299,12 @@ async function drawState(force) {
 
   const stamp = JSON.stringify([Object.keys(local),
     tasks.filter(x => x.state === 'running').map(x => x.book)]);
+  // 剪藏徽章不在剪藏那一屏也要跟着书目走：侧边栏那颗数字是「书库里有几篇剪来的」，
+  // 藏在别的视图里也应该是对的。
+  const clipTotal = Object.values(local)
+    .filter(b => (b.source || '') === 'clip').length;
+  const bgc = $('#bgClip');
+  if (bgc) bgc.textContent = clipTotal ? clipTotal : '';
   if (v === 'shelf') {
     // 接口 Key 是启动以后才读到的那一次：书架结构要重铺（之前铺的是空壳）并补拉书架
     if (keySet !== shellKeyAt && shownPane === 'shelf') renderShelfView();
@@ -2686,6 +3314,10 @@ async function drawState(force) {
     // 本地书库：书目一变（取回 / 导入 / 删除）就重铺。网格自带指纹，重复调用会早早返回。
     if (force || stamp !== localStamp) { localStamp = stamp; localSig = ''; }
     renderLocalGrid();
+  } else if (v === 'clip') {
+    // 剪藏：只重铺「最近剪的」那一面网格；正在抓的那几行由各自的回执驱动，别被整屏刷掉。
+    if (force || stamp !== localStamp) { localStamp = stamp; clipGridSig = ''; }
+    renderClipShelf();
   } else if (force) renderView();
   // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
 }
@@ -3476,6 +4108,7 @@ const SHELF_BATCH = 60;
 function renderView() {
   if (v === 'shelf') { renderShelfView(); return; }
   if (v === 'local') { renderLocalView(); return; }
+  if (v === 'clip') { renderClipView(); return; }
   if (v === 'notes') { renderNotebooks(); return; }
   if (v === 'random') { renderRandomView(); return; }
   if (v === 'stats') { renderStatsView(); return; }
@@ -3518,6 +4151,10 @@ function renderShelfView() {
            <option value="在读">在读</option>
            <option value="已读">已读</option>
          </select>
+         <div class="smode" id="sMode" role="group" aria-label="书架显示样式">
+           <button type="button" data-m="grid" title="上下瀑布：滚一页摊一页">瀑布</button>
+           <button type="button" data-m="stack" title="左右叠卡：一次放大一本，用 ← → 翻">叠卡</button>
+         </div>
          <button class="deed" id="sBatch" style="height:32px">批量</button>
          <span class="cnt" id="scnt"></span>
        </div>`;
@@ -3695,6 +4332,108 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) revealInView();
 });
 
+/* ── 书架显示样式：瀑布 / 叠卡 ─────────────
+   瀑布是上下滚的羊皮卷；叠卡一次只放大一本，后面的往右折着叠出去，
+   ← → 或点右侧那几张翻。样式存本机，下次打开还是用户挑的那面。 */
+const SHELF_MODE_KEY = 'guizang_shelf_mode_v1';
+let shelfMode = 'grid';
+let shelfCursor = 0;
+try { shelfMode = localStorage.getItem(SHELF_MODE_KEY) === 'stack' ? 'stack' : 'grid'; }
+catch (e) { /* 无痕模式，用默认 */ }
+
+function setShelfMode(m) {
+  shelfMode = m === 'stack' ? 'stack' : 'grid';
+  try { localStorage.setItem(SHELF_MODE_KEY, shelfMode); } catch (e) {}
+  shelfCursor = 0;
+  shelfShown = SHELF_BATCH;
+  const g = $('#sMode');
+  if (g) [...g.children].forEach(b => b.classList.toggle('on', b.dataset.m === shelfMode));
+  renderShelfGrid();
+}
+
+/** 每张卡摆哪儿，只看它离当前那张有几张 —— 没有第几种状态，位置就是距离。 */
+function applyStack(stage) {
+  const kids = [...stage.children];
+  kids.forEach((c, i) => {
+    const d = i - shelfCursor;
+    c.classList.remove('s0', 's1', 's2', 's3', 'sgone', 'saway');
+    c.classList.add(d < 0 ? 'sgone' : d === 0 ? 's0' : d === 1 ? 's1' : d === 2 ? 's2'
+      : d === 3 ? 's3' : 'saway');
+    // 只有「看不见」的那几张（折走的、甩远的）从无障碍树里摘掉；
+    // 扇形里那三张看得见也能点，标成 aria-hidden 就成了「读屏里不存在却能点」。
+    c.setAttribute('aria-hidden', d >= 0 && d <= 3 ? 'false' : 'true');
+  });
+  const pos = stage.parentNode && stage.parentNode.querySelector('#stPos');
+  if (pos) pos.textContent = kids.length ? (shelfCursor + 1) + ' / ' + kids.length : '';
+  const pv = stage.parentNode && stage.parentNode.querySelector('#stPrev');
+  const nx = stage.parentNode && stage.parentNode.querySelector('#stNext');
+  if (pv) pv.disabled = shelfCursor <= 0;
+  if (nx) nx.disabled = shelfCursor >= kids.length - 1;
+  setNote('shelf', kids.length
+    ? (kids.length < shelfAll().length
+        ? `${shelfCursor + 1} / ${shelfAll().length} 本 · 还有 ${shelfAll().length - kids.length} 本没进来`
+        : `${shelfCursor + 1} / ${kids.length} 本 · ← → 翻动`)
+    : '');
+}
+
+function shelfStep(dir) {
+  const stage = PANES.shelf && PANES.shelf.querySelector('.sstage');
+  if (!stage || !stage.children.length) return;
+  const want = Math.max(0, Math.min(stage.children.length - 1, shelfCursor + dir));
+  if (want === shelfCursor) return;
+  closeAllCards();
+  shelfCursor = want;
+  applyStack(stage);
+  // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）
+  const all = shelfAll();
+  if (all.length > shelfShown && shelfCursor >= shelfShown - 2) {
+    shelfShown += SHELF_BATCH;
+    renderShelfGrid();
+  }
+}
+
+/* 叠卡那面的键盘：只在书架看得见、不在阅读时、焦点不在输入框里才接手，
+   免得抢了阅读器 ←/→ 翻章，也免得在筛选框里打字打出一串翻页。 */
+document.addEventListener('keydown', e => {
+  if (shelfMode !== 'stack' || v !== 'shelf') return;
+  if (document.body.classList.contains('reading')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA'
+    || t.isContentEditable)) return;
+  if (e.key === 'ArrowLeft') { shelfStep(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { shelfStep(1); e.preventDefault(); }
+});
+
+function renderShelfStack(wrap, shown) {
+  // 摊开动画是瀑布那套（按滚动位置点亮），叠卡用不着，观察器先关掉别来抢 opacity
+  revealGrid = null;
+  if (revealIO) { revealIO.disconnect(); revealIO = null; }
+  if (restIO) { restIO.disconnect(); restIO = null; }
+  let box = wrap.querySelector('.sstack');
+  if (!box) {
+    wrap.innerHTML = '<div class="sstack"><div class="sstage"></div>'
+      + '<div class="snav"><button id="stPrev" aria-label="上一本" title="上一本（←）">←</button>'
+      + '<span class="sp" id="stPos"></span>'
+      + '<button id="stNext" aria-label="下一本" title="下一本（→）">→</button></div>'
+      + '<div class="shinth">← → 翻书 · 点封面摊开动作 · 点右侧那几张直接跳过去</div></div>';
+    box = wrap.querySelector('.sstack');
+    box.querySelector('#stPrev').onclick = () => shelfStep(-1);
+    box.querySelector('#stNext').onclick = () => shelfStep(1);
+    const st = box.querySelector('.sstage');
+    // 扇形后面那几张：点它就翻过去，不必一下一下按。用捕获先拦一手，
+    // 免得被卡片自己的「点开摊动作条」吃掉。
+    st.addEventListener('click', e => {
+      const c = e.target.closest && e.target.closest('.wcard');
+      if (!c || !st.contains(c) || c.classList.contains('s0')) return;
+      e.stopPropagation(); e.preventDefault();
+      shelfStep([...st.children].indexOf(c) - shelfCursor);
+    }, true);
+  }
+  fillGrid(box.querySelector('.sstage'), shown);
+  applyStack(box.querySelector('.sstage'));
+}
+
 /** 键控复用：同一本书继续用老节点（封面已解码、摊开动画已放完），
  *  只补新增的、只删消失的 —— 这是「点一下不闪」的关键一步。 */
 function fillGrid(grid, items) {
@@ -3722,7 +4461,9 @@ function renderShelfGrid() {
   if (shelfShown === 0) shelfShown = SHELF_BATCH;
   const all = shelfAll();
   const shown = all.slice(0, shelfShown);
-  setNote('shelf', all.length
+  if (shelfMode === 'stack' && shelfCursor > shown.length - 1)
+    shelfCursor = Math.max(0, shown.length - 1);
+  setNote('shelf', shelfMode === 'stack' ? '' : all.length
     ? (shown.length < all.length ? `${shown.length} / ${all.length} 本` : `共 ${all.length} 本`)
     : '');
   const scnt = pane.querySelector('#scnt');
@@ -3740,6 +4481,12 @@ function renderShelfGrid() {
     return;
   }
 
+  if (shelfMode === 'stack') {
+    renderShelfStack(wrap, shown);
+    paintProgress();
+    return;
+  }
+
   // 键控复用：同一本书继续用老节点，只补新增的、只删消失的
   let grid = wrap.querySelector('.sgrid');
   let isNew = false;
@@ -3747,6 +4494,7 @@ function renderShelfGrid() {
     grid = document.createElement('div');
     grid.className = 'sgrid';
     isNew = true;
+    if (wrap.querySelector('.sstack')) wrap.innerHTML = '';   // 刚从叠卡切回来
   }
   fillGrid(grid, shown);
   if (isNew) wrap.replaceChildren(grid);
@@ -3784,6 +4532,14 @@ function wireShelfTools() {
     b.textContent = document.body.classList.contains('batch') ? '退出批量' : '批量';
     b.onclick = () => setBatch(!document.body.classList.contains('batch'));
   }
+  const md = $('#sMode');
+  if (md) {
+    [...md.children].forEach(x => x.classList.toggle('on', x.dataset.m === shelfMode));
+    md.onclick = e => {
+      const x = e.target.closest('button');
+      if (x && x.dataset.m && x.dataset.m !== shelfMode) setShelfMode(x.dataset.m);
+    };
+  }
   const st = $('#sstate');
   if (st) {
     st.value = window.__sstate || '';
@@ -3796,7 +4552,7 @@ function wireShelfTools() {
    这一屏只看「本机已经存下来的书」：从微信读书取回来的，和用户自己导进来的，
    都摆在同一个书架上。取回来的读它的正文；导入的支持 MD / TXT / EPUB / PDF。
    每本都能一键定位到它在硬盘上的文件夹（Finder 里打开），也能从本地删掉。 */
-let localFilter = '';   // '' 全部 / 'weread' 取回的 / 'local' 我导入的
+let localFilter = '';   // '' 全部 / 'weread' 取回的 / 'local' 我导入的 / 'clip' 剪藏的
 let localSig = '';      // 网格指纹：筛选 + 关键词 + 书目不变就不重画，切视图不闪
 
 /** 本地书库里的书。local 里每一条都是「已经在硬盘上」的
@@ -3811,9 +4567,11 @@ function localBooks() {
   return arr;
 }
 
-/** 格式小签：取回来的都是分章 Markdown，导入的按原始格式标。 */
+/** 格式小签：取回的与剪藏的都是分章 Markdown，导入的按原始格式标。 */
 function localFmt(b) {
-  if ((b.source || 'weread') !== 'local') return 'MD';
+  const src = b.source || 'weread';
+  if (src === 'clip') return '文章';
+  if (src !== 'local') return 'MD';
   return (b.format || '').toUpperCase() || 'TXT';
 }
 
@@ -3824,14 +4582,16 @@ function localMeta(b) {
   bits.push(`${b.chapters || 0}${b.total && b.total !== b.chapters ? ' / ' + b.total : ''} 章`);
   const c = b.chars || 0;
   if (c) bits.push(c >= 10000 ? Math.round(c / 10000) + ' 万字' : c + ' 字');
-  bits.push((b.source || 'weread') === 'local' ? '我导入的' : '取回的');
+  bits.push({local: '我导入的', clip: '剪藏的'}[b.source || 'weread'] || '取回的');
   return bits.join(' · ');
 }
 
 /** 本地书库里的一张卡：形状与书架卡一致（2:3 + 一行标题），
- *  区别是操作只有阅读 / 定位 / 删除，格式签常驻显示。 */
-function localCard(b) {
+ *  区别是操作只有阅读 / 定位 / 删除，格式签常驻显示。
+ *  back 是「读完回到哪一屏」：从剪藏那面进来就回剪藏，别把人甩到本地书库去。 */
+function localCard(b, back) {
   const id = b.id;
+  const pane = back || 'local';
   const el = document.createElement('article');
   el.className = 'wcard hasTag';
   el.dataset.id = id;
@@ -3871,7 +4631,7 @@ function localCard(b) {
   act.className = 'hoveract';
   const read = document.createElement('button');
   read.textContent = '阅读';
-  read.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, 'local'); };
+  read.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, pane); };
   act.append(read);
 
   const strip = document.createElement('div');
@@ -3882,7 +4642,9 @@ function localCard(b) {
     x.onclick = e => { e.stopPropagation(); fn(); closeAllCards(); };
     return x;
   };
-  strip.append(mk('阅读', () => openReader(id, b.title || id, 'local')));
+  strip.append(mk('阅读', () => openReader(id, b.title || id, pane)));
+  // 剪藏进来的文章带着原链接：本地读完后还能回源站点看配图版式与评论区
+  if (b.url) strip.append(mk('原文', () => window.open(b.url, '_blank', 'noopener')));
   strip.append(mk('定位', () => locateBook(id)));
   strip.append(mk('删除', () => confirmDeleteLocal(id, b.title || id)));
 
@@ -3893,7 +4655,7 @@ function localCard(b) {
   n.textContent = b.title || id;
   n.style.cursor = 'pointer';
   n.title = '开始阅读';
-  n.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, 'local'); closeAllCards(); };
+  n.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, pane); closeAllCards(); };
   const a = document.createElement('div');
   a.className = 'a';
   a.textContent = localMeta(b);
@@ -3964,6 +4726,7 @@ function renderLocalView() {
           <button data-f="">全部</button>
           <button data-f="weread">取回的</button>
           <button data-f="local">我导入的</button>
+          <button data-f="clip">剪藏的</button>
         </span>
         <span class="cnt" id="lcnt"></span>
       </div>
@@ -4100,6 +4863,351 @@ async function importFiles(files) {
     localSig = '';
     renderLocalGrid(body);
   }
+}
+
+/* ── 剪藏文章 ─────────────────────────────
+   粘贴链接 → 解析正文 → 收成书库里的一本「文章」。一行一个链接，一次贴一串也行：
+   微信公众号推文能认出标题、作者、发布日和正文，其它站点走通用正文抽取。
+   一条一条抓、一条一条落架，进度写在每一行上 —— 哪篇被验证页挡住了只有那一行变红，
+   旁边的照常入库，不像整批转圈那样「一处卡住全都白等」。
+   落架后它就是书库里的一本普通书（meta.source=clip）：阅读、划词笔记、导出 EPUB/PDF、
+   定位文件全都走现成那套，不必为剪藏另开一条路。 */
+let clipItems = [];      // [{url, state, title, sub, preview, book}]，state: pending/doing/ready/done/bad
+let clipBusy = false;    // 串行抓取时锁住按钮：同一链接点两遍会白跑一趟
+let clipGridSig = '';    // 「最近剪的」网格指纹：书目不变就不重画，切回来不闪
+const CLIP_MAX = 20;     // 与后端 MAX_CLIP_URLS 对齐，超出的先不排队（一次抓太多容易被限流）
+const CLIP = {ta: null, list: null, shelf: null, cnt: null, title: null, all: null, parse: null};
+const CLIP_ST = {pending: '待抓', doing: '抓取中', ready: '已解析', done: '已入库', bad: '没抓到'};
+
+/** 粘贴框里常有的脏东西：前后的引号、书名号、序号点。两端剥干净再判断。 */
+function clipClean(raw) {
+  return String(raw || '')
+    .replace(/^[\s"'“”‘’,，、。(（【《<]+/, '')
+    .replace(/[\s"'“”’’,，、)）】》>]+$/, '');
+}
+
+/** 从一段文本里抠出链接：换行 / 逗号 / 顿号 / 分号都当分隔，去重，只留 http(s)。 */
+function clipLinks(text) {
+  const seen = new Set(), out = [];
+  String(text || '').split(/[\s,;，、；]+/).forEach(raw => {
+    const s = clipClean(raw);
+    if (!/^https?:\/\/[^\s]+/i.test(s) || seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  });
+  return out;
+}
+
+function clipHost(url) {
+  const seg = String(url || '').split('/');
+  try { return decodeURIComponent(seg[2] || ''); } catch (e) { return seg[2] || ''; }
+}
+
+/** 粘贴框 → 待办列表。已经抓过的链接保留它的状态和结果，
+ *  新贴进来的排在后面；文本删掉就等于这条不要了（不必单独点「移除」）。 */
+function clipSync() {
+  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+  const prev = new Map(clipItems.map(x => [x.url, x]));
+  clipItems = links.slice(0, CLIP_MAX)
+    .map(u => prev.get(u) || {url: u, state: 'pending'});
+}
+
+async function clipAsk(mode, url) {
+  let r;
+  try {
+    r = await (await fetch('/api/clip', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode, url}),
+    })).json();
+  } catch (e) {
+    return {ok: false, msg: '后端没应答：程序还开着吗？'};
+  }
+  return r && typeof r === 'object' ? r : {ok: false, msg: '没读到回执'};
+}
+
+/** 走一条链接：mode=preview 只抓正文（先确认抓对了），mode=save 直接收成一本。
+ *  批量时由 clipRunAll 持锁（forced），单条自己持锁 —— 免得用户连点两下，
+ *  同一个链接被敲两次门：公众号那边第二次往往就跳验证页了。 */
+async function clipStep(i, mode, forced) {
+  const it = clipItems[i];
+  if (!it) return false;
+  if (!forced && clipBusy) return false;
+  if (!forced) clipBusy = true;
+  it.state = 'doing';
+  it.sub = mode === 'save' ? '正在收进书库…' : '正在抓正文…';
+  renderClipRows();
+  const r = await clipAsk(mode, it.url);
+  if (mode === 'preview' && r.ok && r.preview) {
+    const p = r.preview;
+    it.state = 'ready';
+    it.title = p.title || clipHost(it.url);
+    it.preview = p;
+    it.sub = [p.site || clipHost(it.url), p.author, p.date,
+      p.words ? p.words + ' 字' : ''].filter(Boolean).join(' · ');
+  } else if (mode === 'save' && r.ok && r.book) {
+    it.state = 'done';
+    it.title = r.book.title || it.title;
+    it.book = r.book.id;
+    it.sub = [r.book.site || clipHost(it.url),
+      (r.book.chars || 0) + ' 字', (r.book.chapters || 1) + ' 节'].join(' · ');
+  } else {
+    it.state = 'bad';
+    it.sub = r.msg || (mode === 'save' ? '这一篇没能收进来' : '这一篇没抓出正文');
+  }
+  const res = it.state;
+  if (!forced) {
+    clipBusy = false;
+    renderClipRows();
+    if (mode === 'save') {
+      // 单条入库就当场说一声、当场把书库刷新；批量那一轮改在最后统一报数（见 clipRunAll）
+      if (res === 'done') {
+        whisper(r.msg || `已剪进书库：《${it.title || clipHost(it.url)}》`);
+        await drawState(true);
+      } else whisper(it.sub);
+    }
+  }
+  return res;
+}
+
+/** 批量：从头到尾串行，一条落定再动下一条，表头写着「第 3 / 7 条」。 */
+async function clipRunAll(mode) {
+  if (clipBusy) return;
+  const todo = clipItems.map((x, i) => ({x, i}))
+    .filter(o => (mode === 'save' ? o.x.state !== 'done'
+                                  : o.x.state !== 'ready' && o.x.state !== 'done'));
+  if (!todo.length) { whisper(mode === 'save' ? '都入库了，没有要处理的' : '都解析过了'); return; }
+  clipBusy = true;
+  renderClipRows();                       // 先把按钮锁住，别让批量途中再点出一条并发的
+  const was = clipItems.map(x => x.state);
+  for (let k = 0; k < todo.length; k++) {
+    setNote('clip', `${k + 1} / ${todo.length}`);
+    await clipStep(todo[k].i, mode, true);
+  }
+  clipBusy = false;
+  setNote('clip', '');
+  const okc = clipItems.filter((x, i) => (x.state === 'done' || x.state === 'ready')
+    && was[i] !== x.state).length;
+  const failc = clipItems.filter((x, i) => x.state === 'bad' && was[i] !== 'bad').length;
+  renderClipRows();
+  if (mode === 'save') await drawState(true);   // 新书落架：徽章、最近剪的、本地书库一起接手
+  whisper(mode === 'preview'
+    ? (failc ? `解析好 ${okc} 篇，${failc} 篇没抓出来` : `解析好 ${okc} 篇`)
+    : (failc ? `入库 ${okc} 篇，${failc} 篇没成` : `入库 ${okc} 篇`));
+}
+
+/** 一行：左边说清「这是哪篇」，中间一枚状态，右边三个动作。
+ *  文字 + 色彩区分状态，不放图标 —— 界面里不出现 emoji。 */
+function clipRowEl(it, i) {
+  const row = document.createElement('div');
+  row.className = 'cliprow';
+
+  const bd = document.createElement('div');
+  bd.className = 'bd';
+  const nm = document.createElement('div');
+  nm.className = 'nm' + (it.title ? '' : ' pending');
+  nm.textContent = it.title || it.url;
+  nm.title = it.url;
+  const sub = document.createElement('div');
+  sub.className = 'sub' + (it.state === 'bad' ? ' bad' : '');
+  sub.textContent = it.sub || clipHost(it.url);
+  bd.append(nm, sub);
+
+  const st = document.createElement('span');
+  st.className = 'st' + (it.state === 'doing' ? ' doing'
+    : it.state === 'done' ? ' done' : it.state === 'bad' ? ' bad' : '');
+  st.textContent = CLIP_ST[it.state] || '待抓';
+
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const btn = (label, fn, disabled) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.disabled = !!disabled;
+    b.onclick = () => { if (!clipBusy) fn(); };
+    return b;
+  };
+  const lock = clipBusy;
+  if (it.state === 'done') {
+    acts.append(
+      btn('阅读', () => openReader(it.book, it.title || it.url, 'clip')),
+      btn('原文', () => window.open(it.url, '_blank', 'noopener')),
+      btn('移除', () => { clipRemove(i); }));
+  } else {
+    acts.append(
+      btn(it.state === 'ready' ? '预览' : '解析', () => {
+        if (it.state === 'ready') clipShowPreview(i);
+        else clipStep(i, 'preview');
+      }, lock),
+      btn('入库', () => clipStep(i, 'save'), lock),
+      btn('移除', () => { clipRemove(i); }, lock));
+  }
+
+  row.append(bd, st, acts);
+  return row;
+}
+
+function clipRemove(i) {
+  const it = clipItems[i];
+  if (!it) return;
+  clipItems.splice(i, 1);
+  if (CLIP.ta) {
+    const kept = clipItems.map(x => x.url).join('\n');
+    CLIP.ta.value = kept;
+  }
+  renderClipRows();
+}
+
+function clipShowPreview(i) {
+  const it = clipItems[i];
+  const p = (it && it.preview) || {};
+  if (!it) return;
+  sheet({
+    title: p.title || it.url,
+    text: [p.site || clipHost(it.url), p.author, p.date,
+      p.words ? p.words + ' 字' : ''].filter(Boolean).join(' · ')
+      + '。确认是这篇正文就收进书库；抓取时已经把这条记下了，入库不会再去敲一次对方的门。',
+    body: p.head || '',
+    actions: [
+      {label: '收进书库', lead: true, run: () => clipStep(i, 'save')},
+      {label: '看原文', run: () => window.open(it.url, '_blank', 'noopener')},
+      {label: '先不存'},
+    ],
+  });
+}
+
+/** 待办列表：条目不多（≤20），整列重铺比留旧节点更省事，也不会牵动输入框。 */
+function renderClipRows() {
+  if (!CLIP.list) return;
+  if (!clipItems.length) {
+    CLIP.list.replaceChildren();
+  } else {
+    CLIP.list.replaceChildren(...clipItems.map((x, i) => clipRowEl(x, i)));
+  }
+  // 「解析 / 入库」看的是粘贴框里有没有链接，不是列表：列表要按了才铺出来，
+  // 用它来决定能不能点就成了「先点才亮、亮了才能点」。
+  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+  const left = clipItems.filter(x => x.state !== 'done').length;
+  const busy = clipItems.filter(x => x.state === 'doing').length;
+  CLIP.cnt.textContent = !links.length
+    ? '还没贴链接'
+    : !clipItems.length
+      ? `认出 ${Math.min(links.length, CLIP_MAX)} 条链接`
+        + (links.length > CLIP_MAX ? `（一次最多 ${CLIP_MAX} 条，其余的先留着）` : '')
+      : busy ? `${busy} 条正在抓 · 共 ${clipItems.length} 条`
+             : `${clipItems.length} 条 · 待处理 ${left}`;
+  const lock = clipBusy;
+  if (CLIP.all) CLIP.all.disabled = lock || !links.length;
+  if (CLIP.parse) CLIP.parse.disabled = lock || !links.length;
+}
+
+/** 最近剪的：只列剪藏来的篇目，卡片与本地书库同款（阅读 / 原文 / 定位 / 删除）。 */
+function clipBooks() {
+  return Object.values(local)
+    .filter(b => (b.source || '') === 'clip')
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+}
+
+function renderClipShelf() {
+  if (!CLIP.shelf) return;
+  const all = clipBooks();
+  const bgc = $('#bgClip');
+  if (bgc) bgc.textContent = all.length ? all.length : '';
+  const head = CLIP.title;
+  if (head) head.textContent = all.length
+    ? `最近剪的 · 共 ${all.length} 篇（全部在「本地书库 → 剪藏的」）` : '';
+  const sig = all.slice(0, 12).map(b => b.id + ':' + (b.updated_at || 0)).join(',');
+  if (sig === clipGridSig) return;
+  clipGridSig = sig;
+
+  const wrap = CLIP.shelf;
+  if (!all.length) {
+    wrap.replaceChildren(localEmptyClip());
+    return;
+  }
+  let grid = wrap.querySelector('.sgrid');
+  if (!grid) grid = document.createElement('div'), grid.className = 'sgrid';
+  const have = new Map();
+  for (const c of [...grid.children]) have.set(c.dataset.id, c);
+  const order = [];
+  for (const b of all.slice(0, 12)) {
+    let c = have.get(b.id);
+    if (c) {
+      have.delete(b.id);
+      const a = c.querySelector('.mt .a');
+      if (a) a.textContent = localMeta(b);
+    } else c = localCard(b, 'clip');
+    order.push(c);
+  }
+  have.forEach(c => c.remove());
+  const cur = [...grid.children];
+  if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
+  if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+}
+
+function localEmptyClip() {
+  const d = document.createElement('div');
+  d.className = 'emptyline';
+  d.innerHTML = '<b>还没有剪藏的文章</b>把公众号链接贴进上面那个框，点「解析正文」看一眼，'
+    + '再点「入库」就进书库了。之后随时能在「本地书库」里读到它，也能划线做笔记。';
+  return d;
+}
+
+function wireClip(p) {
+  CLIP.ta = p.querySelector('#cTa');
+  CLIP.list = p.querySelector('#cList');
+  CLIP.shelf = p.querySelector('#cShelf');
+  CLIP.cnt = p.querySelector('#cCnt');
+  CLIP.title = p.querySelector('#cShelfTitle');
+  CLIP.all = p.querySelector('#cAll');
+  CLIP.parse = p.querySelector('#cParse');
+
+  const open = p.querySelector('#cOpen');
+  if (open) open.onclick = () => post('openbooks').catch(() => {});
+  CLIP.parse.onclick = () => { clipSync(); renderClipRows(); clipRunAll('preview'); };
+  CLIP.all.onclick = () => { clipSync(); renderClipRows(); clipRunAll('save'); };
+  p.querySelector('#cClear').onclick = () => {
+    if (clipBusy) return;
+    clipItems = [];
+    CLIP.ta.value = '';
+    renderClipRows();
+  };
+  // 贴完直接 Cmd/Ctrl+Enter 开抓，不必再把鼠标移到按钮上
+  CLIP.ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (!clipBusy) { clipSync(); renderClipRows(); clipRunAll('preview'); }
+    }
+  });
+  let timer = null;
+  CLIP.ta.addEventListener('input', () => {
+    clearTimeout(timer);
+    // 只数不抓：贴的过程里就把「认出几条」和按钮亮灭跟上，按下去才真的动网络
+    timer = setTimeout(renderClipRows, 220);
+  });
+}
+
+function renderClipView() {
+  const {p, body, fresh} = viewPane('clip', viewHeader('剪藏文章',
+    `<button class="deed" id="cOpen" style="height:30px">打开书库文件夹</button>`));
+  if (fresh) {
+    body.innerHTML = `<div class="clipin">
+        <textarea class="clipta" id="cTa" spellcheck="false"
+          placeholder="粘贴文章链接，一行一个。微信公众号推文认得最准，其它有正文的站点也能剪。&#10;例：https://mp.weixin.qq.com/s/…"></textarea>
+        <div class="stools">
+          <span class="cnt" id="cCnt"></span>
+          <span class="grow"></span>
+          <button class="deed" id="cParse" style="height:30px">解析正文</button>
+          <button class="deed sure" id="cAll" style="height:30px">全部入库</button>
+          <button class="deed" id="cClear" style="height:30px">清空</button>
+        </div>
+      </div>
+      <div id="cList"></div>
+      <div class="ch2" id="cShelfTitle"></div>
+      <div id="cShelf"></div>`;
+    wireClip(p);
+  }
+  renderClipRows();
+  renderClipShelf();
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
@@ -4709,7 +5817,9 @@ async function renderDetailView(storeId, readerId, title) {
   t += kv('划线 / 想法 / 书签',
     `${nb.noteCount || 0} / ${nb.reviewCount || 0} / ${nb.bookmarkCount || 0}`);
   t += kv('本地 Markdown', mine
-    ? `已抓取 ${mine.chapters} 章${mine.done ? ' · 完整' : ''}`
+    ? (bookFull(mine)
+        ? `已抓取 ${mine.chapters} 章 · 完整`
+        : `只取了 ${mine.chapters}${mine.total ? '/' + mine.total : ''} 章 · 没取完`)
     : '<span style="color:var(--ink-3)">尚未抓取</span>');
   if (info.wordCount) t += kv('总字数', esc(info.wordCount));
   t += '</div>';
@@ -4737,15 +5847,26 @@ async function renderDetailView(storeId, readerId, title) {
   if (/^\d{5,20}$/.test(String(detailStore || ''))) {
     acts.append(shelfBtn(detailStore, info.title || title));
   }
-  acts.append(
-    mk(mine ? '补全图片' : '开始抓取', async () => {
+  // 取到一半的那本（中止或断在半路）：主按钮改成「接着取」，旁边并列一条「清掉重取」。
+  // 补的是用户报的那个死结 —— 中止之后本地状态还写着「已抓取」，再点取书被
+  // 「已有任务在跑」顶回来，残稿留在盘上没人清，这本书于是既取不动也删不掉。
+  const part = !!(mine && mine.chapters && !bookFull(mine));
+  if (part) {
+    acts.append(
+      mk('接着取', async () => { if (await beginFetch(id || storeId, info.title || title)) backTo('shelf'); }),
+      mk('清掉重取', () => refetchFresh(id || storeId, info.title || title), 'cut')
+    );
+  } else {
+    acts.append(mk(mine ? '补全图片' : '开始抓取', async () => {
       if (mine) {
         const r = await post('images', {book: id});
         whisper(r.ok ? '正在补齐图片' : r.msg);
       } else if (await beginFetch(id || storeId, title)) {
         backTo('shelf');
       }
-    }),
+    }));
+  }
+  acts.append(
     mk('卡片回顾', () => renderReview(notesKey, info.title || title, 'book')),
     mk('导出 Anki 卡包', () => exportApkg(notesKey, id, info.title || title)),
     mk('复制划线', async () => {
@@ -4757,15 +5878,16 @@ async function renderDetailView(storeId, readerId, title) {
     }),
     mk('重新读取', () => renderDetailView(detailStore, id, info.title || title))
   );
-  if (mine) {
-    acts.append(
-      mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id),
-        (info.title || title || id) + '.zip')),
-      mk('正文', () => openReader(id, info.title || title || id, 'detail')),
-      mk('EPUB', () => exportBook('epub', id, info.title || title || id)),
-      mk('PDF', () => exportBook('pdf', id, info.title || title || id)),
-      mk('目录', async () => { const r = await post('reveal', {book: id}); if (!r.ok) whisper(r.msg); })
-    );
+  // 详情页只讲这本书，不管文件（用户要求）：完整包 / 正文 / EPUB / PDF / 目录
+  // 五颗钮从这儿拿掉，全部收进阅读器 —— 那儿本来就有 MD / EPUB / PDF / 完整包 /
+  // 文件夹，目录就是左边那一栏。要读直接点封面。
+  if (mine && id) {
+    const cvEl = body.querySelector('.dtop .cv');
+    if (cvEl) {
+      cvEl.classList.add('go');
+      cvEl.title = '打开阅读';
+      cvEl.onclick = () => openReader(id, info.title || title || id, 'detail');
+    }
   }
   body.append(acts);
 }
@@ -4864,6 +5986,8 @@ function readerSkeleton() {
       <div class="rdbar">
         <span class="rdcrumb" id="rdCrumb"></span>
         <span class="grow"></span>
+        <button class="rdtool" id="rdNavT" title="目录栏（D）" aria-label="目录栏">目录</button>
+        <button class="rdtool" id="rdNoteT" title="笔记栏（N）" aria-label="笔记栏">笔记</button>
         <button class="rdtool" id="rdAsk" title="问小助手（选中一段更准）" aria-label="问小助手">${ask}</button>
         <button class="rdtool" id="rdFocus" title="专注模式（F）" aria-label="专注模式">${icon}</button>
         <button class="rdtool" id="rdSet" title="阅读设置" aria-label="阅读设置">Aa</button>
@@ -4898,9 +6022,25 @@ function readerSkeleton() {
           <button class="deed" data-dl="md" style="height:26px" title="导出整本为 Markdown">MD</button>
           <button class="deed" data-dl="epub" style="height:26px" title="导出整本为 EPUB">EPUB</button>
           <button class="deed" data-dl="pdf" style="height:26px" title="导出整本为 PDF">PDF</button>
+          <button class="deed" data-dl="zip" style="height:26px" title="整本连图片打包下来">完整包</button>
+          <button class="deed" data-dl="folder" style="height:26px" title="在访达里打开这本书的文件夹">文件夹</button>
         </div>
       </div>
     </div>
+    <aside class="rdnotes" id="rdNotes" aria-label="这本书的笔记">
+      <div class="nttabs">
+        <button data-tab="marks" class="on">划线<b id="ntCM">0</b></button>
+        <button data-tab="entries">条目<b id="ntCE">0</b></button>
+        <span class="grow"></span>
+        <button id="ntNew" title="写一篇长笔记，可以引用书里别处的话">写条目</button>
+        <button id="ntMap" title="把这些笔记画成一张思维导图">导图</button>
+        <button id="ntExp" title="导成 notes.md，就放在这本书的文件夹里">导出</button>
+        <button id="ntClose" title="收起笔记栏（N）">收起</button>
+      </div>
+      <div class="ntchips" id="ntChips"></div>
+      <div class="ntbody" id="ntList"><div class="ntempty">正在读取这本书的笔记…</div></div>
+      <div class="ntfoot" id="ntStatus">笔记存在这本书的文件夹里</div>
+    </aside>
   </div>`;
 }
 
@@ -4910,6 +6050,18 @@ function wireReader(p) {
     // 设置面板里的分段按钮先认（它们在 #rdPop 里，不是普通工具钮）。
     const seg = e.target.closest && e.target.closest('.rdseg button');
     if (seg && p.contains(seg)) { rdPickCfg(seg); return; }
+    // 笔记栏：一行就是一句划线，点整行跳回正文；行上那几颗小钮另有分工。
+    const ntrow = e.target.closest && e.target.closest('.ntrow');
+    if (ntrow && p.contains(ntrow)) {
+      const b = e.target.closest('button');
+      if (b) ntRowAct(b, ntrow); else ntJump(ntrow);
+      return;
+    }
+    const chip = e.target.closest && e.target.closest('.ntchip');
+    if (chip && p.contains(chip)) { ntFilter(chip.dataset.f, chip.dataset.v); return; }
+    // 正文里点一道划线 → 打开笔记栏并定位到那一条（反过来也通：点条目跳回正文）。
+    const mk = e.target.closest && e.target.closest('mark.gzmk');
+    if (mk && p.contains(mk)) { ntRowForMark(mk.dataset.mk); return; }
     const t = e.target.closest('button');
     if (!t || !p.contains(t)) return;
     if (t.id === 'rdBack') { backTo(RD.back); return; }
@@ -4919,6 +6071,14 @@ function wireReader(p) {
     if (t.id === 'rdAsk') { rdAsk(); return; }
     if (t.id === 'rdFocus') { rdSetFocus(!document.body.classList.contains('focus')); return; }
     if (t.id === 'rdSet') { rdPopToggle(); return; }
+    if (t.id === 'rdNavT') { rdSetPane('nav', !rdPane.nav); return; }
+    if (t.id === 'rdNoteT' || t.id === 'ntClose') { rdSetPane('notes', t.id === 'ntClose' ? false : !rdPane.notes); return; }
+    // 笔记栏顶上的三颗大钮：写条目 / 导图 / 导出。三层浮窗都开在页面最上面（.ntlay，
+    // 比 #veil 还高），所以这里不能用 sheet() 问话 —— 问了也看不见。
+    if (t.id === 'ntNew') { ntEdOpen(null, ntLastSeed()); return; }
+    if (t.id === 'ntMap') { ntMapOpen(); return; }
+    if (t.id === 'ntExp') { ntExportNotes(); return; }
+    if (t.dataset.tab) { ntTab(t.dataset.tab); return; }
     if (t.dataset.ch !== undefined) rdGo(+t.dataset.ch);
   });
   // 划词：拖选一段就贴出小条；单击英文单词直接查义。
@@ -4975,12 +6135,14 @@ async function openReader(bookId, title, backPane) {
   p.dataset.seq = seq;
   p.dataset.chseq = 0;
   rdApplyCfg();                                     // 把本机阅读偏好贴到新骨架上
+  rdApplyPanes();                                   // 栏的开合同步贴上去
   rdSetFocus(document.body.classList.contains('focus'));   // 专注态跨开书保持
   rdProgress();
 
   RD.book = bookId; RD.title = title || bookId; RD.chapters = []; RD.at = -1;
   rdPaintPick();
   rdTimeStart();                                    // 开书即开始记本机阅读时长
+  ntLoad(bookId);                                   // 右栏那本笔记跟着这本书一起换
 
   let d;
   try {
@@ -5016,6 +6178,9 @@ async function openReader(bookId, title, backPane) {
   let at = 0;
   try { const s = localStorage.getItem(rdStoreKey(bookId)); if (s !== null) at = parseInt(s, 10) || 0; }
   catch (e) { /* 无痕模式等，忽略 */ }
+  // 笔记栏多半比目录先到（它只问一次 /api/mynotes）：那会儿还没有章节表，行上只能
+  // 写个文件名。目录一到位就重铺一次，把「0001」换回「第 1 章 …」。
+  if (NT.book === bookId) ntPaint();
   rdGo(Math.max(0, Math.min(RD.chapters.length - 1, at)));
 }
 
@@ -5071,6 +6236,7 @@ function rdSetFocus(on) {
     btn.classList.toggle('on', !!on);
     btn.title = on ? '退出专注（F）' : '专注模式（F）';
   }
+  rdApplyPanes();                     // 栏按钮的亮灭要跟着「现在真看得见吗」走
 }
 
 function rdPopToggle() {
@@ -5111,6 +6277,1322 @@ function rdApplyCfg() {
   });
 }
 
+/* ── 三栏开合：目录 / 正文 / 笔记 ──────────────────
+   「左边读、右边记」，两边都能缩回去。开关状态存本机：上一本收了笔记栏，
+   下一本打开时也是收着的 —— 版式是人的习惯，不该每本书再问一遍。 */
+const RD_PANE_KEY = 'guizang-rdpane';
+let rdPane = {nav: true, notes: true};
+
+function rdLoadPane() {
+  try {
+    const o = JSON.parse(localStorage.getItem(RD_PANE_KEY) || 'null');
+    if (o && typeof o.nav === 'boolean') rdPane.nav = o.nav;
+    if (o && typeof o.notes === 'boolean') rdPane.notes = o.notes;
+    else rdPane.notes = window.innerWidth >= 1200;    // 头一次：屏够宽就摊开给他看
+  } catch (e) { /* 无痕模式等，用默认 */ }
+}
+function rdSavePane() {
+  try { localStorage.setItem(RD_PANE_KEY, JSON.stringify(rdPane)); } catch (e) { /* 忽略 */ }
+}
+
+/** 把开合贴到骨架上：栏宽交给 CSS 变量走过渡，按钮的选中态和 title 在这儿同步。
+ *  专注模式在样式里就把两栏压成 0 了，所以按钮的「亮」要按此刻真看得见的那栏算，
+ *  不然会出现「笔记」亮着、栏却不在。 */
+function rdApplyPanes() {
+  const p = PANES.read; if (!p) return;
+  const wrap = p.querySelector('#rdWrap'); if (!wrap) return;
+  const focus = document.body.classList.contains('focus');
+  wrap.classList.toggle('notes', !!rdPane.notes);
+  wrap.classList.toggle('nonav', !rdPane.nav);
+  const shown = {nav: rdPane.nav && !focus, notes: rdPane.notes && !focus};
+  const nt = p.querySelector('#rdNoteT');
+  if (nt) {
+    nt.classList.toggle('on', shown.notes);
+    nt.title = shown.notes ? '收起笔记栏（N）' : '笔记栏（N）';
+  }
+  const nv = p.querySelector('#rdNavT');
+  if (nv) {
+    nv.classList.toggle('on', shown.nav);
+    nv.title = shown.nav ? '收起目录栏（D）' : '目录栏（D）';
+  }
+}
+
+function rdSetPane(which, on) {
+  rdPane[which] = !!on;
+  // 专注模式的意思是「只出现书籍的内容」，栏一开就得先退出来，否则两边互相压着，
+  // 用户会以为按钮坏了。
+  if (on && document.body.classList.contains('focus')) rdSetFocus(false);
+  rdSavePane();
+  rdApplyPanes();
+  if (which === 'notes' && rdPane.notes) ntPaint();
+}
+
+/* ── 这本书的笔记（notes.json）────────────────────
+   数据住在书目录里，读写全走 /api/mynotes。前端只改内存里这一份 doc，改完攒
+   900ms 存一次 —— 连划五句只落一次盘，不至于每点一下就转存盘图标。
+   存完拿服务端回的那份覆盖本地：id、时间戳、颜色、排序都是它补的，两边各留
+   一份迟早对不上，以「落盘的那份」为准最省心。 */
+const NT = {book: '', doc: null, tags: [], meta: {}, tab: 'marks',
+            tag: '', here: false, timer: 0, seq: 0, lock: false};
+/* 标签兜底：正常由 /api/mynotes 给（加一种笔只改后端一处）。接口万一没带回来，
+   也别让浮层上那排色片是空的。 */
+const NT_TAGS_DEF = [
+  {key: 'point', name: '论点', color: '#ffd45e', ink: '#3a2c05'},
+  {key: 'doubt', name: '疑问', color: '#ff9d8f', ink: '#3c130f'},
+  {key: 'quote', name: '可引用', color: '#93e0b4', ink: '#0c2e1a'},
+  {key: 'todo', name: '待查', color: '#9cc6ff', ink: '#0d2340'},
+  {key: 'idea', name: '灵感', color: '#c9b1ff', ink: '#231046'},
+];
+const NT_KINDS = {highlight: '划线', bold: '加粗', underline: '下划线',
+                  strike: '删除线', note: '批注'};
+
+function ntEmpty() { return {schema: 1, marks: [], entries: []}; }
+function ntDoc() { if (!NT.doc) NT.doc = ntEmpty(); if (!NT.doc.marks) NT.doc.marks = []; if (!NT.doc.entries) NT.doc.entries = []; return NT.doc; }
+function ntTags() { return (NT.tags && NT.tags.length) ? NT.tags : NT_TAGS_DEF; }
+function ntTagOf(k) { return ntTags().find(t => t.key === k) || null; }
+function ntMarkById(id) { return (NT.doc && NT.doc.marks || []).find(m => m.id === id) || null; }
+function ntEntryById(id) { return (NT.doc && NT.doc.entries || []).find(e => e.id === id) || null; }
+/** 这道划线是什么颜色：自己挑的色 > 标签的色 > 不写（跟着墨色走）。 */
+function ntColorOf(m) {
+  if (m && m.color) return m.color;
+  const t = m && ntTagOf(m.tag);
+  return t ? t.color : '';
+}
+function ntNow() { return Math.floor(Date.now() / 1000); }
+function ntWhen(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000), z = n => (n < 10 ? '0' + n : '' + n);
+  return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
+}
+
+/** 拉这本书的笔记。换书时先把上一本没存出去的补上，不然那点划线就丢在半路了。 */
+async function ntLoad(book) {
+  if (NT.timer) { clearTimeout(NT.timer); NT.timer = 0; if (NT.book && NT.doc) ntSave(); }
+  NT.book = book; NT.doc = null; NT.tag = ''; NT.here = false; NT.seq++;
+  const my = NT.seq;
+  ntPaint();
+  ntStatus('正在读这本书的笔记…');
+  let d;
+  try { d = await (await fetch('/api/mynotes?book=' + encodeURIComponent(book))).json(); }
+  catch (e) { if (NT.seq === my) ntStatus('笔记没读出来，稍后再试', 'bad'); return; }
+  if (NT.seq !== my || NT.book !== book) return;      // 期间又换了书，这次结果作废
+  if (!d.ok) { NT.doc = ntEmpty(); ntStatus(d.msg || '这本书还不认笔记', 'bad'); ntPaint(); return; }
+  NT.doc = d.doc || ntEmpty();
+  NT.tags = (d.tags && d.tags.length) ? d.tags : NT_TAGS_DEF;
+  NT.meta = {title: d.title || book, author: d.author || '',
+             source: d.source || '', url: d.url || ''};
+  ntStatus(d.exported ? '笔记导出过 notes.md，就在这本书的文件夹里'
+                      : '笔记存在这本书的文件夹里');
+  ntPaint();
+  ntApply();                                           // 正文可能先铺好了，补一遍划线
+}
+
+function ntTouch() {
+  clearTimeout(NT.timer);
+  NT.timer = setTimeout(ntSave, 900);
+  ntStatus('正在存…', 'busy');
+}
+
+async function ntSave() {
+  const book = NT.book, doc = NT.doc;
+  NT.timer = 0;
+  if (!book || !doc) return;
+  let d;
+  try {
+    d = await (await fetch('/api/mynotes', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({book, doc}),
+    })).json();
+  } catch (e) { ntStatus('没存上，稍后再试', 'bad'); return; }
+  if (NT.book !== book) return;                        // 期间换了书，别把状态写花
+  if (!d.ok) { ntStatus(d.msg || '没存上', 'bad'); return; }
+  if (d.doc) NT.doc = d.doc;
+  if (d.counts && local[book]) local[book].notes = d.counts;
+  const n = (NT.doc.marks || []).length + (NT.doc.entries || []).length;
+  ntStatus('已存 ' + n + ' 条 · 就在这本书的文件夹里');
+  if (!NT.lock) ntPaint();
+}
+
+function ntStatus(msg, cls) {
+  const p = PANES.read; if (!p) return;
+  const el = p.querySelector('#ntStatus'); if (!el) return;
+  el.textContent = msg;
+  el.className = 'ntfoot' + (cls ? ' ' + cls : '');
+}
+
+function ntTab(k) { NT.tab = k === 'entries' ? 'entries' : 'marks'; ntPaint(); }
+
+function ntFilter(f, v) {
+  if (f === 'tag') NT.tag = NT.tag === v ? '' : v;     // 再点一次就取消
+  else if (f === 'here') NT.here = !NT.here;
+  ntPaint();
+}
+
+/** 筛选片：一支笔一片，最后那颗「只在本章」管范围。 */
+function ntChips(box) {
+  const cs = ['<button class="ntchip' + (NT.tag ? '' : ' on') + '" data-f="tag" data-v="">全部</button>'];
+  ntTags().forEach(t => {
+    cs.push('<button class="ntchip' + (NT.tag === t.key ? ' on' : '') + '" data-f="tag" data-v="'
+      + esc(t.key) + '" title="只看「' + esc(t.name) + '」"><i style="--mkc:'
+      + esc(t.color) + '"></i>' + esc(t.name) + '</button>');
+  });
+  cs.push('<button class="ntchip' + (NT.here ? ' on' : '') + '" data-f="here" data-v="1"'
+    + ' title="只看正在读的这一章">只在本章</button>');
+  box.innerHTML = cs.join('');
+}
+
+function ntChTitle(file) {
+  if (!file) return '未定位章节';
+  const c = RD.chapters.find(x => x && x.file === file);
+  if (c) return c.title || file;
+  return String(file).replace(/\.md$/i, '');
+}
+
+function ntMarkRow(m) {
+  const c = ntColorOf(m), t = ntTagOf(m.tag);
+  return '<div class="ntrow"' + (c ? ' style="--mkc:' + esc(c) + '"' : '')
+    + ' data-mk="' + esc(m.id) + '" tabindex="0">'
+    + '<i class="cbar"></i>'
+    + '<div class="q">' + esc(m.text) + '</div>'
+    + (m.memo ? '<div class="memo">' + esc(m.memo) + '</div>' : '')
+    + '<div class="nfoot"><span class="nch">' + esc(ntChTitle(m.ch)) + '</span>'
+    + '<span class="grow"></span>'
+    + '<span class="nk">' + esc(NT_KINDS[m.kind] || '划线')
+    + (t ? ' · ' + esc(t.name) : '') + '</span>'
+    + '<span>' + esc(ntWhen(m.updated_at)) + '</span></div>'
+    + '<div class="nacts">'
+    + '<button data-act="jump" type="button">跳到正文</button>'
+    + '<button data-act="memo" type="button">' + (m.memo ? '改想法' : '写想法') + '</button>'
+    + '<button data-act="del" class="del" type="button">删除</button>'
+    + '</div></div>';
+}
+
+/** 列表里那一小段正文预览。截断要截在整行上，否则 Markdown 会渲染出缺胳膊少腿的东西
+ *  （半个表格、没闭合的代码块）—— 那一屏就没法看了。 */
+function ntEntryPeek(body) {
+  const s = String(body || '');
+  if (!s.trim()) return '';
+  let cut = s.length > 460 ? s.slice(0, 460) : s;
+  const nl = cut.lastIndexOf('\n');
+  if (nl > 100) cut = cut.slice(0, nl);
+  if (((cut.match(/```/g) || []).length) % 2) cut = cut.slice(0, cut.lastIndexOf('```'));
+  return mdRender(cut);
+}
+
+function ntEntryRow(e) {
+  const c = ntColorOf(e);
+  const peek = ntEntryPeek(e.body);
+  const refs = (e.refs || []).slice(0, 4);
+  return '<div class="ntrow"' + (c ? ' style="--mkc:' + esc(c) + '"' : '')
+    + ' data-en="' + esc(e.id) + '" tabindex="0">'
+    + '<i class="cbar"></i>'
+    + '<div class="q">' + esc(e.title || '（无题）') + '</div>'
+    + (peek ? '<div class="pvs md">' + peek + '</div>' : '')
+    + (refs.length ? '<div class="refs">' + refs.map((r, i) =>
+        '<button class="rf" type="button" data-act="ref" data-i="' + i + '"'
+        + ' title="翻到正文里这一句"><em>' + esc(r.text || '（这一句）') + '</em>'
+        + '<span>' + esc(ntChTitle(r.ch)) + '</span></button>').join('')
+      + (e.refs.length > refs.length ? '<span class="nk">+' + (e.refs.length - refs.length) + '</span>' : '')
+      + '</div>' : '')
+    + '<div class="nfoot"><span class="nch">' + esc(ntChTitle(e.ch)) + '</span>'
+    + '<span class="grow"></span>'
+    + '<span>' + esc(ntWhen(e.updated_at)) + '</span></div>'
+    + '<div class="nacts">'
+    + '<button data-act="edit" type="button">接着写</button>'
+    + '<button data-act="jump" type="button">跳到出处</button>'
+    + '<button data-act="del" class="del" type="button">删除</button>'
+    + '</div></div>';
+}
+
+/** 列表：只画当前页签 + 当前筛选那几条。一本书的笔记量（几十到几百）一次铺完就够，
+ *  犯不上上虚拟滚动。 */
+function ntPaint() {
+  const p = PANES.read; if (!p) return;
+  const box = p.querySelector('#ntList'); if (!box) return;
+  ntChips(p.querySelector('#ntChips'));
+  p.querySelectorAll('.nttabs button[data-tab]').forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === NT.tab));
+  const doc = NT.doc;
+  const marks = (doc && doc.marks) || [], entries = (doc && doc.entries) || [];
+  const cm = p.querySelector('#ntCM'), ce = p.querySelector('#ntCE');
+  if (cm) cm.textContent = String(marks.length);
+  if (ce) ce.textContent = String(entries.length);
+  if (!NT.book) { box.innerHTML = '<div class="ntempty">先打开一本书</div>'; return; }
+  if (!doc) { box.innerHTML = '<div class="ntempty">正在读这本书的笔记…</div>'; return; }
+  const here = NT.here ? ((RD.chapters[RD.at] || {}).file || '') : '';
+  if (NT.tab === 'entries') {
+    const list = entries.filter(e => (!NT.tag || e.tag === NT.tag)
+      && (!here || e.ch === here));
+    box.innerHTML = list.length ? list.map(ntEntryRow).join('')
+      : '<div class="ntempty">' + (entries.length
+        ? '这一类还没有条目。'
+        : '还没有独立笔记条目。条目是那种可以写很长、能引用别处的笔记，和随手划的那一笔不是一回事。')
+        + '</div>';
+    return;
+  }
+  const list = marks.filter(m => (!NT.tag || m.tag === NT.tag) && (!here || m.ch === here));
+  box.innerHTML = list.length ? list.map(ntMarkRow).join('')
+    : '<div class="ntempty">' + (marks.length
+      ? '这些笔还没划到这儿。选中正文里的一句话，浮层上点一支笔就记下了。'
+      : '还没有划线。选中正文里的一句话，浮层里点一支笔就记下了；想顺手写两句，点「记一笔」。')
+      + '</div>';
+}
+
+/** 行上的小按钮：跳转 / 写想法 / 接着写 / 删。 */
+function ntRowAct(btn, row) {
+  const act = btn.dataset.act;
+  const mk = row.dataset.mk, en = row.dataset.en;
+  if (act === 'jump') { ntJump(row); return; }
+  if (act === 'memo') {
+    const m = ntMarkById(mk);
+    if (!m) return;
+    const r = row.getBoundingClientRect();
+    selPopNote(r.left + r.width / 2, r.top, {mark: m, text: m.text});
+    return;
+  }
+  if (act === 'edit') {
+    const e = ntEntryById(en);
+    if (e) ntEdOpen(e);
+    return;
+  }
+  if (act === 'ref') {
+    const e = ntEntryById(en);
+    const r = e && (e.refs || [])[+btn.dataset.i];
+    if (r) ntGoto(r.ch, r.mark);
+    return;
+  }
+  if (act === 'del') {
+    if (mk) ntDel([mk]);
+    else if (en) ntDelEntry(en);
+  }
+}
+
+/** 点行 = 跳回正文那一句；点条目行 = 先翻到那一章，再定位到它引用的那句。 */
+function ntJump(row) {
+  const p = PANES.read; if (!p) return;
+  if (row.dataset.mk) {
+    const m = ntMarkById(row.dataset.mk);
+    if (!m) return;
+    ntLastFromMark(m);
+    ntGoto(m.ch, m.id);
+    return;
+  }
+  const e = ntEntryById(row.dataset.en);
+  if (!e) return;
+  const ref = (e.refs || []).find(r => r.mark);
+  if (ref) ntLastFromMark(ntMarkById(ref.mark));
+  ntGoto(ref && ref.ch ? ref.ch : e.ch, ref && ref.mark);
+}
+
+function ntGoto(file, markId) {
+  const i = RD.chapters.findIndex(c => c && c.file === file);
+  if (i < 0) { whisper(file ? '这一章的正文还没取回来' : '这一条没有记下位置'); return; }
+  if (i !== RD.at) { rdGo(i).then(() => ntFlashMark(markId)); return; }
+  ntFlashMark(markId);
+}
+
+/** 滚过去 + 闪一下：全程没有弹窗，也不把阅读焦点挪走。 */
+function ntFlashMark(id) {
+  const p = PANES.read; if (!p) return;
+  if (!id) { const sc = p.querySelector('#rdScroll'); if (sc) sc.scrollTo({top: 0, behavior: 'smooth'}); return; }
+  const el = p.querySelector('mark.gzmk[data-mk="' + id + '"]');
+  if (!el) { whisper('原文有些出入，这一句暂时定位不到'); return; }
+  el.scrollIntoView({block: 'center', behavior: 'smooth'});
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  p.querySelectorAll('.ntrow').forEach(r =>
+    r.classList.toggle('on', r.dataset.mk === id));
+}
+
+/** 正文里点了一道划线：把笔记栏打开、定位到那一行。栏本来是收着的也得能追过去。 */
+function ntRowForMark(id) {
+  ntLastFromMark(ntMarkById(id));      // 顺手记下「刚点的是哪句」，写条目时能直接引
+  if (!rdPane.notes) rdSetPane('notes', true);
+  if (NT.tab !== 'marks') { NT.tab = 'marks'; ntPaint(); }
+  const p = PANES.read; if (!p) return;
+  let row = p.querySelector('.ntrow[data-mk="' + id + '"]');
+  if (!row && (NT.tag || NT.here)) {          // 被筛选挡住了：先放开筛选再找
+    NT.tag = ''; NT.here = false; ntPaint();
+    row = p.querySelector('.ntrow[data-mk="' + id + '"]');
+  }
+  if (!row) { ntPaint(); return; }
+  p.querySelectorAll('.ntrow').forEach(r => r.classList.toggle('on', r === row));
+  row.scrollIntoView({block: 'nearest'});
+}
+
+/* ── 划线怎么贴回正文 ────────────────────────────
+   划线只存「原文 + 前面 40 字 + 后面 40 字 + 在哪一章」，不存行号也不存偏移：
+   换字号、换行距、换栏宽、改主题都会让行跑位，只有文字本身是稳的。每次铺完正文
+   现找一遍；同一句在书里出现多次，就靠前后文分辨是哪一处。 */
+
+/** 把正文铺成一条字符串，并记下每个文本节点在这条串里的起点，供查找与包 <mark> 用。 */
+function ntFlat(root) {
+  const nodes = [], starts = [];
+  let all = '';
+  const walk = n => {
+    for (let i = 0; i < n.childNodes.length; i++) {
+      const c = n.childNodes[i];
+      if (c.nodeType === 3) { nodes.push(c); starts.push(all.length); all += c.data; }
+      else if (c.nodeType === 1) {
+        const t = c.tagName;
+        // BR 不算字：抓回来的正文里硬换行很多，把它当空白抹掉更容易匹配上。
+        if (t === 'SCRIPT' || t === 'STYLE' || t === 'IMG' || t === 'BR') continue;
+        walk(c);
+      }
+    }
+  };
+  walk(root);
+  return {all, nodes, starts};
+}
+
+/** 某个 DOM 位置（节点 + 偏移）在这条串里的第几个字。元素型边界取它内容的起点。 */
+function ntPos(f, node, off) {
+  if (!node) return -1;
+  const k = f.nodes.indexOf(node);
+  if (k >= 0) return f.starts[k] + Math.min(off, node.data.length);
+  if (node.nodeType === 1) {
+    for (let i = 0; i < f.nodes.length; i++) if (node.contains(f.nodes[i])) return f.starts[i];
+  }
+  return -1;
+}
+
+/** 选区的前后文：各 40 字，够分辨重复句子，又不至于把上下文当成原文存下来。 */
+function ntAround(root, sel) {
+  const out = {prefix: '', suffix: ''};
+  try {
+    const r = sel.getRangeAt(0);
+    if (!root.contains(r.startContainer) || !root.contains(r.endContainer)) return out;
+    const f = ntFlat(root);
+    const s = ntPos(f, r.startContainer, r.startOffset);
+    const e = ntPos(f, r.endContainer, r.endOffset);
+    if (s < 0 || e < 0 || e <= s) return out;
+    out.prefix = f.all.slice(Math.max(0, s - 40), s);
+    out.suffix = f.all.slice(e, e + 40);
+  } catch (e) { /* 拿不到就空着，靠文字本身找 */ }
+  return out;
+}
+
+/** 在正文里找一句原文。前后文全中的候选优先；一处都对不上时，再试「抹掉空白」
+ *  那一版 —— 抓回来的正文里换行位置未必和当初选区里的一致。 */
+function ntFind(f, m) {
+  const all = f.all, t = String(m.text || '');
+  if (!t) return null;
+  const pre = String(m.prefix || ''), suf = String(m.suffix || '');
+  let best = null, from = 0, guard = 0;
+  while (guard++ < 4000) {
+    const i = all.indexOf(t, from);
+    if (i < 0) break;
+    from = i + t.length;
+    let sc = 0;
+    const p = all.slice(Math.max(0, i - pre.length), i);
+    const s2 = all.slice(i + t.length, i + t.length + suf.length);
+    if (pre) sc += (p === pre ? 2 : (p.slice(-10) === pre.slice(-10) ? 1 : 0));
+    if (suf) sc += (s2 === suf ? 2 : (s2.slice(0, 10) === suf.slice(0, 10) ? 1 : 0));
+    if (!best || sc > best.sc) best = {s: i, e: i + t.length, sc};
+    if (sc >= 4) break;
+  }
+  if (best) return best;
+  const skip = /\s/;
+  const idx = [];
+  let flat = '';
+  for (let i = 0; i < all.length; i++) if (!skip.test(all[i])) { idx.push(i); flat += all[i]; }
+  const t2 = t.replace(/\s+/g, '');
+  if (!t2) return null;
+  const j = flat.indexOf(t2);
+  if (j < 0) return null;
+  return {s: idx[j], e: idx[Math.min(j + t2.length - 1, idx.length - 1)] + 1, sc: 0};
+}
+
+/** 把 [s,e) 包进 <mark>：跨几个文本节点就切几刀。 */
+function ntWrapOne(f, s, e, m) {
+  const hits = [];
+  for (let k = 0; k < f.nodes.length; k++) {
+    const node = f.nodes[k], len = node.data.length;
+    const a = f.starts[k], b = a + len;
+    if (!len || b <= s || a >= e) continue;
+    hits.push({node, from: Math.max(0, s - a), to: Math.min(len, e - a)});
+  }
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const h = hits[i];
+    if (h.to <= h.from) continue;
+    let mid = h.node;
+    if (h.from > 0) mid = h.node.splitText(h.from);
+    if (mid.data.length > h.to - h.from) mid.splitText(h.to - h.from);
+    if (!mid.parentNode) continue;
+    const mk = document.createElement('mark');
+    mk.className = 'gzmk k-' + (m.kind || 'highlight');
+    mk.dataset.mk = m.id;
+    mk.title = (NT_KINDS[m.kind] || '划线') + (m.memo ? '：' + m.memo : '') + '（点这里看那条笔记）';
+    const c = ntColorOf(m);
+    if (c) mk.style.setProperty('--mkc', c);
+    mid.parentNode.insertBefore(mk, mid.nextSibling);
+    mk.appendChild(mid);
+  }
+}
+
+/** 重贴划线：先把旧的 <mark> 拆回去还原文本，再按 doc 重新找一遍包上。
+ *  不重画整章正文 —— 重画会把滚动位置和选区弄没，读者正读到一半呢。
+ *  从外往里包，每包一刀重新数一遍节点：这样「高亮里再套一个加粗」也不会把偏移算歪。 */
+function ntApply() {
+  const p = PANES.read; if (!p) return;
+  const bg = p.querySelector('#rdBody'); if (!bg) return;
+  bg.querySelectorAll('mark.gzmk').forEach(el => {
+    const par = el.parentNode;
+    if (!par) return;
+    while (el.firstChild) par.insertBefore(el.firstChild, el);
+    par.removeChild(el);
+    par.normalize();
+  });
+  const file = (RD.chapters[RD.at] || {}).file || '';
+  const doc = NT.doc;
+  if (!doc || !file) return;
+  const list = (doc.marks || []).filter(m => m && m.ch === file && m.text && m.id);
+  if (!list.length) return;
+  const f0 = ntFlat(bg);
+  const found = [];
+  list.forEach(m => { const r = ntFind(f0, m); if (r) found.push({m, r}); });
+  found.sort((a, b) => a.r.s - b.r.s || b.r.e - a.r.e);
+  found.forEach(item => {
+    const f = ntFlat(bg);
+    const r = ntFind(f, item.m) || item.r;
+    ntWrapOne(f, r.s, r.e, item.m);
+  });
+}
+
+/** 新加一笔划线（或改笔型）：记下原文 + 上下文 + 章，然后重贴、存盘。
+ *  around / ch 可以由调用方先抄一份 —— 「记一笔」那个浮层里要点进输入框打字，
+ *  那时候文档选区早被抢走了，不先抄就不知道用户到底选了哪句。 */
+function ntAdd(sel, txt, opts) {
+  opts = opts || {};
+  const p = PANES.read; if (!p) return false;
+  if (!NT.book) { whisper('这本书还没打开'); return false; }
+  const bg = p.querySelector('#rdBody');
+  const ch = opts.ch || (RD.chapters[RD.at] || {}).file || '';
+  if (!ch) { whisper('这一章还没有文件名，记不下位置'); return false; }
+  const around = opts.around || (bg && sel ? ntAround(bg, sel) : {prefix: '', suffix: ''});
+  txt = String(txt || (sel ? String(sel) : '')).trim();
+  if (!txt) { whisper('先选中一句话再记'); return false; }
+  const doc = ntDoc();
+  const t = ntNow();
+  doc.marks.unshift({
+    id: 'm_' + Math.random().toString(16).slice(2, 12),
+    ch, text: txt, prefix: around.prefix, suffix: around.suffix,
+    kind: opts.kind || 'highlight', tag: opts.tag || '',
+    color: opts.color || '', memo: opts.memo || '', page: String(RD.at + 1),
+    created_at: t, updated_at: t,
+  });
+  ntTouch();
+  ntApply();
+  if (!NT.lock) ntPaint();
+  return true;
+}
+
+function ntUpdate(id, patch) {
+  const m = ntMarkById(id);
+  if (!m) return false;
+  Object.keys(patch).forEach(k => { m[k] = patch[k]; });
+  m.updated_at = ntNow();
+  ntTouch();
+  ntApply();
+  if (!NT.lock) ntPaint();
+  return true;
+}
+
+function ntDel(ids) {
+  if (!NT.doc || !ids || !ids.length) return;
+  const drop = {};
+  ids.forEach(i => { drop[i] = 1; });
+  NT.doc.marks = (NT.doc.marks || []).filter(m => !drop[m.id]);
+  ntTouch();
+  ntApply();
+  if (!NT.lock) ntPaint();
+}
+
+function ntDelEntry(id) {
+  if (!NT.doc) return;
+  NT.doc.entries = (NT.doc.entries || []).filter(e => e.id !== id);
+  ntTouch();
+  if (!NT.lock) ntPaint();
+}
+
+/** 选区压着了几道现有划线（用来给「擦掉」那颗钮）。 */
+function ntMarksUnder(root, sel) {
+  try {
+    const r = sel.getRangeAt(0);
+    const out = [];
+    root.querySelectorAll('mark.gzmk').forEach(el => {
+      if (el.dataset.mk && r.intersectsNode(el)) out.push(el.dataset.mk);
+    });
+    return out;
+  } catch (e) { return []; }
+}
+
+/** 这一排笔只活在阅读器正文里：没在读书（或在别的视图里划词）就没有「哪一章」可记。 */
+function penBody() {
+  if (!RD.book) return null;
+  const p = PANES.read;
+  return (p && p.querySelector('#rdBody')) || null;
+}
+
+/** 浮层上那一排笔：五支带色的 + 三种笔画 + 记一笔 +（有的话）擦掉。
+ *  位置和上下文在这儿一次性抄好：色片点下去就落笔，「记一笔」还要先进输入框打字，
+ *  两处用的是同一份快照，免得一小时后才发现选区早没了。 */
+function ntPenItems(root, sel, txt) {
+  const around = root ? ntAround(root, sel) : {prefix: '', suffix: ''};
+  const ch = (RD.chapters[RD.at] || {}).file || '';
+  const base = {around, ch};
+  ntLastFromSel(txt, ch);           // 抄一份「刚选中的这句」：写条目时要点「引用这句」，
+                                    // 而光标一进输入框，浏览器的选区就没了。
+  const put = (extra, name) => {
+    if (!ntAdd(sel, txt, Object.assign({}, base, extra))) return;
+    ntDone(name);
+  };
+  const items = [];
+  ntTags().forEach(t => {
+    items.push({
+      color: t.color, title: '高亮：' + t.name, label: t.name,
+      fn: () => put({kind: 'highlight', tag: t.key}, t.name),
+    });
+  });
+  items.push({sep: 1, label: '粗', title: '加粗', fn: () => put({kind: 'bold'}, '加粗')});
+  items.push({label: '下划', title: '下划线', fn: () => put({kind: 'underline'}, '下划线')});
+  items.push({label: '删', title: '删除线', fn: () => put({kind: 'strike'}, '删除线')});
+  items.push({sep: 1, label: '记一笔', title: '写句想法，自动带上原文和位置',
+    fn: (x, y) => selPopNote(x, y, {text: txt, around, ch, sel})});
+  items.push({label: '写条目', title: '把这句引进去，写一篇自己的长笔记',
+    fn: () => { selPopHide(); ntEdOpen(null, {text: txt, ch}); }});
+  const under = ntMarksUnder(root, sel);
+  if (under.length) items.push({label: '擦掉', title: '去掉压着这几段的划线',
+    fn: () => { ntDel(under); ntDone('已擦掉'); }});
+  return items;
+}
+
+function ntDone(name) {
+  selPopHide();
+  const sel = window.getSelection();
+  if (sel) sel.removeAllRanges();
+  whisper(rdPane.notes ? ('已记下：' + name) : ('已记下：' + name + '　按 N 看笔记栏'));
+}
+
+/* ── 条目：另一类笔记 ───────────────────────────────────
+   和随手划的那一笔分开 —— 条目是一份自己的 Markdown 文档：有标题、能写到很长、
+   能引用书里别处的若干句话（refs），也能套模板起手。全部仍旧存在这本书的
+   notes.json 里，导出的时候和划线一起进 notes.md。 */
+const NTED = {on: false, id: '', tag: '', tpl: '', ch: '', refs: [], mode: '', dirty: false};
+/* 「这句」：正文里最后一次划词 / 最后一次点到的划线。写条目前顺手引用它，
+   不必先记下哪一句 —— 光标一进输入框，浏览器的选区就没了。 */
+const NTLAST = {text: '', ch: '', mark: ''};
+const NTMAP = {cut: 'tag', url: '', svg: '', book: ''};
+
+/** 记一句「正文里此刻在哪儿」。root 必须是阅读器正文，否则不算。 */
+function ntLastFromMark(m) {
+  if (!m) return;
+  NTLAST.text = m.text || ''; NTLAST.ch = m.ch || ''; NTLAST.mark = m.id || '';
+}
+function ntLastFromSel(txt, ch) {
+  NTLAST.text = String(txt || ''); NTLAST.ch = ch || ''; NTLAST.mark = '';
+}
+/** 起手引用那一句。mark 一定要带上 —— 少了它，条目里的引用 chip 就点不回正文那句，
+ *  用户看到的就是「我明明引了，怎么跳不过去」。 */
+function ntLastSeed() {
+  return NTLAST.text ? {text: NTLAST.text, ch: NTLAST.ch, mark: NTLAST.mark} : null;
+}
+
+/** Markdown 工具条。整排由 JS 摆：加一种笔只改这张表，不必动 HTML。 */
+const ED_TOOLS = [
+  {g: 1, t: 'h1', label: 'H1', tip: '一级标题'},
+  {t: 'h2', label: 'H2', tip: '二级标题'},
+  {t: 'h3', label: 'H3', tip: '三级标题'},
+  {t: 'h4', label: 'H4', tip: '四级标题'},
+  {t: 'h5', label: 'H5', tip: '五级标题'},
+  {sep: 1},
+  {g: 2, t: 'bold', html: '<b>粗</b>', tip: '加粗（选中的字变成 **粗**）'},
+  {t: 'ital', html: '<i>斜</i>', tip: '斜体'},
+  {t: 'strike', html: '<s>删</s>', tip: '删除线'},
+  {t: 'code', label: '码', tip: '行内代码'},
+  {sep: 1},
+  {g: 3, t: 'quote', label: '引用', tip: '这段是引来的话'},
+  {t: 'bull', label: '列表', tip: '无序列表'},
+  {t: 'num', label: '编号', tip: '有序列表'},
+  {t: 'task', label: '待办', tip: '- [ ] 能勾的那种'},
+  {t: 'fence', label: '代码块', tip: '整段照原样'},
+  {t: 'hr', label: '分隔', tip: '一条横线'},
+  {sep: 1},
+  {g: 4, t: 'table', label: '表格', tip: '点几乘几就插几乘几', pop: 1},
+  {t: 'link', label: '链接', tip: '[文字](地址)'},
+];
+
+function ntEdLayer() { return document.getElementById('ntEdLayer'); }
+
+/** 建一次工具条 + 绑一次事件（浮层是静态标记，脚本跑到这儿时元素已经在 DOM 里）。 */
+function ntEdWire() {
+  if (NTED.wired) return;
+  NTED.wired = true;
+  const box = document.getElementById('ntEdTools');
+  ED_TOOLS.forEach(item => {
+    if (item.sep) {
+      const s = document.createElement('span');
+      s.className = 'sep';
+      box.appendChild(s);
+      return;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.t = item.t;
+    if (item.html) b.innerHTML = item.html; else b.textContent = item.label;
+    b.title = item.tip;
+    b.onclick = ev => edTool(item.t, b, ev);
+    box.appendChild(b);
+  });
+  const sep = document.createElement('span');
+  sep.className = 'sp';
+  box.appendChild(sep);
+  // 标签色：条目也归到那五支笔之一，右栏的筛选片就能把划线和条目一起筛。
+  const tagBox = document.createElement('span');
+  tagBox.className = 'dots';
+  ntTags().forEach(t => {
+    const d = document.createElement('button');
+    d.type = 'button';
+    d.className = 'dot';
+    d.dataset.tag = t.key;
+    d.style.setProperty('--mkc', t.color);
+    d.title = '把这条目标成「' + t.name + '」';
+    d.onclick = () => edTag(NTED.tag === t.key ? '' : t.key);
+    tagBox.appendChild(d);
+  });
+  const none = document.createElement('button');
+  none.type = 'button';
+  none.dataset.t = 'tag0';
+  none.textContent = '无标';
+  none.title = '不归类';
+  none.onclick = () => edTag('');
+  tagBox.appendChild(none);
+  box.appendChild(tagBox);
+  const sep2 = document.createElement('span');
+  sep2.className = 'sep';
+  box.appendChild(sep2);
+  const ref = document.createElement('button');
+  ref.type = 'button';
+  ref.dataset.t = 'ref';
+  ref.textContent = '引用这句';
+  ref.title = '把正文里刚选中的那句话（或刚点到的那道划线）引到这条笔记里';
+  ref.onclick = () => edRefLast();
+  // 三种看法是一组，包在一起换行：拆成「只写」在上一排、「边写边看 只看」在下一排，
+  // 看着像是坏了。
+  const modes = document.createElement('span');
+  modes.className = 'modes';
+  [['edit', '只写'], ['split', '边写边看'], ['view', '只看']].forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.m = p[0];
+    b.textContent = p[1];
+    b.title = p[0] === 'split' ? '左边写 Markdown，右边看渲染结果' : p[1];
+    b.onclick = () => edMode(p[0]);
+    modes.appendChild(b);
+  });
+  const tpl = document.createElement('button');
+  tpl.type = 'button';
+  tpl.dataset.t = 'tpl';
+  tpl.textContent = '模板';
+  tpl.title = '套一套起手式：官方的或你自己存的';
+  tpl.onclick = () => ntTplOpen();
+  box.append(ref, modes, tpl);
+}
+
+function edTa() { return document.getElementById('ntEdTa'); }
+
+/** 改了一点东西就说一声：关闭时不至于悄悄丢稿。 */
+function edChanged() {
+  NTED.dirty = true;
+  ntEdPreview();
+}
+
+let edPvTimer = 0;
+function ntEdPreview() {
+  clearTimeout(edPvTimer);
+  edPvTimer = setTimeout(ntEdPreviewNow, 140);
+}
+/** 「只写」那一档右边根本看不见，就别白渲染一遍 Markdown 了。 */
+function ntEdPreviewNow() {
+  if (!NTED.on || NTED.mode === 'edit') return;
+  const pv = document.getElementById('ntEdPv');
+  if (pv) pv.innerHTML = mdRender(edTa().value);
+}
+
+function edMode(m) {
+  NTED.mode = m;
+  try { localStorage.setItem('guizang-ed-mode', m); } catch (e) { /* 无痕模式，记不住就算了 */ }
+  const body = document.getElementById('ntEdBody');
+  if (body) {
+    body.classList.toggle('split', m === 'split');
+    body.classList.toggle('view', m === 'view');
+  }
+  document.querySelectorAll('#ntEdTools button[data-m]').forEach(b =>
+    b.classList.toggle('on', b.dataset.m === m));
+}
+
+/** 对选区里的每一行做加工（行首加减号、井号、引用号都走这儿）。 */
+function edEachLine(fn) {
+  const ta = edTa(), v = ta.value;
+  const from = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+  const nl = v.indexOf('\n', ta.selectionEnd);
+  const to = nl < 0 ? v.length : nl;
+  const out = v.slice(from, to).split('\n').map(fn).join('\n');
+  ta.setRangeText(out, from, to, 'preserve');
+  ta.focus();
+  ta.setSelectionRange(from, from + out.length);
+  edChanged();
+}
+
+const ED_MARK = /^(?:#{1,6}\s+|>\s*|[-*+]\s{1,2}(?:\[[ x]\]\s+)?|\d+\.\s+)/;
+function edPrefix(p) {
+  edEachLine(line => {
+    if (line.startsWith(p)) return line.slice(p.length);          // 再点一次就取消
+    const bare = line.replace(ED_MARK, '');
+    return p + bare;
+  });
+}
+function edWrap(a, b, ph) {
+  const ta = edTa(), v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+  // 再点一次要能取消：符号包住选区就剥掉外层，选中的字自己已经套好了就剥里层。
+  // 不做这个开关，「加粗」点两下会变成 ****字****，用户只会觉得这排钮有毛病。
+  if (a === b && v.slice(Math.max(0, s - a.length), s) === a && v.slice(e, e + b.length) === b) {
+    const mid = v.slice(s, e);
+    ta.setRangeText(mid, s - a.length, e + b.length, 'end');
+    ta.focus();
+    const from = s - a.length;
+    ta.setSelectionRange(from, from + mid.length);
+    edChanged();
+    return;
+  }
+  const picked = v.slice(s, e);
+  if (a === b && picked.length >= 2 * a.length && picked.startsWith(a) && picked.endsWith(b)) {
+    const inner = picked.slice(a.length, picked.length - b.length);
+    ta.setRangeText(inner, s, e, 'end');
+    ta.focus();
+    ta.setSelectionRange(s, s + inner.length);
+    edChanged();
+    return;
+  }
+  const mid = picked || ph || '';
+  ta.setRangeText(a + mid + b, s, e, 'preserve');
+  ta.focus();
+  ta.setSelectionRange(s + a.length, s + a.length + mid.length);
+  edChanged();
+}
+/** 整段插入：前后各补一个空行，免得表格贴在句子尾巴上。 */
+function edBlock(text) {
+  const ta = edTa(), v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+  const head = (!s || v[s - 1] === '\n') ? '' : '\n';
+  const pre = (s && v[s - 1] === '\n') ? '\n' : '';
+  const body = pre + text + '\n';
+  ta.setRangeText(head + body, s, e, 'preserve');
+  ta.focus();
+  const at = s + head.length + body.length - 1;
+  ta.setSelectionRange(at, at);
+  edChanged();
+}
+
+function edTool(t, btn, ev) {
+  if (t === 'table') { edGridToggle(btn); return; }
+  edGridHide();
+  const h = n => edPrefix('#'.repeat(n) + ' ');
+  if (t === 'h1') return h(1);
+  if (t === 'h2') return h(2);
+  if (t === 'h3') return h(3);
+  if (t === 'h4') return h(4);
+  if (t === 'h5') return h(5);
+  if (t === 'bold') return edWrap('**', '**', '重点');
+  if (t === 'ital') return edWrap('*', '*', '斜体');
+  if (t === 'strike') return edWrap('~~', '~~', '不要了');
+  if (t === 'code') return edWrap('`', '`', 'code');
+  if (t === 'quote') return edPrefix('> ');
+  if (t === 'bull') return edPrefix('- ');
+  if (t === 'num') { let i = 0; return edEachLine(l => (++i) + '. ' + l.replace(ED_MARK, '')); }
+  if (t === 'task') return edPrefix('- [ ] ');
+  if (t === 'fence') return edBlock('```\n' + (edTa().value.slice(edTa().selectionStart, edTa().selectionEnd) || '代码') + '\n```');
+  if (t === 'hr') return edBlock('---');
+  if (t === 'link') return edWrap('[', '](https://)', '链接文字');
+  if (t === 'ref') return edRefLast();
+  if (t === 'tpl') return ntTplOpen();
+}
+
+/* ── 表格发生器：选几乘几就是几乘几，不必敲竖线 ───────────── */
+const ED_GRID_R = 6, ED_GRID_C = 8;
+function edGridToggle(btn) {
+  const wrap = btn.parentNode;
+  let pop = wrap.querySelector('.edpop');
+  if (pop && pop.classList.contains('open')) return edGridHide();
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.className = 'edpop';
+    pop.innerHTML = '<div class="gh">插入表格</div><div class="tb">'
+      + Array.from({length: ED_GRID_R * ED_GRID_C}, () => '<i></i>').join('')
+      + '</div><div class="cap">1 行表头 + 0 行内容</div>';
+    btn.style.position = 'static';
+    const holder = document.createElement('span');
+    holder.className = 'edgrid';
+    wrap.insertBefore(holder, btn);
+    holder.appendChild(btn);
+    holder.appendChild(pop);
+    const cells = [...pop.querySelectorAll('.tb i')];
+    const cap = pop.querySelector('.cap');
+    const paint = n => {
+      const r = Math.floor((n - 1) / ED_GRID_C) + 1, c = (n - 1) % ED_GRID_C + 1;
+      cells.forEach((el, i) => el.classList.toggle('hit', i < n));
+      cap.textContent = r + ' 行 × ' + c + ' 列（含 1 行表头）';
+      return {r, c};
+    };
+    let at = {r: 1, c: 1};
+    cells.forEach((el, i) => {
+      el.onmouseenter = () => { at = paint(i + 1); };
+      el.onclick = ev => { ev.stopPropagation(); edTable(at.r, at.c); edGridHide(); };
+    });
+    pop.onmousedown = ev => ev.preventDefault();   // 别抢输入框的光标
+    pop.onclick = ev => ev.stopPropagation();
+  }
+  edGridReset(pop);
+  pop.classList.add('open');
+}
+function edGridReset(pop) {                 // 每次打开都回到 1×1，别留着上次的选中
+  const cells = pop.querySelectorAll('.tb i');
+  if (cells.length) cells[0].onmouseenter();
+}
+function edGridHide() {
+  const pop = document.querySelector('#ntEdTools .edpop');
+  if (pop) pop.classList.remove('open');
+}
+function edTable(rows, cols) {
+  rows = Math.max(1, rows || 1);
+  cols = Math.max(1, cols || 1);
+  const line = cells => '|' + cells.join('|') + '|';
+  const head = line(Array.from({length: cols}, (_, i) => ' 列' + (i + 1) + ' '));
+  const sep = line(Array.from({length: cols}, () => ' --- '));
+  const body = Array.from({length: rows - 1}, () => line(Array.from({length: cols}, () => '    ')));
+  edBlock([head, sep].concat(body).join('\n'));
+}
+
+/* ── 引用：这条笔记挂在书里的哪几句上 ───────────────────── */
+function edTag(k) {
+  NTED.tag = k;
+  document.querySelectorAll('#ntEdTools .dot').forEach(d =>
+    d.classList.toggle('on', d.dataset.tag === k));
+  NTED.dirty = true;
+}
+function edRefsPaint() {
+  const box = document.getElementById('ntEdRefs');
+  if (!box) return;
+  box.replaceChildren();
+  if (!NTED.refs.length) {
+    const s = document.createElement('span');
+    s.className = 'refhint';
+    s.textContent = '这条笔记还没有引用书里的哪一句 —— 在正文里选一句话，再来点「引用这句」。';
+    box.appendChild(s);
+    return;
+  }
+  NTED.refs.forEach((r, i) => {
+    const el = document.createElement('div');
+    el.className = 'edref';
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.title = '点一下就翻到正文里那句（写的时候能对着看）';
+    const em = document.createElement('em');
+    em.textContent = r.text || '（这一句）';
+    const sp = document.createElement('span');
+    sp.textContent = ntChTitle(r.ch);
+    const x = document.createElement('b');
+    x.textContent = '×';
+    x.title = '取消这一处引用';
+    el.append(em, sp, x);
+    const go = () => ntGoto(r.ch, r.mark);
+    el.onclick = ev => {
+      if (ev.target === x) { NTED.refs.splice(i, 1); edRefsPaint(); return; }
+      go();
+    };
+    el.onkeydown = ev => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
+    };
+    box.appendChild(el);
+  });
+}
+function edRefAdd(r) {
+  if (!r || !(r.text || '').trim()) return false;
+  if (NTED.refs.some(x => x.text === r.text && x.ch === r.ch)) { whisper('这一句已经引过了'); return false; }
+  NTED.refs.push({text: String(r.text).slice(0, 1200), ch: r.ch || '',
+                  mark: r.mark || '', entry: r.entry || ''});
+  NTED.dirty = true;
+  edRefsPaint();
+  return true;
+}
+function edRefLast() {
+  if (!NTLAST.text) { whisper('先在正文里选一句话，或点一道已有的划线'); return; }
+  if (edRefAdd({text: NTLAST.text, ch: NTLAST.ch, mark: NTLAST.mark})) whisper('已引这一句');
+}
+
+/* ── 开 / 关 / 存 ───────────────────────────────────── */
+/** entry 给了就是改 Existing，不给就是新开一篇；seed 带一句刚选中的原文。 */
+function ntEdOpen(entry, seed) {
+  if (!NT.book) { whisper('先打开一本书'); return; }
+  ntEdWire();
+  const layer = ntEdLayer();
+  NTED.on = true;
+  NT.lock = true;                        // 编辑期间别让存盘把列表重铺了
+  NTED.id = entry ? (entry.id || '') : '';
+  NTED.tag = entry ? (entry.tag || '') : '';
+  NTED.tpl = entry ? (entry.tpl || '') : '';
+  NTED.ch = entry ? (entry.ch || '') : ((RD.chapters[RD.at] || {}).file || '');
+  NTED.refs = entry ? (entry.refs || []).map(r => ({text: r.text, ch: r.ch,
+                                                    mark: r.mark, entry: r.entry})) : [];
+  NTED.dirty = false;
+  NTED.forgive = false;                  // 上一篇的「再点一次才关」不算到这一篇头上
+  document.getElementById('ntEdTitle').value = entry ? (entry.title || '') : '';
+  edTa().value = entry ? (entry.body || '') : '';
+  if (!entry && seed) edRefAdd(seed);
+  let m = NTED.mode;
+  if (!m) {
+    try { m = localStorage.getItem('guizang-ed-mode') || ''; } catch (e) { m = ''; }
+    if (!m) m = window.innerWidth >= 1000 ? 'split' : 'edit';
+  }
+  edMode(m);
+  document.querySelectorAll('#ntEdTools .dot').forEach(d =>
+    d.classList.toggle('on', d.dataset.tag === NTED.tag));
+  edRefsPaint();
+  ntEdPreviewNow();
+  layer.classList.add('open');
+  setTimeout(() => document.getElementById('ntEdTitle').focus(), 30);
+}
+function ntEdClose() {
+  // 空稿没什么可丢的：只自动引了一句、一个字没写就走，别拦人。
+  const blank = !String(edTa().value || '').trim()
+    && !String(document.getElementById('ntEdTitle').value || '').trim();
+  if (NTED.dirty && !blank && !NTED.forgive) {
+    NTED.forgive = true;
+    whisper('这篇还没存：再点一次关闭就不留了');
+    return;
+  }
+  NTED.forgive = false;
+  NTED.on = false;
+  NTED.dirty = false;
+  NT.lock = false;
+  edGridHide();
+  ntEdLayer().classList.remove('open');
+  ntPaint();
+}
+
+function ntEdSave(keepOpen) {
+  const titleEl = document.getElementById('ntEdTitle');
+  const title = String(titleEl.value || '').trim();
+  const body = String(edTa().value || '');
+  if (!title && !body.trim()) { whisper('这篇还空着，写两句再存'); return false; }
+  const doc = ntDoc();
+  let e = NTED.id ? ntEntryById(NTED.id) : null;
+  const t = ntNow();
+  if (!e) {
+    e = {id: 'n_' + Math.random().toString(16).slice(2, 12), created_at: t};
+    doc.entries.unshift(e);
+    NTED.id = e.id;
+  }
+  e.title = title || ((NTED.refs[0] || {}).text || '未命名条目').slice(0, 24);
+  e.body = body;
+  e.ch = NTED.ch || ((RD.chapters[RD.at] || {}).file || '');
+  e.tag = NTED.tag || '';
+  e.tpl = NTED.tpl || '';
+  e.refs = NTED.refs.slice(0, 40);
+  e.updated_at = t;
+  NTED.dirty = false;
+  ntTouch();
+  if (keepOpen) ntEdPreviewNow();
+  else ntEdClose();
+  if (!keepOpen) whisper('条目记下了，就在这本书的文件夹里');
+  return true;
+}
+
+/* ── 模板 ────────────────────────────────────────────
+   模板 = 一篇条目的起手稿。官方五套 + 用户自己存的；占位符 {title} {author}
+   {chapter} {text} {date} {url} 由后端填，前端只负责把上下文递过去。 */
+function ntTplCtx() {
+  const ch = NTED.ch || ((RD.chapters[RD.at] || {}).file || '');
+  return {
+    id: '',
+    title: NT.meta.title || NT.book || '',
+    author: NT.meta.author || '',
+    chapter: ntChTitle(ch),
+    text: (NTED.refs[0] || {}).text || NTLAST.text || '',
+    date: new Date().toISOString().slice(0, 10),
+    url: NT.meta.url || '',
+  };
+}
+function ntTplLayer() { return document.getElementById('ntTplLayer'); }
+async function ntTplOpen() {
+  edGridHide();
+  ntTplLayer().classList.add('open');
+  await ntTplRefresh();
+}
+const NT_TPL = {items: []};
+/** 模板列表永远以上一次的 GET 为准：删/存之后重问一次，比自己改数组更不容易和盘上对不上。 */
+async function ntTplRefresh() {
+  const box = document.getElementById('ntTplList');
+  let d;
+  try { d = await (await fetch('/api/note_tpl')).json(); }
+  catch (e) { box.innerHTML = '<div class="ntempty">模板没读出来，本机服务没在跑？</div>'; return; }
+  NT_TPL.items = d.items || [];
+  ntTplPaint();
+}
+function ntTplPaint() {
+  const box = document.getElementById('ntTplList');
+  box.replaceChildren();
+  const hd = document.createElement('div');
+  hd.className = 'tplhd';
+  hd.textContent = '点一下就插到光标这儿 —— 已经写过的不会被动掉';
+  box.appendChild(hd);
+  if (!NT_TPL.items.length) {
+    const s = document.createElement('div');
+    s.className = 'ntempty';
+    s.textContent = '一套模板也没有';
+    box.appendChild(s);
+    return;
+  }
+  NT_TPL.items.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'tplrow';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    const tg = document.createElement('div');
+    tg.className = 'tg';
+    const n = document.createElement('div');
+    n.className = 'tn';
+    n.textContent = t.name;
+    const dd = document.createElement('div');
+    dd.className = 'td';
+    dd.textContent = t.desc || '（没有说明）';
+    tg.append(n, dd);
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = t.official ? '官方' : '我的';
+    row.append(tg, badge);
+    if (!t.official) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'del';
+      del.textContent = '删除';
+      del.onclick = async ev => {
+        ev.stopPropagation();
+        const j = await tplReq({del: t.id});
+        if (!j) { whisper('模板没删掉'); return; }
+        if (j.ok) { whisper('模板删了'); await ntTplRefresh(); }
+        else whisper(j.msg || '模板没删掉');
+      };
+      row.appendChild(del);
+    }
+    row.onclick = () => ntTplUse(t);
+    row.onkeydown = ev => { if (ev.key === 'Enter') ntTplUse(t); };
+    box.appendChild(row);
+  });
+}
+async function tplReq(payload) {
+  try {
+    return await (await fetch('/api/note_tpl', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    })).json();
+  } catch (e) { return null; }
+}
+async function ntTplUse(t) {
+  const ctx = ntTplCtx();
+  ctx.id = t.id;
+  const j = await tplReq({apply: {id: t.id, title: ctx.title, author: ctx.author,
+                                  chapter: ctx.chapter, text: ctx.text,
+                                  date: ctx.date, url: ctx.url}});
+  if (!j || !j.ok) { whisper((j && j.msg) || '模板没套上'); return; }
+  if (!NTED.on) ntEdOpen(null, ntLastSeed());
+  NTED.tpl = t.id;
+  edBlock(String(j.body || ''));
+  const titleEl = document.getElementById('ntEdTitle');
+  if (titleEl && !String(titleEl.value || '').trim()) {
+    titleEl.value = (NT.meta.title || '') ? (t.name + ' · ' + (NT.meta.title || '')) : t.name;
+  }
+  ntTplLayer().classList.remove('open');
+  whisper('模板插进来了');
+}
+/** 把编辑器里这篇存成自己的模板：正文里的花括号占位符会照原样留着。 */
+function ntTplSaveAs() {
+  const box = document.getElementById('ntTplList');
+  box.innerHTML = '<div class="tplhd">新模板</div><div class="tplform">'
+    + '<input id="tplName" placeholder="名字，比如「错题回炉」" autocomplete="off">'
+    + '<input id="tplDesc" placeholder="一句话说明，列表里看得懂就行">'
+    + '<div class="tplhint">占位符：{title} 书名 · {author} 作者 · {chapter} 章节 · '
+    + '{text} 引用的那句 · {date} 日期 · {url} 链接。不写的就空着。</div>'
+    + '<textarea id="tplBody" placeholder="模板正文（Markdown）"></textarea>'
+    + '<div class="acts"><button class="deed" id="tplCancel">取消</button>'
+    + '<button class="deed sure" id="tplGo">存这个模板</button></div></div>';
+  const ta = box.querySelector('#tplBody');
+  ta.value = String(edTa().value || '');
+  if (!ta.value.trim()) {
+    ta.value = '**原文**：{text}\n\n**出处**：{title}　{chapter}\n\n**我的想法**：\n\n- \n';
+  }
+  box.querySelector('#tplName').focus();
+  box.querySelector('#tplCancel').onclick = () => ntTplPaint();
+  box.querySelector('#tplGo').onclick = async () => {
+    const name = String(box.querySelector('#tplName').value || '').trim();
+    if (!name) { whisper('总得给它个名字'); return; }
+    const j = await tplReq({save: {name, desc: String(box.querySelector('#tplDesc').value || '').trim(),
+                                   body: ta.value}});
+    if (j && j.ok) { whisper('模板存好了'); await ntTplRefresh(); }
+    else whisper((j && j.msg) || '模板没存上');
+  };
+}
+
+/* ── 思维导图 ────────────────────────────────────────
+   SVG 由后端画（它也顺手往书目录里存一份 mindmap.svg），前端只做展示和切刀。
+   图是本地生成的字符串，走 blob 给 <img>，看完就 revoke，不留悬挂的 URL。 */
+async function ntMapOpen() {
+  if (!NT.book) { whisper('先打开一本书'); return; }
+  const layer = document.getElementById('ntMapLayer');
+  layer.classList.add('open');
+  await ntMapPaint();
+}
+async function ntMapPaint() {
+  const stage = document.getElementById('ntMapStage');
+  const img = document.getElementById('ntMapImg');
+  const info = document.getElementById('ntMapInfo');
+  document.querySelectorAll('#ntMapCut button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === NTMAP.cut));
+  if (!NT.doc) { info.textContent = '这本书的笔记还没读出来'; return; }
+  const n = (NT.doc.marks || []).length + (NT.doc.entries || []).length;
+  if (!n) {
+    stage.classList.remove('busy');
+    img.removeAttribute('src');
+    info.textContent = '还没有可画的笔记 —— 先划两句';
+    return;
+  }
+  stage.classList.add('busy');
+  info.textContent = '正在画…';
+  NTMAP.book = NT.book;
+  let d;
+  try {
+    d = await (await fetch('/api/mynotes/map?book=' + encodeURIComponent(NT.book)
+                           + '&cut=' + encodeURIComponent(NTMAP.cut))).json();
+  } catch (e) {
+    stage.classList.remove('busy');
+    info.textContent = '导图没画出来：本机服务没在跑';
+    return;
+  }
+  stage.classList.remove('busy');
+  if (!d.ok || !d.svg) { info.textContent = d.msg || '导图没画出来'; return; }
+  NTMAP.svg = d.svg;
+  if (NTMAP.url) URL.revokeObjectURL(NTMAP.url);
+  NTMAP.url = URL.createObjectURL(new Blob([d.svg], {type: 'image/svg+xml'}));
+  img.src = NTMAP.url;
+  info.textContent = d.nodes + ' 个节点 · ' + d.branches + ' 条一级分支 · 也存了一份在书文件夹里';
+}
+function ntMapSaveFile() {
+  if (!NTMAP.svg) { whisper('图上还没有东西'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([NTMAP.svg], {type: 'image/svg+xml'}));
+  a.download = ((NT.meta.title || NT.book || 'notes') + '-思维导图.svg');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* ── 导出 notes.md ───────────────────────────────────
+   先存再导：后端读的是盘上那份，不先 flush 就会导出比屏幕上少几条的内容，
+   而用户看到的就是「我明明记了」。 */
+async function ntExportNotes() {
+  if (!NT.book) { whisper('先打开一本书'); return; }
+  ntStatus('正在导出…', 'busy');
+  if (NT.timer) { clearTimeout(NT.timer); NT.timer = 0; }
+  await ntSave();
+  let d;
+  try {
+    d = await (await fetch('/api/mynotes/export', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({book: NT.book}),
+    })).json();
+  } catch (e) { ntStatus('导出没做成：本机服务没在跑', 'bad'); return; }
+  if (!d.ok) { ntStatus(d.msg || '导出没做成', 'bad'); whisper(d.msg || '导出没做成'); return; }
+  ntStatus('已导出 notes.md（' + d.chars + ' 字）· 就在这本书的文件夹里');
+  whisper('notes.md 导出好了');
+}
+
+/* ── 浮窗接线：静态标记，绑一次就够（不靠 wireReader，它们在阅读器外面）── */
+function ntFloatsWire() {
+  if (NTED.floatsWired) return;
+  NTED.floatsWired = true;
+  const ed = document.getElementById('ntEdLayer');
+  const tpl = document.getElementById('ntTplLayer');
+  const map = document.getElementById('ntMapLayer');
+  [ed, tpl, map].forEach(l => {
+    l.addEventListener('mousedown', e => { if (e.target === l) ntLayerClose(l); });
+  });
+  document.getElementById('ntEdSave').onclick = () => ntEdSave(false);
+  document.getElementById('ntEdClose').onclick = ntEdClose;
+  document.getElementById('ntEdTitle').addEventListener('input', () => { NTED.dirty = true; });
+  const ta = document.getElementById('ntEdTa');
+  ta.addEventListener('input', edChanged);
+  ta.addEventListener('keydown', e => {
+    const meta = e.metaKey || e.ctrlKey;
+    if (meta && e.key.toLowerCase() === 's') { e.preventDefault(); ntEdSave(false); return; }
+    if (meta && e.key === 'Enter') { e.preventDefault(); ntEdSave(true); return; }
+    if (e.key === 'Escape') { e.stopPropagation(); ntEdClose(); return; }
+    // Markdown 里最常被按的两把键：回车接着上一个列表项，Tab 仍旧跳焦点（不抢）。
+    if (e.key === 'Enter' && !meta && !e.shiftKey) {
+      const v = ta.value, s = ta.selectionStart;
+      const ls = v.lastIndexOf('\n', s - 1) + 1;
+      const cur = v.slice(ls, s);
+      const li = cur.match(/^(\s*)(?:[-*+]\s(?:\[[ xX]\]\s)?|\d+\.\s)/);
+      if (li) {
+        e.preventDefault();
+        const rest = cur.slice(li[0].length);
+        if (!rest.trim()) {                       // 空着再回车 = 收掉这一串列表（只撤掉行首那几
+          ta.setRangeText('', ls, ta.selectionEnd, 'end');   // 个字符，不额外留一行空行）
+          edChanged();
+          return;
+        }
+        let mark = li[0].replace(/[xX]/, ' ');
+        const num = cur.match(/^(\s*)(\d+)\./);
+        if (num) mark = num[1] + (parseInt(num[2], 10) + 1) + '. ';
+        ta.setRangeText('\n' + mark, ta.selectionStart, ta.selectionEnd, 'end');
+        edChanged();
+      }
+    }
+  });
+  document.getElementById('ntTplClose').onclick = () => tpl.classList.remove('open');
+  document.getElementById('ntTplNew').onclick = () => {
+    if (!NTED.on && !document.getElementById('ntEdTa').value.trim()) {
+      ntEdOpen(null, ntLastSeed());
+    }
+    ntTplSaveAs();
+  };
+  document.getElementById('ntMapClose').onclick = () => map.classList.remove('open');
+  document.getElementById('ntMapCut').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    NTMAP.cut = b.dataset.v;
+    ntMapPaint();
+  });
+  document.getElementById('ntMapDir').onclick = () => {
+    if (!NT.book) return;
+    post('reveal', {book: NT.book}).then(r => { if (r && !r.ok) whisper(r.msg || '文件夹没打开'); });
+  };
+  document.getElementById('ntMapDl').onclick = ntMapSaveFile;
+  window.addEventListener('scroll', edGridHide, true);
+}
+function ntLayerClose(l) {
+  if (l.id === 'ntEdLayer') { ntEdClose(); return; }
+  l.classList.remove('open');
+}
+/** Esc 关掉最上面那层浮窗（编辑器自己有脏稿提醒，交给它自己处理）。 */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const tpl = document.getElementById('ntTplLayer');
+  const map = document.getElementById('ntMapLayer');
+  if (tpl && tpl.classList.contains('open')) { tpl.classList.remove('open'); return; }
+  if (map && map.classList.contains('open')) { map.classList.remove('open'); return; }
+  if (NTED.on) { ntEdClose(); }
+}, true);
+
+/* ── 左栏当前章 ──────────────────────────────── */
 /** 标记左栏当前章，并把它滚进可视区（别让选中项跑到列表外面）。 */
 function rdMark(i) {
   const p = PANES.read; if (!p) return;
@@ -5130,6 +7612,7 @@ async function rdGo(i) {
   RD.at = i;
   rdMark(i);
   rdCrumb(i);
+  if (NT.here) ntPaint();          // 「只在本章」跟着这一章筛，翻章就得跟着换
   try { localStorage.setItem(rdStoreKey(RD.book), String(i)); } catch (e) { /* 忽略 */ }
   const bookSeq = p.dataset.seq;
   const mySeq = (+p.dataset.chseq || 0) + 1;
@@ -5177,7 +7660,7 @@ function rdSkelHTML() {
     + '</div>';
 }
 
-/** 把一章正文铺进正文区：淡化淡入 + 修图/链接 + 回到顶部 + 进度归位。 */
+/** 把一章正文铺进正文区：淡化淡入 + 修图/链接 + 回到顶部 + 进度归位 + 贴回划线。 */
 function rdPaint(bg, md) {
   if (!bg) return;
   bg.innerHTML = mdRender(md);
@@ -5187,6 +7670,7 @@ function rdPaint(bg, md) {
   if (sc) sc.scrollTop = 0;
   bg.classList.remove('fade'); void bg.offsetWidth; bg.classList.add('fade');
   rdProgress();
+  ntApply();                                   // 这一章的划线贴回原文上
 }
 
 /** 预取相邻两章（上/下各一），把下一次翻章变成瞬时。 */
@@ -5267,13 +7751,25 @@ async function rdDownload(kind) {
       + '&name=' + encodeURIComponent(base), base + '.md');
     return;
   }
+  // 「文件夹」不是导出，是把这本书在硬盘上的位置指给用户看
+  if (kind === 'folder') {
+    const r = await post('reveal', {book: RD.book});
+    if (r && !r.ok) whisper(r.msg || '没能打开那个文件夹');
+    return;
+  }
+  if (kind === 'zip') {
+    whisper('正在打包整本…');
+    const ok = await clip('/api/zip?book=' + encodeURIComponent(RD.book), base + '.zip');
+    whisper(ok ? '已导出完整包' : '打包未完成');
+    return;
+  }
   whisper('正在生成 ' + kind.toUpperCase() + '…');
   const ok = await clip('/api/' + kind + '?book=' + encodeURIComponent(RD.book), '');
   whisper(ok ? ('已导出 ' + kind.toUpperCase()) : '导出未完成');
 }
 
 /* 读书时的键盘：←/→ 或 [ ] 翻章，空格/Shift+空格翻屏，PageUp/PageDown 同样翻屏，
-   Home/End 到顶/底，F 专注，Esc 先关设置面板、没有面板才退回。
+   Home/End 到顶/底，F 专注，N 开合笔记栏，D 开合目录栏，Esc 先关设置面板、没有面板才退回。
    只在阅读态生效；焦点在输入框/下拉里时放行，别抢输入；带修饰键的组合键
    （Cmd+← 之类是系统/浏览器的）一律不碰。 */
 document.addEventListener('keydown', e => {
@@ -5289,6 +7785,8 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'f' || e.key === 'F') {
     rdSetFocus(!document.body.classList.contains('focus')); e.preventDefault();
   }
+  else if (e.key === 'n' || e.key === 'N') { rdSetPane('notes', !rdPane.notes); e.preventDefault(); }
+  else if (e.key === 'd' || e.key === 'D') { rdSetPane('nav', !rdPane.nav); e.preventDefault(); }
   else if (e.key === ' ' || e.key === 'Spacebar'
       || e.key === 'PageDown' || e.key === 'PageUp') {
     if (t && t.tagName === 'BUTTON') return;          // 按钮自己要响应空格，别抢
@@ -5320,7 +7818,8 @@ document.addEventListener('click', e => {
   rdPopToggle();
 });
 
-rdLoadCfg();   // 开界面时就把本机阅读偏好读进来
+rdLoadCfg();     // 开界面时就把本机阅读偏好读进来
+rdLoadPane();    // 三栏的开合同样是本机的事
 
 /* ── 本机阅读时长 ──────────────────────────
    微信读书那边的时间由官方接口给；这一份记的是「在归藏阅读器里真正坐着读的时间」。
@@ -5383,8 +7882,14 @@ function selPopEl() {
   selPop = document.createElement('div');
   selPop.className = 'selpop';
   selPop.id = 'selpop';
-  // 在小条上按下别把正文选区弄丢，也别触发外面的「点外收起」
-  selPop.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
+  // 在小条上按下别把正文选区弄丢，也别触发外面的「点外收起」——
+  // 但「记一笔」那个浮层要能在里面打字，输入框得真的拿到焦点。
+  selPop.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    const tag = e.target && e.target.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+    e.preventDefault();
+  });
   document.body.append(selPop);
   return selPop;
 }
@@ -5408,8 +7913,9 @@ function selPopPlace(x, y) {
   el.style.top = Math.round(top) + 'px';
 }
 
-/** 工具条模式：一排按钮。 */
-function selPopBar(x, y, items) {
+/** 工具条模式：上面一排是怎么读（复制/译/问），下面一排是怎么记（五色笔 + 批注）。
+ *  两排分开放是因为它们根本是两件事：上面那排在处理文字，下面那排在往书里落笔。 */
+function selPopTools(x, y, items, pens) {
   const el = selPopEl();
   const bar = document.createElement('div');
   bar.className = 'selbar';
@@ -5417,12 +7923,126 @@ function selPopBar(x, y, items) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = it.label;
-    b.onclick = () => it.fn();
+    if (it.title) b.title = it.title;
+    b.onclick = () => it.fn(x, y);
     bar.append(b);
   });
   el.replaceChildren(bar);
+  if (pens && pens.length) {
+    const row = document.createElement('div');
+    row.className = 'selpens';
+    pens.forEach(it => {
+      if (it.sep) {
+        const s = document.createElement('span');
+        s.className = 'sep';
+        row.append(s);
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.title = it.title || it.label || '';
+      if (it.color) {
+        b.className = 'pen';
+        b.style.setProperty('--mkc', it.color);
+        b.innerHTML = '<i></i>';            // 色片自己就是那支笔，不必再写字
+      } else b.textContent = it.label;
+      b.onclick = () => it.fn(x, y);
+      row.append(b);
+    });
+    el.append(row);
+  }
   el.classList.add('show');
   selPopPlace(x, y);
+}
+
+/** 划词即记：浮层里直接写想法，存下来自动带上原文和出处（第几章、选区前后文）。
+ *  opts.mark 有值就是改一条已有的批注，没值就是新记一条。 */
+function selPopNote(x, y, opts) {
+  opts = opts || {};
+  const el = selPopEl();
+  const box = document.createElement('div');
+  box.className = 'selnote';
+  const color = opts.mark ? ntColorOf(opts.mark) : '';
+  const q = document.createElement('div');
+  q.className = 'q';
+  q.textContent = String(opts.text || '').slice(0, 160);
+  if (color) q.style.setProperty('--mkc', color);
+  const ta = document.createElement('textarea');
+  ta.placeholder = '写一句想法，存下来自动带上原文和位置';
+  ta.value = (opts.mark && opts.mark.memo) || opts.memo || '';
+  const row = document.createElement('div');
+  row.className = 'row';
+  const kinds = document.createElement('div');
+  kinds.className = 'kinds';
+  let kind = (opts.mark && opts.mark.kind) || opts.kind || 'note';
+  let tag = (opts.mark && opts.mark.tag) || opts.tag || '';
+  const tagBtns = ntTags().map(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t.name;
+    b.dataset.k = t.key;
+    b.style.setProperty('--mkc', t.color);
+    b.title = '把这一笔标成「' + t.name + '」';
+    kinds.append(b);
+    return b;
+  });
+  const kindBtns = [['note', '批注'], ['highlight', '高亮']].map(pair => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = pair[1];
+    b.dataset.v = pair[0];
+    b.title = pair[0] === 'note' ? '带一句想法的批注' : '只把这句高亮';
+    kinds.append(b);
+    return b;
+  });
+  const sync = () => {
+    tagBtns.forEach(b => b.classList.toggle('on', b.dataset.k === tag));
+    kindBtns.forEach(b => b.classList.toggle('on', b.dataset.v === kind));
+    q.style.setProperty('--mkc', (ntTagOf(tag) || {}).color || color || 'rgba(255,255,255,.3)');
+  };
+  tagBtns.forEach(b => b.onclick = () => { tag = tag === b.dataset.k ? '' : b.dataset.k; sync(); });
+  kindBtns.forEach(b => b.onclick = () => { kind = b.dataset.v; sync(); });
+  row.append(kinds);
+  const grow = document.createElement('span');
+  grow.className = 'grow';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'cancel';
+  cancel.textContent = '取消';
+  cancel.onclick = () => selPopHide();
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'go';
+  go.textContent = opts.mark ? '存改动' : '记下';
+  row.append(grow, cancel, go);
+  box.append(q, ta, row);
+  el.replaceChildren(box);
+  el.classList.add('show');
+  sync();
+  selPopPlace(x, y);
+
+  const save = () => {
+    const memo = String(ta.value || '').trim();
+    if (opts.mark) {
+      ntUpdate(opts.mark.id, {memo, tag, kind});
+      selPopHide();
+      whisper('这条想法改好了');
+      return;
+    }
+    // 光标一进输入框，浏览器的选区就散了：原文和位置用打开浮层那一刻的快照。
+    const sel = opts.sel || window.getSelection();
+    const txt = String(opts.text || (sel ? String(sel) : '')).trim();
+    if (!txt) { whisper('先选中一句话再记'); return; }
+    const around = opts.around || {prefix: '', suffix: ''};
+    if (ntAdd(sel, txt, {kind, tag, memo, around, ch: opts.ch})) {
+      ntDone(kind === 'highlight' ? ((ntTagOf(tag) || {}).name || '高亮') : '一条批注');
+    }
+  };
+  go.onclick = save;
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); selPopHide(); }
+  });
+  ta.focus();
 }
 
 /** 答案卡模式：标题 + 正文；busy 时先给个「在问」。返回正文节点供回填。 */
@@ -5537,6 +8157,8 @@ function selAfterUp(e, down) {
     return;
   }
   if (moved > 6) { selPopHide(); return; }      // 拖了一把却没选上，不收就算了
+  // 点在已有的划线上：那是「去看我记的那条」，不是查单词 —— 交给 click 分支处理。
+  if (e.target.closest && e.target.closest('mark.gzmk')) { selPopHide(); return; }
   const w = selWordAt(e.clientX, e.clientY);
   if (w) {
     selText = w;
@@ -5544,7 +8166,9 @@ function selAfterUp(e, down) {
   } else selPopHide();
 }
 
-/** 选中一段：贴出小条。锚点取选区上沿中点，贴着文字走。 */
+/** 选中一段：贴出小条。锚点取选区上沿中点，贴着文字走。
+ *  上面一排是「怎么处理这段文字」，下面一排是「怎么往书里落笔」——两排各管各的，
+ *  笔那一排只在阅读器正文里出现（出了正文就没有「哪一章」可记了）。 */
 function selShowBar(sel, cx, cy, txt) {
   selText = txt;
   let x = cx, y = cy;
@@ -5560,7 +8184,11 @@ function selShowBar(sel, cx, cy, txt) {
   items.push({label: '译成中文', fn: () =>
     selAskCard(x, y, txt.length > 16 ? txt.slice(0, 15) + '…' : txt, 'translate', txt, ctx)});
   items.push({label: '问小助手', fn: () => selAskAgent(txt, ctx)});
-  selPopBar(x, y, items);
+  let pens = [];
+  const body = penBody();
+  // 小条要活一会儿，落笔用的却是此刻的选区：先把上下文抄下来再摆。
+  if (body && body.contains(sel.anchorNode)) pens = ntPenItems(body, sel, txt);
+  selPopTools(x, y, items, pens);
 }
 
 /** 把选段递给右下角的小助手：带上「正在读哪本·哪章」当引子。 */
@@ -5593,10 +8221,19 @@ function rdAsk() {
 /** 点界面别处收掉小条。 */
 document.addEventListener('click', e => {
   if (!selPop || !selPop.classList.contains('show')) return;
+  // 判「点的是不是小条自己」要看事件路径，不能用 closest：浮层里的按钮经常在点下去
+  // 的那一刻就被换掉了（「记一笔」是把整层换成输入框），换了身的元素 closest 找不到
+  // 浮层，于是刚弹出的编辑器立刻被当成“点到外面”收走。
+  const path = e.composedPath ? e.composedPath() : [];
+  if (path.indexOf(selPop) >= 0) return;
   if (e.target.closest && e.target.closest('#selpop')) return;
   selPopHide();
 });
-window.addEventListener('scroll', () => selPopHide(), true);
+window.addEventListener('scroll', () => {
+  // 正在浮层里打字时不因为滚动收起：聚焦输入框本身就可能把页面挪一下
+  if (selPop && selPop.contains(document.activeElement)) return;
+  selPopHide();
+}, true);
 window.addEventListener('resize', () => selPopHide());
 
 /* ── 笔记索引 / 卡片 ──────────────────── */
@@ -5858,13 +8495,17 @@ async function runBatch(kind) {
     return;
   }
   if (kind === 'fetch') {
-    // 一本一本排队：后端同一时刻只跑一个取书任务
-    const localIds = new Set(Object.keys(local));
-    const todo = ids.filter(x => !localIds.has(x));
-    if (!todo.length) { whisper('选中的都已抓取过了'); return; }
+    // 一本一本排队：后端同一时刻只跑一个取书任务。
+    // 「本地有目录」不等于「取完了」—— 中止过的半本必须能排进队里续取，
+    // 原来用「本地有没有」筛，用户批量一按，最需要补的那几本反而被跳过说「都抓过了」。
+    const todo = ids.filter(x => !bookFull(local[x]));
+    const again = todo.filter(x => local[x]).length;
+    if (!todo.length) { whisper('选中的都已经取全了'); return; }
     sheet({
       title: '批量抓取',
-      text: `将按顺序抓取 ${todo.length} 本（后端一次只能跑一本，会一本接一本）。可以先去忙别的，进度在右下角。`,
+      text: `将按顺序抓取 ${todo.length} 本（后端一次只跑一本，会一本接一本）`
+        + (again ? `，其中 ${again} 本上次没取完，会从断点接着取` : '')
+        + '。可以先去忙别的，进度在右下角。',
       actions: [
         { label: '开始', lead: true, run: () => queueFetch(todo) },
         { label: '算了' },
@@ -6396,6 +9037,7 @@ $('#syncAuth').onclick = async () => {
 
 /* ── 启动 ─────────────────────────────── */
 renderView();
+ntFloatsWire();     // 条目编辑器 / 模板 / 导图这三层是静态标记，绑一次就一直在
 moveNavPill();      // 胶囊先就位，别等第一次点侧边栏时才凭空冒出来
 window.addEventListener('resize', moveNavPill);   // 换宽度时按钮行高会变，跟着重算
 wireNavAhead();     // 侧边栏悬停预判：指针停在哪儿，先替那一屏把数据拉起来
