@@ -51,7 +51,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 ### Option 1: Download the macOS app
 
-[**Download Guizang-0.9.6.dmg**](安装包/归藏-0.9.6.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
+[**Download Guizang-0.9.7.dmg**](安装包/归藏-0.9.7.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
 
 1. Double-click the dmg and drag **归藏.app** into Applications.
 2. On first launch, if you see **"归藏" is damaged and can't be opened. You should move it to the Trash.**, this is macOS blocking an unsigned app, not a corrupted file. Run:
@@ -258,6 +258,14 @@ Key decisions in the fetch engine and their reasons:
 - **Image downloads force IPv4.** On macOS, urllib tries IPv6 first; when the route is unavailable, every image stalls for about 120 seconds.
 
 ## Changelog
+
+**0.9.7**
+
+- Reader typography overhaul: paragraphs no longer leave single-word last lines, CJK punctuation hangs at the margins, headings no longer strand at the end of a passage, and long lines mixing English/links wrap more gracefully.
+- Chapter loading now uses an inline width-matched skeleton instead of a static "loading…" line, so the content height no longer collapses then re-expands.
+- Smoother scrolling: progress is throttled per frame, the top/bottom bars cast a faint shadow once the body scrolls, and the body, code block and table-of-contents scrollbars are unified into one thin style.
+- Images fade in rather than snapping open; wide tables inside the body scroll horizontally instead of breaking the text column on narrow or focus layouts.
+- Keyboard: added PageUp / PageDown paging, consistent with Space, Shift+Space and Home/End.
 
 **0.9.6**
 
