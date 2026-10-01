@@ -4,8 +4,8 @@
 重点不是覆盖率，是防止这几处又退化成「静默什么都不做」——
 所以每条断言都盯着「到底调用了什么」，而不是「有没有抛异常」。
 
-跑法：.venv/bin/python tools/test_platform_compat.py      （macOS / Linux）
-     .venv\\Scripts\\python.exe tools\\test_platform_compat.py   （Windows）
+跑法：.venv/bin/python tests/test_platform_compat.py      （macOS / Linux）
+     .venv\\Scripts\\python.exe tests\\test_platform_compat.py   （Windows）
 """
 import os
 import subprocess
@@ -28,7 +28,14 @@ def _fake_binary(root, *parts):
 
 class VenvPython(unittest.TestCase):
     def setUp(self):
+        # 这一组断言盯着「虚拟环境跟源码目录走」这条默认分支。GUIZANG_DATA 一旦设了，
+        # 数据目录就不再等于传进来的 repo（装成 app 时正是如此），断言会指到别处去。
+        # run_all.sh 是带着沙盒环境变量跑全套件的，所以这里必须先把它摘掉。
+        self._clean = mock.patch.dict(os.environ)
+        self._clean.start()
+        self.addCleanup(self._clean.stop)
         os.environ.pop("GUIZANG_PYTHON", None)
+        os.environ.pop("GUIZANG_DATA", None)
 
     def test_prefers_windows_layout(self):
         with tempfile.TemporaryDirectory() as d:

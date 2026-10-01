@@ -8,7 +8,7 @@
   2. 页面往壳发什么（cmd 必须恰好是 probe/start/enter）
   3. 不在套壳里打开时，页面会不会装死
 
-用法: .venv/bin/python tools/check_onboarding.py
+用法: .venv/bin/python tests/check_onboarding.py
 """
 import asyncio
 import json

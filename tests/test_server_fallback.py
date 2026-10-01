@@ -8,7 +8,7 @@ do_POST → 连接被关 → 前端 `await` 直接 reject → onclick 没 catch 
   ② 紧接着还能正常请求（服务没被拖死）
   ③ 日志里留下了可追的「操作失败」行
 
-跑法：.venv/bin/python tools/test_server_fallback.py
+跑法：.venv/bin/python tests/test_server_fallback.py
 """
 import json
 import os
@@ -20,7 +20,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import selftest  # noqa: E402
+
+ROOT = selftest.REPO
 PY = str(ROOT / ".venv/bin/python") if os.path.isfile(ROOT / ".venv/bin/python") \
     else (str(ROOT / ".venv/Scripts/python.exe") if os.path.isfile(ROOT / ".venv/Scripts/python.exe") else sys.executable)
 
@@ -55,10 +58,14 @@ def wait_up(port, tries=60):
 
 def main():
     port = free_port()
-    log_path = "/tmp/gz_fallback_test.log"
+    selftest.SANDBOX.mkdir(parents=True, exist_ok=True)
+    log_path = str(selftest.SANDBOX / "fallback-test.log")
     with open(log_path, "w") as logf:
+        # 沙盒数据目录：这个测试起的是真服务，不能去翻用户自己的 cache 和 ~/Documents/归藏。
+        env = dict(os.environ, GUIZANG_DATA=str(selftest.CACHE), GUIZANG_BOOKS=str(selftest.BOOKS))
         proc = subprocess.Popen([PY, "ui_server.py", "--port", str(port)],
-                                cwd=ROOT, stdout=logf, stderr=subprocess.STDOUT, text=True)
+                                cwd=ROOT, env=env, stdout=logf,
+                                stderr=subprocess.STDOUT, text=True)
     checks = []
     try:
         if not wait_up(port):

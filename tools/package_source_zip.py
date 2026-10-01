@@ -1,30 +1,72 @@
-"""把源码打成桌面 zip：只装代码与文档，绝不带上 cache/output/凭证。
+"""把源码打成 zip：只装代码与文档，绝不带上 cache/output/凭证。
+
+清单不再自己写第二份 —— 直接读 shell/build_macos.sh 里的 APP_FILES / APP_DIRS。
+这个仓库栽过一次：新增后端模块忘了补进打包脚本，打出来的 .app 缺模块；也栽过第二次：
+这里的 INCLUDE 还留着已经搬走的老路径，同时漏掉了 book_export.py 那一整批新模块。
+一份清单两处写，就一定会分叉，所以只留一处。
 
 除了挑文件，还做一遍内容体检：包里的每一行都不该出现别人的家目录、邮箱、手机号、
 cookie 值或书架里的书名 —— 这些是「代码能跑」之外必须守住的边界。
 """
-import datetime, pathlib, re, zipfile
+import datetime, pathlib, re, sys, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-INCLUDE = ["ui.html", "ui_server.py", "export_precise.py", "download_images.py",
-           "platform_compat.py", "login.py", "shelf_add.py", "bootstrap.py",
-           "ui_check.py", "启动归藏.command", "启动归藏.bat",
-           "README.md", "部署说明.md", "requirements.txt"]
-# shell/ 必须整份带上：光有 Python 源码，收到的人打不出那个 .app。
-EXTRA_DIRS = ["tools", "mcp", "skills", "shell"]
+BUILD = ROOT / "shell" / "build_macos.sh"
+
+# 打包脚本之外、源码包还要额外带上的东西（.app 用不到，但收到 zip 的人要用）。
+EXTRA_FILES = ["启动归藏.command", "启动归藏.bat",
+               "README.md", "README.en.md", "README.ja.md"]
+EXTRA_DIRS = ["shell", "tools", "tests", "docs"]
+
 SKIP_SUFFIX = {".pyc"}
 SKIP_PARTS = {"__pycache__", ".git", ".venv", "cache", "output", "dist", "build"}
 
+
+def manifest():
+    """从 build_macos.sh 里读出 APP_FILES / APP_DIRS 两个 bash 数组。"""
+    text = BUILD.read_text(encoding="utf-8")
+    out = {}
+    for name in ("APP_FILES", "APP_DIRS"):
+        m = re.search(rf'^{name}=\(\n(.*?)\)\n', text, re.M | re.S)
+        if not m:
+            sys.exit(f"读不到 {name}：打包脚本的结构变了，这里的解析也要跟着改")
+        out[name] = [l.strip() for l in m.group(1).splitlines()
+                     if l.strip() and not l.strip().startswith("#")]
+    missing = [f for f in out["APP_FILES"] if not (ROOT / f).exists()]
+    if missing:
+        sys.exit("清单里的文件不在仓库里：" + "、".join(missing))
+    return out["APP_FILES"], out["APP_DIRS"]
+
+
 # 内容体检规则：模式 → 说明。全是通用形状，不写具体值，免得规则本身带信息。
+# 判据与 tests/check_privacy.py 保持一致：邮箱必须「@ 后是字母、结尾是字母 TLD」，
+# 否则 marked@0.3.6、icon_512x512@2x.png 这些形状会被当成邮箱，每次打包刷一屏假警报，
+# 到真泄漏那天就没人看了。
 PATTERNS = [
     (re.compile(r"/Users/[A-Za-z0-9._-]+|[A-Za-z]:\\Users\\|[A-Za-z]:\\[A-Za-z0-9._-]+\\", re.I),
      "写死的家目录绝对路径"),
-    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}"), "邮箱"),
+    (re.compile(r"[\w.+-]+@[A-Za-z][\w-]*(?:\.[\w-]+)*\.[A-Za-z]{2,}"), "邮箱"),
     (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "手机号"),
     (re.compile(r"(wr_vid|wr_skey|wr_gid|api[_-]?key|authorization)\s*[:=]\s*[\"'][0-9a-zA-Z_\-]{8,}", re.I),
      "像是真凭证的赋值"),
     (re.compile(r"(?<!\d)\d{9,13}(?!\d)"), "像真实书号的长数字"),
 ]
+# 认下来的公开形状与占位示例；判据与 tests/check_privacy.py 的 ALLOW 对齐。
+ALLOW = re.compile(r"git@github\.com|users\.noreply\.github\.com|example\.com|your-|xxx|"
+                   r"@2x\.|<[^>]*>|localhost|127\.0\.0\.1")
+# 结构性豁免：文件路径片段 → 免除的规则（"*" 表示全免），每条都要写清为什么。
+WAIVERS = [
+    ("tests/check_privacy.py", "*"),                  # 扫描器的规则里本来就写着这些形状
+    ("tools/package_source_zip.py", "*"),             # 同上，本文件的 PATTERNS 自身
+    ("vendor/", "像真实书号的长数字"),                  # 压缩过的三方 js 里全是长数字串
+]
+
+
+def waived(who, name):
+    for frag, only in WAIVERS:
+        if frag in who and (only == "*" or only == name):
+            return True
+    return False
 
 
 def scan(zf):
@@ -38,20 +80,31 @@ def scan(zf):
         except (UnicodeDecodeError, KeyError):
             continue
         for no, line in enumerate(text.splitlines(), 1):
+            if ALLOW.search(line):
+                continue
             for pat, why in PATTERNS:
-                if pat.search(line):
+                if not waived(info.filename, why) and pat.search(line):
                     hits.append(f"{info.filename}:{no} → {why}：{line.strip()[:60]}")
     return hits
 
 
+files, dirs = manifest()
+include = files + EXTRA_FILES
+extra_dirs = dirs + EXTRA_DIRS
+
 out = pathlib.Path.home() / f"Desktop/归藏-源码-{datetime.date.today():%Y%m%d}.zip"
+out.parent.mkdir(parents=True, exist_ok=True)   # 没有桌面目录的机器（Linux/CI）不该在这一步炸
 n = 0
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-    for name in INCLUDE:
+    for name in include:
         f = ROOT / name
         if f.exists():
             z.write(f, f"归藏源码/{name}"); n += 1
-    for d in EXTRA_DIRS:
+        elif name not in files:      # 外围文件（比如只做了 mac 的启动脚本）可以缺
+            print("  跳过（没有这个文件）:", name)
+        else:
+            sys.exit(f"清单点名了 {name}，仓库里却没有 —— 先查是不是被误删了")
+    for d in extra_dirs:
         for f in sorted((ROOT / d).rglob("*")):
             if f.is_dir() or f.suffix in SKIP_SUFFIX or any(p in SKIP_PARTS for p in f.parts):
                 continue
