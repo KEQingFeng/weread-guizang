@@ -28,7 +28,7 @@ import urllib.request
 import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 import platform_compat as pc
 
@@ -77,6 +77,8 @@ CFG_PATH = os.path.join(CACHE_DIR, "config.json")
 COVER_DIR = os.path.join(CACHE_DIR, "covers")
 WALL_PATH = os.path.join(CACHE_DIR, "wallpaper.bin")
 UI_PATH = os.path.join(REPO, "ui.html")
+# 离线可用的第三方前端库（页面内读正文用的 markdown 渲染器，见 vendor/README.md）
+VENDOR_DIR = os.path.join(REPO, "vendor")
 
 # 微信读书官方 Agent Gateway（用户自填 wrk- API Key）
 WEREAD_GATEWAY = "https://i.weread.qq.com/api/agent/gateway"
@@ -1204,6 +1206,126 @@ def content_disp(name, ext):
             % (ascii_name, ext, quote(f"{name}.{ext}")))
 
 
+# ---------- 页面内读正文（目录 / 单章 / 插图 / 随包静态资源） ----------
+# 这几条只读、只认白名单：正文是抓回来的外部内容，按数据对待，绝不拿它拼路径。
+_VENDOR_MIME = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf",
+    ".svg": "image/svg+xml", ".png": "image/png",
+}
+_IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+             ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+             ".svg": "image/svg+xml"}
+
+
+def vendor_file(name):
+    """随包分发的静态资源（如 vendor/markdown-it.min.js）。只认单层文件名与已知扩展名。"""
+    if not name or not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in _VENDOR_MIME:
+        return None
+    p = os.path.realpath(os.path.join(VENDOR_DIR, name))
+    if not p.startswith(os.path.realpath(VENDOR_DIR) + os.sep) or not os.path.isfile(p):
+        return None
+    return p, _VENDOR_MIME[ext]
+
+
+def book_outline(book_id):
+    """一本书的阅读目录：逐章文件 + 标题 + 字数。
+
+    标题以「该章正文的第一行」为准 —— 引擎落盘时总会把章名写成开头那一行
+    `# 章名`，它和这一章的内容是一起写下来的，永远对得住。原来优先用
+    `_catalog.json`（网页目录）按位置取，但那份目录是网页 DOM 顺序（含版权页、
+    内容提要这类没落成文件的条目，也有重复嵌套项），跟实际落盘的文件根本不是
+    一一对应：实测九本书，偏移量从 0 到 21 不等，照位置取会让整本目录全错位
+    （「版权信息」显示成第一章）。所以改成：先读文件首行，读不出才退回目录。
+    """
+    d = safe_book_dir(book_id)
+    if not d:
+        return None
+    ch_dir = os.path.join(d, "chapters")
+    if not os.path.isdir(ch_dir):
+        return None
+    files = sorted(f for f in os.listdir(ch_dir) if f.endswith(".md"))
+    if not files:
+        return None
+    meta = {}
+    mp = os.path.join(d, "meta.json")
+    if os.path.exists(mp):
+        try:
+            meta = json.load(open(mp, encoding="utf-8"))
+        except Exception:
+            meta = {}
+    catalog = []
+    cp = os.path.join(d, "_catalog.json")
+    if os.path.exists(cp):
+        try:
+            catalog = json.load(open(cp, encoding="utf-8"))
+        except Exception:
+            catalog = []
+    chapters = []
+    for i, fn in enumerate(files):
+        try:
+            text = open(os.path.join(ch_dir, fn), encoding="utf-8").read()
+        except Exception:
+            text = ""
+        # 第一行非空内容就是章名（引擎写盘时带 # 前缀）
+        title = ""
+        for line in text.splitlines():
+            line = line.strip().lstrip("#").strip()
+            if line:
+                title = line[:60]
+                break
+        # 首行读不出来（空文件等）才退回目录，聊胜于无，但不再当主力
+        if not title and isinstance(catalog, list) and i < len(catalog) and catalog[i]:
+            title = str(catalog[i]).strip()
+        chapters.append({"i": i + 1, "file": fn, "title": title or f"第 {i + 1} 章",
+                         "chars": len(text)})
+    img_dir = os.path.join(d, "images")
+    images = len([f for f in os.listdir(img_dir) if not f.startswith(".")]) \
+        if os.path.isdir(img_dir) else 0
+    return {"id": book_id,
+            "title": meta.get("title") or book_id,
+            "author": meta.get("author") or "",
+            "done": bool(meta.get("done")),
+            "chapters": chapters,
+            "images": images}
+
+
+def chapter_text(book_id, ch):
+    """单章正文（原样返回 markdown，渲染交给前端）。"""
+    d = safe_book_dir(book_id)
+    if not d or not ch or not re.fullmatch(r"[A-Za-z0-9._-]+\.md", ch):
+        return None
+    ch_dir = os.path.realpath(os.path.join(d, "chapters"))
+    p = os.path.realpath(os.path.join(ch_dir, ch))
+    if not p.startswith(ch_dir + os.sep) or not os.path.isfile(p):
+        return None
+    try:
+        return open(p, encoding="utf-8").read()
+    except Exception:
+        return None
+
+
+def book_image(book_id, name):
+    """章内插图：output/<id>/images/<name> 白名单读取。文件名是抓取时定的，不含路径。"""
+    d = safe_book_dir(book_id)
+    if not d or not name or not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in _IMG_MIME:
+        return None
+    root = os.path.realpath(os.path.join(d, "images"))
+    p = os.path.realpath(os.path.join(root, name))
+    if not p.startswith(root + os.sep) or not os.path.isfile(p):
+        return None
+    return p, _IMG_MIME[ext]
+
+
+
 def write_meta(book_id, title, author, done):
     d = safe_book_dir(book_id)
     if not d:
@@ -1320,11 +1442,16 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, code, ctype, body, extra=None):
         if isinstance(body, str):
             body = body.encode("utf-8")
+        extra = extra or {}
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
+        # 绝大多数响应是「刚算出来的」，必须 no-store；但插图这类可以长缓存的
+        # 由调用方通过 extra 显式指定，这里就不再叠一条默认值（重复头会被浏览器忽略）。
+        self.send_header("Cache-Control", extra.get("Cache-Control") or "no-store")
+        for k, v in extra.items():
+            if k == "Cache-Control":
+                continue
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
@@ -1365,6 +1492,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, "text/html; charset=utf-8", f.read())
             except FileNotFoundError:
                 return self._send(500, "text/plain; charset=utf-8", "ui.html 缺失")
+
+        if path.startswith("/vendor/"):
+            hit = vendor_file(unquote(path[len("/vendor/"):]))
+            if not hit:
+                return self._send(404, "text/plain; charset=utf-8", "not found")
+            fp, mime = hit
+            with open(fp, "rb") as f:
+                return self._send(200, mime, f.read(),
+                                  {"Cache-Control": "public, max-age=86400"})
 
         if path == "/api/state":
             with _lock:
@@ -1537,6 +1673,28 @@ class Handler(BaseHTTPRequestHandler):
             data = open(dest, "rb").read()
             return self._send(200, "application/zip", data,
                               {"Content-Disposition": content_disp(f"归藏-{n}本", "zip")})
+
+        if path == "/api/read":
+            book = q.get("book", [""])[0]
+            ch = q.get("ch", [""])[0]
+            if ch:                       # 取某一章正文
+                md = chapter_text(book, ch)
+                if md is None:
+                    return self._send(404, "text/plain; charset=utf-8", "没有这一章")
+                return self._json({"ok": True, "book": book, "file": ch, "md": md})
+            out = book_outline(book)     # 不给 ch 就是阅读目录
+            if out is None:
+                return self._send(404, "text/plain; charset=utf-8", "这本书还没有可读的章节")
+            return self._json({"ok": True, "data": out})
+
+        if path == "/api/img":
+            hit = book_image(q.get("book", [""])[0], q.get("name", [""])[0])
+            if not hit:
+                return self._send(404, "text/plain; charset=utf-8", "no image")
+            fp, mime = hit
+            with open(fp, "rb") as f:
+                return self._send(200, mime, f.read(),
+                                  {"Cache-Control": "public, max-age=604800"})
 
         if path == "/api/md":
             book = q.get("book", [""])[0]
