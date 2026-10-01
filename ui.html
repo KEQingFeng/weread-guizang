@@ -859,7 +859,133 @@
      监听器全在，只是要切过去的面板本来就已经在页面上。用 !important 焊死：
      以后任何面板/动效样式都别想把隐藏的视图叠回布局里。 */
   [hidden]{display:none !important}
-  .vbody{flex:1; min-width:0}
+  /* min-height:0：让 .vbody 在定高 pane 里真的能收缩，内部才滚得动
+     （flex 子项默认 min-height:auto，会把内容高度顶出去）。 */
+  .vbody{flex:1; min-width:0; min-height:0}
+
+  /* ── 页内看正文（左右分栏）───────────────
+     #view 有 overflow:hidden，position:sticky 在这里是失效的（sticky 认最近的
+     滚动祖先，而这个「滚动容器」自己并不滚）。所以阅读器不用 sticky，改成一个
+     定高的网格：左栏目录、右栏正文各自内部滚动，整页不动，切换时也就没有回升。
+
+     高度不再靠一串魔法数字凑（原来 calc(100vh - 152px)，表头一换行就多出 16px
+     把整页顶出滚动条）：切到阅读器时直接给这张 pane 定高，
+     视口 - 顶栏 56 - main 上留白 26 - 下留白 22 - #view 上下边框 2 = 106，
+     剩下的交给内部 flex——.vbody 吃掉表头之外的高度，.rdwrap 再 100% 填满。
+     表头高矮都不影响贴底。 */
+  .rdwrap{
+    display:grid; grid-template-columns:252px minmax(0,1fr);
+    height:100%; min-height:0; margin:0;
+    border-top:1px solid var(--line);
+  }
+  /* 阅读器要「一屏刚好」：正文自己滚，整页不许跟着滚，否则翻章会看到整页在动。
+     body.reading 由 paneEl 在切到阅读器时挂上。
+     #view 是 <section>，会吃到全局 section{margin-bottom:22px}——阅读时清掉它，
+     否则算好的 106 之外还要多出 22px 的下边距，整页照样被顶出滚动条。 */
+  body.reading #view{margin-bottom:0}
+  body.reading #view > .vpane[data-pane="read"]{height:calc(100vh - 106px); min-height:0}
+  /* main 默认下留白 96px（给悬浮 dock 让位）；阅读时不需要，收到 22px 才能贴底。 */
+  @media (min-width:841px){ body.reading main{padding-bottom:22px} }
+  /* 右下角的「任务」进度 dock 是抓取用的，读书时既不相关又会压住正文右下角；
+     淡出并让出点击（用 opacity 而非 display，进出阅读时有一小段过渡，不突兀）。
+     右下角那颗 Agent 气泡窄，落在正文列外的留白里，保持常驻。 */
+  .dock{transition:opacity .28s var(--spring), transform .28s var(--spring)}
+  body.reading .dock{opacity:0; pointer-events:none; transform:translateY(8px)}
+  /* 左栏：全书目录。表头（书名/章节数/筛选）钉在栏顶，列表自己滚。 */
+  .rdnav{display:flex; flex-direction:column; min-height:0; min-width:0;
+    border-right:1px solid var(--line); background:rgba(255,255,255,.22)}
+  .rdnavhd{padding:12px 12px 9px; display:flex; flex-direction:column; gap:8px; flex:none}
+  .rdbook{font-size:12.5px; font-weight:600; color:var(--ink); line-height:1.35;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .rdmeta{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .rdfilter{width:100%; box-sizing:border-box; height:28px; padding:0 10px; font:inherit;
+    font-size:12px; color:var(--ink); border:1px solid var(--line-2); border-radius:8px;
+    background:rgba(255,255,255,.6); outline:none; transition:border-color .16s ease, box-shadow .16s ease}
+  .rdfilter:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  /* 换书：原生 select 最稳（键盘、触屏、无障碍都自带），把外形压成界面自己的样子。
+     右侧的细箭头是内联 SVG，不是字符，免得和「界面零 emoji」的约定打架。 */
+  .rdpick{width:100%; box-sizing:border-box; height:30px; padding:0 26px 0 10px; font:inherit;
+    font-size:12.5px; font-weight:600; color:var(--ink); cursor:pointer;
+    border:1px solid var(--line-2); border-radius:9px; background-color:rgba(255,255,255,.6);
+    appearance:none; -webkit-appearance:none; text-overflow:ellipsis;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b93a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 10px center;
+    transition:border-color .16s ease, box-shadow .16s ease}
+  .rdpick:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); outline:none}
+  .rdlist{flex:1; overflow:auto; overscroll-behavior:contain; padding:4px 8px 16px;
+    scrollbar-width:thin}
+  .rdch{display:flex; gap:8px; width:100%; align-items:flex-start; text-align:left;
+    padding:7px 9px; border:0; border-radius:9px; background:transparent; cursor:pointer;
+    font:inherit; font-size:12.5px; line-height:1.5; color:var(--ink-2);
+    transition:background .16s ease, color .16s ease}
+  .rdch:hover{background:var(--surface-2); color:var(--ink)}
+  .rdch .ix{flex:none; min-width:1.7em; padding-top:1px; color:var(--ink-3);
+    font-size:11px; font-variant-numeric:tabular-nums}
+  .rdch .tt{min-width:0; overflow:hidden; display:-webkit-box;
+    -webkit-line-clamp:2; -webkit-box-orient:vertical}
+  .rdch.on{background:var(--accent-soft); color:var(--accent); font-weight:550}
+  .rdch.on .ix{color:var(--accent)}
+  .rdempty{padding:26px 12px; text-align:center; color:var(--ink-3); font-size:12px}
+
+  /* 右栏：正文。上下两行——正文自己滚，底部一条翻页工具条常驻。 */
+  .rdmain{display:grid; grid-template-rows:minmax(0,1fr) auto; min-width:0; min-height:0}
+  .rdscroll{overflow:auto; overscroll-behavior:contain; scroll-behavior:smooth}
+  .rdin{max-width:70ch; margin:0 auto; padding:30px 34px 64px}
+  .rdfoot{display:flex; align-items:center; gap:10px; padding:9px 16px;
+    border-top:1px solid var(--line); background:rgba(255,255,255,.32);
+    font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .rdfoot .grow{flex:1}
+  .rdpos{white-space:nowrap}
+  .rdhint{padding:72px 24px; text-align:center; color:var(--ink-3); font-size:12.5px; line-height:1.9}
+
+  /* 正文排版：抓回来的是纯 Markdown，按「好读」调，不抢界面本身的静。 */
+  .md{color:var(--ink); font-size:15px; line-height:1.92; word-wrap:break-word}
+  .md > :first-child{margin-top:0}
+  .md h1,.md h2,.md h3,.md h4{line-height:1.42; font-weight:600; letter-spacing:-.01em;
+    margin:1.7em 0 .62em}
+  .md h1{font-size:22px}
+  .md h2{font-size:19px}
+  .md h3{font-size:16.5px}
+  .md h4{font-size:15px; color:var(--ink-2)}
+  .md p{margin:0 0 1.06em}
+  .md a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(47,127,240,.32);
+    transition:border-color .16s ease}
+  .md a:hover{border-bottom-color:var(--accent)}
+  .md img{max-width:100%; height:auto; display:block; margin:1.15em auto; border-radius:12px;
+    box-shadow:0 8px 26px -14px rgba(20,24,32,.45)}
+  .md blockquote{margin:1.15em 0; padding:.15em 0 .15em 16px;
+    border-left:3px solid var(--accent-soft); color:var(--ink-2)}
+  .md blockquote p:last-child{margin-bottom:0}
+  .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em;
+    background:var(--surface-2); padding:.12em .4em; border-radius:5px}
+  .md pre{background:var(--surface-2); padding:14px 16px; border-radius:12px;
+    overflow:auto; margin:1.15em 0}
+  .md pre code{background:none; padding:0; font-size:12.5px; line-height:1.72}
+  .md ul,.md ol{margin:0 0 1.06em; padding-left:1.5em}
+  .md li{margin:.3em 0}
+  .md hr{border:0; border-top:1px solid var(--line); margin:2.1em 0}
+  .md table{border-collapse:collapse; width:100%; margin:1.15em 0; font-size:13.5px}
+  .md th,.md td{border:1px solid var(--line-2); padding:7px 10px; text-align:left; vertical-align:top}
+  .md th{background:var(--surface-2); font-weight:600}
+  /* 章节之间换页时的轻微淡入：让「切章」像翻页，而不是闪一下。 */
+  .rdin.fade{animation:rdfade .32s ease both}
+  @keyframes rdfade{from{opacity:0; transform:translate3d(0,6px,0)} to{opacity:1; transform:none}}
+
+  /* 窄窗：左右栏叠成上下——目录变一排可横滑的章节片，正文整页滚（不锁高）。 */
+  @media (max-width:840px){
+    /* 叠成上下后不再锁高：整页滚回去，读者才看得到完整正文。 */
+    body.reading #view > .vpane[data-pane="read"]{height:auto; min-height:0}
+    .rdwrap{grid-template-columns:minmax(0,1fr); height:auto; min-height:0}
+    .rdnav{border-right:0; border-bottom:1px solid var(--line)}
+    .rdlist{display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 10px 10px}
+    .rdch{flex:none; max-width:210px; border:1px solid var(--line-2); background:rgba(255,255,255,.5)}
+    .rdmain{grid-template-rows:auto}
+    .rdscroll{overflow:visible}
+    .rdin{padding:22px 18px 56px}
+    .rdfoot{position:relative}
+    /* 窄窗里右下角气泡正好压在「下载 md」上；读书时收起来，退出即回。 */
+    body.reading .agent{display:none}
+  }
 
   /* 卡片：只动 transform/opacity（走合成层，不掉帧）；封面在自己的盒子里微缩放 */
   .wcard .cv img{opacity:0; transition:transform .55s var(--spring), opacity .4s ease}
@@ -1523,6 +1649,9 @@
   </div>
 </div>
 
+<!-- 页内看正文用的 Markdown 渲染器：随包分发的 markdown-it（MIT），离线可跑。
+     抓回来的正文按数据处理，所以渲染时关掉内联 HTML（html:false）。 -->
+<script src="/vendor/markdown-it.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 
@@ -2069,8 +2198,7 @@ function shelfCard(b, bits) {
   // 完整包 / 源网站 / 目录 / 补全图片这些收进详情页，需要再点进去拿。
   strip.append(mk('详情', () => renderDetailView(detailStore, detailReader, b.title)));
   if (mine) {
-    strip.append(mk('正文', () => clip('/api/md?book=' + encodeURIComponent(id)
-      + '&name=' + encodeURIComponent(b.title || id), (b.title || id) + '.md')));
+    strip.append(mk('正文', () => openReader(id, b.title || id, 'shelf')));
   } else {
     strip.append(mk('取书', () => beginFetch(id, b.title)));
   }
@@ -2795,6 +2923,9 @@ function paneEl(name) {
   const changed = shownPane !== name;
   if (changed && PANES[shownPane]) paneScroll[shownPane] = window.scrollY;
   for (const k in PANES) PANES[k].hidden = (k !== name);
+  // 阅读器要「一屏刚好」：正文自己在栏内滚，整页不许跟着滚。切到阅读器时
+  // 把 main 底部那段呼吸留白收窄（配合 .rdwrap 的定高），离开时再还回去。
+  document.body.classList.toggle('reading', name === 'read');
   if (changed) {
     shownPane = name;
     slideView(slideDir, name);
@@ -3932,14 +4063,279 @@ async function renderDetailView(storeId, readerId, title) {
     acts.append(
       mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id),
         (info.title || title || id) + '.zip')),
-      mk('正文', () => clip('/api/md?book=' + encodeURIComponent(id)
-        + '&name=' + encodeURIComponent(info.title || title || id),
-        (info.title || title || id) + '.md')),
+      mk('正文', () => openReader(id, info.title || title || id, 'detail')),
       mk('目录', async () => { const r = await post('reveal', {book: id}); if (!r.ok) whisper(r.msg); })
     );
   }
   body.append(acts);
 }
+
+/* ── 页内看正文（左右分栏阅读器）─────────
+   一本书一个常驻 'read' pane：换书只换数据、不重建骨架，所以点另一本书是「原地换」
+   而不是「先拆再建」。右侧正文按需拉；每本书记住上次读到第几章。 */
+
+const RD = {book: '', title: '', chapters: [], at: -1, back: 'shelf'};
+let mdIt = null;
+let mdItTried = false;
+
+/** 渲染 Markdown。本地随包带的是 markdown-it（html:false，抓回来的正文按数据处理）；
+ *  万一那份资源没带上，退回 <pre> 纯文本，至少保证还能读。 */
+function mdRender(text) {
+  if (!mdItTried) {
+    mdItTried = true;
+    try { mdIt = window.markdownit
+      ? window.markdownit({html: false, linkify: true, breaks: false}) : null; }
+    catch (e) { mdIt = null; }
+  }
+  if (mdIt) return mdIt.render(text || '');
+  return '<pre>' + esc(text || '') + '</pre>';
+}
+
+function rdStoreKey(book) { return 'guizang-read-' + book; }
+
+/** 书名短一点，别把左栏顶宽。 */
+function rdShort(s, n) {
+  s = String(s || '');
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+/** 已取回正文的书（用来做阅读器里的「换一本」）。local 是阅读器 id → 统计。 */
+function rdHaveBooks() {
+  return Object.keys(local).map(k => local[k])
+    .filter(b => b && b.id && (b.done || (b.chapters || 0) > 0))
+    .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh'));
+}
+
+function readerSkeleton() {
+  return `<div class="rdwrap">
+    <div class="rdnav">
+      <div class="rdnavhd">
+        <select class="rdpick" id="rdPick" aria-label="切换书籍"></select>
+        <div class="rdmeta" id="rdMeta">正在读取目录…</div>
+        <input class="rdfilter" id="rdFilter" placeholder="筛选章节" spellcheck="false"
+          autocomplete="off" aria-label="筛选章节">
+      </div>
+      <div class="rdlist" id="rdList"></div>
+    </div>
+    <div class="rdmain">
+      <div class="rdscroll" id="rdScroll">
+        <div class="rdin md" id="rdBody"><div class="rdhint">正在读取目录…</div></div>
+      </div>
+      <div class="rdfoot">
+        <button class="deed" id="rdPrev" style="height:26px" title="上一章（←）">上一章</button>
+        <button class="deed" id="rdNext" style="height:26px" title="下一章（→）">下一章</button>
+        <span class="grow"></span>
+        <span class="rdpos" id="rdPos"></span>
+        <button class="deed" id="rdDl" style="height:26px">下载 md</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** 事件走委托：正文区每次换章都会重铺，绑在 pane 上才不会被 innerHTML 冲掉。 */
+function wireReader(p) {
+  p.addEventListener('click', e => {
+    const t = e.target.closest('button');
+    if (!t || !p.contains(t)) return;
+    if (t.id === 'rdBack') { backTo(RD.back); return; }
+    if (t.id === 'rdPrev') { rdGo(RD.at - 1); return; }
+    if (t.id === 'rdNext') { rdGo(RD.at + 1); return; }
+    if (t.id === 'rdDl') { rdDownload(); return; }
+    if (t.dataset.ch !== undefined) rdGo(+t.dataset.ch);
+  });
+  p.addEventListener('input', e => {
+    if (e.target.id === 'rdFilter') rdFilter(e.target.value);
+  });
+  p.addEventListener('change', e => {
+    if (e.target.id === 'rdPick' && e.target.value && e.target.value !== RD.book) {
+      const b = local[e.target.value];
+      openReader(e.target.value, (b && b.title) || e.target.value, RD.back);
+    }
+  });
+}
+
+/** 把左栏「换一本」的选项铺好，并选中当前这本。 */
+function rdPaintPick() {
+  const el = PANES.read && PANES.read.querySelector('#rdPick');
+  if (!el) return;
+  const books = rdHaveBooks();
+  el.innerHTML = books.map(b =>
+    `<option value="${esc(b.id)}">${esc(rdShort(b.title || b.id, 22))}</option>`).join('');
+  if (books.some(b => b.id === RD.book)) el.value = RD.book;
+  // 只有一本可取的书时，这颗下拉没意义，收起来
+  el.style.display = books.length > 1 ? '' : 'none';
+}
+
+/** 拉一本书的目录，铺左栏，然后跳到最后读的那一章。 */
+async function openReader(bookId, title, backPane) {
+  if (!bookId) { whisper('这本书还没有本地正文'); return; }
+  RD.back = backPane || (v === 'detail' ? 'detail' : 'shelf');
+  const {p, body, fresh} = viewPane('read',
+    viewHeader(title || '正文', '<button class="deed" id="rdBack" style="height:30px">返回</button>'));
+  if (fresh) wireReader(p);
+  setHeadTitle('read', title || bookId);
+  setNote('read');
+  body.innerHTML = readerSkeleton();
+  const seq = (+p.dataset.seq || 0) + 1;
+  p.dataset.seq = seq;
+  p.dataset.chseq = 0;
+
+  RD.book = bookId; RD.title = title || bookId; RD.chapters = []; RD.at = -1;
+  rdPaintPick();
+
+  let d;
+  try {
+    d = await (await fetch('/api/read?book=' + encodeURIComponent(bookId))).json();
+  } catch (e) {
+    if (+p.dataset.seq === seq) rdHint('连不上本地服务，稍后再试');
+    return;
+  }
+  if (+p.dataset.seq !== seq) return;      // 期间又换了书，这次结果作废
+  if (!d.ok) { rdHint(d.msg || '这本书还没有可读的章节'); return; }
+
+  const book = d.data || {};
+  RD.title = book.title || RD.title;
+  RD.chapters = book.chapters || [];
+  setHeadTitle('read', RD.title);
+  const meta = p.querySelector('#rdMeta');
+  if (meta) meta.textContent = RD.chapters.length + ' 章'
+    + (book.author ? ' · ' + book.author : '')
+    + (book.images ? ' · ' + book.images + ' 图' : '');
+
+  const list = p.querySelector('#rdList');
+  if (!RD.chapters.length) {
+    if (list) list.innerHTML = '<div class="rdempty">没有章节</div>';
+    rdHint('这本书还没有可读的章节');
+    return;
+  }
+  if (list) {
+    list.innerHTML = RD.chapters.map((c, i) =>
+      `<button class="rdch" data-ch="${i}" title="${esc(c.title)}">` +
+      `<span class="ix">${i + 1}</span><span class="tt">${esc(c.title)}</span></button>`).join('');
+  }
+  // 上次读到哪，就从哪接着读
+  let at = 0;
+  try { const s = localStorage.getItem(rdStoreKey(bookId)); if (s !== null) at = parseInt(s, 10) || 0; }
+  catch (e) { /* 无痕模式等，忽略 */ }
+  rdGo(Math.max(0, Math.min(RD.chapters.length - 1, at)));
+}
+
+function rdHint(msg) {
+  const p = PANES.read;
+  if (!p) return;
+  const b = p.querySelector('#rdBody');
+  if (b) b.innerHTML = '<div class="rdhint">' + esc(msg) + '</div>';
+  const pos = p.querySelector('#rdPos'); if (pos) pos.textContent = '';
+  rdFootState();
+}
+
+/** 标记左栏当前章，并把它滚进可视区（别让选中项跑到列表外面）。 */
+function rdMark(i) {
+  const p = PANES.read; if (!p) return;
+  p.querySelectorAll('.rdch').forEach(el => {
+    el.classList.toggle('on', +el.dataset.ch === i);
+  });
+  const cur = p.querySelector('.rdch.on');
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({block: 'nearest'});
+}
+
+async function rdGo(i) {
+  const p = PANES.read;
+  if (!p || !RD.chapters.length) return;
+  i = Math.max(0, Math.min(RD.chapters.length - 1, i));
+  if (i === RD.at) return;
+  const ch = RD.chapters[i];
+  RD.at = i;
+  rdMark(i);
+  try { localStorage.setItem(rdStoreKey(RD.book), String(i)); } catch (e) { /* 忽略 */ }
+  const bookSeq = p.dataset.seq;
+  const mySeq = (+p.dataset.chseq || 0) + 1;
+  p.dataset.chseq = mySeq;
+
+  const bg = p.querySelector('#rdBody');
+  const scroll = p.querySelector('#rdScroll');
+  if (scroll) scroll.scrollTop = 0;
+  if (bg) bg.innerHTML = '<div class="rdhint">正在读取…</div>';
+
+  let d;
+  try {
+    d = await (await fetch('/api/read?book=' + encodeURIComponent(RD.book)
+      + '&ch=' + encodeURIComponent(ch.file))).json();
+  } catch (e) {
+    if (+p.dataset.chseq === mySeq && p.dataset.seq === bookSeq) rdHint('连不上本地服务');
+    return;
+  }
+  // dataset 读回来永远是字符串，比之前要转成数字——否则 '1' !== 1 恒真，
+  // 每次翻章都在这里提前 return，正文永远停在「正在读取…」。
+  if (+p.dataset.chseq !== mySeq || p.dataset.seq !== bookSeq) return;   // 已经翻到别处/换了书
+  if (!d.ok) { rdHint(d.msg || '这一章没能读出来'); return; }
+
+  bg.innerHTML = mdRender(d.md || '');
+  rdFixMedia(bg);
+  bg.classList.remove('fade'); void bg.offsetWidth; bg.classList.add('fade');
+  const pos = p.querySelector('#rdPos');
+  if (pos) pos.textContent = (i + 1) + ' / ' + RD.chapters.length;
+  rdFootState();
+}
+
+/** 正文里的图和链接：本地图换成本地图片接口（后端只认白名单文件名），外链新窗口打开。 */
+function rdFixMedia(root) {
+  root.querySelectorAll('img').forEach(im => {
+    im.loading = 'lazy';
+    const raw = im.getAttribute('src') || '';
+    if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) {
+      im.referrerPolicy = 'no-referrer';
+      return;
+    }
+    const tail = raw.split(/[?#]/)[0].split(/[\\/]/).pop() || '';
+    if (tail && RD.book) {
+      im.src = '/api/img?book=' + encodeURIComponent(RD.book)
+        + '&name=' + encodeURIComponent(tail);
+    }
+  });
+  root.querySelectorAll('a').forEach(a => {
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+  });
+}
+
+/** 底部翻页条：到边就禁用，免得页脚上出现「点了没反应」。 */
+function rdFootState() {
+  const p = PANES.read; if (!p) return;
+  const prev = p.querySelector('#rdPrev'), next = p.querySelector('#rdNext');
+  if (prev) prev.disabled = RD.at <= 0;
+  if (next) next.disabled = RD.at < 0 || RD.at >= RD.chapters.length - 1;
+}
+
+function rdFilter(q) {
+  const p = PANES.read; if (!p) return;
+  q = String(q || '').trim().toLowerCase();
+  p.querySelectorAll('.rdch').forEach(el => {
+    const t = (el.querySelector('.tt') || {}).textContent || '';
+    el.hidden = !!q && t.toLowerCase().indexOf(q) < 0;
+  });
+}
+
+function rdDownload() {
+  if (!RD.book) return;
+  clip('/api/md?book=' + encodeURIComponent(RD.book)
+    + '&name=' + encodeURIComponent(RD.title),
+    (RD.title || RD.book) + '.md');
+}
+
+/** 读书时键盘翻章：← 上一章 / → 下一章 / Esc 回书架。
+ *  只在阅读态生效；焦点在筛选框或下拉里时放行，别抢输入；带修饰键的组合键
+ *  （Cmd+← 之类是系统/浏览器的）一律不碰。 */
+document.addEventListener('keydown', e => {
+  if (!document.body.classList.contains('reading')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT'
+    || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key === 'ArrowLeft') { rdGo(RD.at - 1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { rdGo(RD.at + 1); e.preventDefault(); }
+  else if (e.key === 'Escape') { backTo(RD.back); }
+});
 
 /* ── 笔记索引 / 卡片 ──────────────────── */
 

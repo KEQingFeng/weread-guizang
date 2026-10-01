@@ -45,6 +45,7 @@ APP_FILES=(
 APP_DIRS=(
   mcp
   skills
+  vendor
 )
 
 say() { printf '  %s\n' "$*"; }
