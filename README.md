@@ -70,7 +70,7 @@
 
 3. 首次进入为配置页，点「我思故我在」开始初始化：创建虚拟环境、安装依赖、下载 Chromium（约 370 MB，需能访问外网；使用代理时请在代理软件中开启「系统代理」，程序会自动继承）。随后弹出浏览器完成扫码登录。此后每次打开直接进入界面。
 
-   机器需已安装 Python 3.9+，可从 <https://www.python.org/downloads/> 安装；安装后无需重启。包内另附《首次打开必读.txt》。细节与替代做法见 [部署说明.md](部署说明.md)。
+   机器需已安装 Python 3.9+，可从 <https://www.python.org/downloads/> 安装；安装后无需重启。包内另附《首次打开必读.txt》。细节与替代做法见 [部署说明.md](docs/部署说明.md)。
 
 ### 方式二：从源码运行
 
@@ -263,6 +263,28 @@ flowchart TB
 - **每轮翻页设硬超时**。Playwright 的 `page.evaluate` 默认无超时，渲染进程卡死时调用永久挂起；`asyncio.wait_for` 对不响应取消的调用无效，因此使用 `asyncio.wait` 取得超时后直接返回，再终止浏览器回收连接。
 - **图片下载强制 IPv4**。macOS 上 urllib 默认先尝试 IPv6，路由不通时每张图约卡 120 秒。
 
+## 仓库结构
+
+```
+仓库根      运行期代码：后端 ui_server.py、界面 ui.html、引擎与各功能模块
+            —— 这一层刻意不分包：任务子进程以数据目录为工作目录，靠
+               dirname(__file__) 找同伴模块，移动即断
+tests/      验证门禁。一条命令跑全套：bash tests/run_all.sh（--fast 只跑静态检查）
+tools/      只在开发机上跑：出图标、打源码包、窗口截图
+docs/       三份文档：部署说明、架构与模块地图、开发规范
+shell/      macOS 原生壳与打包脚本：Swift 外壳 → dist/归藏.app → 安装包/*.dmg
+mcp/        MCP stdio 适配器：把本地接口包成 20 个工具给 Agent 用
+skills/     给 Agent 看的说明书（不含可执行逻辑）
+vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不连 CDN
+安装包/     只保留最新那一个 dmg
+```
+
+| 文档 | 什么时候看 |
+| --- | --- |
+| [部署说明.md](docs/部署说明.md) | 装、跑、排障、接 MCP |
+| [架构与模块地图.md](docs/架构与模块地图.md) | 动手改代码之前：谁调谁、数据落在哪、两套书籍 id、加一个功能的最短路径 |
+| [开发规范.md](docs/开发规范.md) | 提改动之前：目录与路径契约、哪些事实只准写一处、界面零 emoji、隐私红线、验证门禁与发版流程 |
+
 ## 更新记录
 
 **0.9.8**
@@ -349,7 +371,7 @@ flowchart TB
 
 **上游仓库未声明任何开源许可证。** 因此这里不替上游做授权决定：上述文件的著作权与授权状态以上游为准；如需再分发或商用，请先向上游确认。
 
-归藏新增的部分——`ui_server.py`、`ui.html`、`mcp/guizang-mcp.mjs`、`platform_compat.py`、`shelf_add.py`、`login.py`、`skills/`、`tools/`、启动脚本与文档——按 **MIT** 使用。
+归藏新增的部分——`ui_server.py`、`ui.html`、`mcp/guizang-mcp.mjs`、`platform_compat.py`、`shelf_add.py`、`login.py`、`skills/`、`tools/`、`tests/`、`docs/`、启动脚本与文档——按 **MIT** 使用。
 
 仓库根目录**刻意不放 `LICENSE` 文件**：一份根 LICENSE 会覆盖整个仓库，而上游代码的授权不由此处决定。待上游明确授权后，再补充合适的许可证。
 

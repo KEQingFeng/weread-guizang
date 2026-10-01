@@ -1,7 +1,17 @@
-"""控件体检：重复 id、引用了不存在的 id、定义了却没人绑定的 id。"""
-import re, pathlib, collections, sys
+"""控件体检：重复 id、引用了不存在的 id、定义了却没人绑定的 id。
 
-src = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "ui.html").read_text(encoding="utf-8")
+默认查本仓库的 ui.html，路径也可以当第一个参数传。
+"""
+import collections
+import pathlib
+import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import selftest  # noqa: E402
+
+target = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else selftest.REPO / "ui.html"
+src = target.read_text(encoding="utf-8")
 
 html_ids = re.findall(r'\bid="([^"]+)"', src)
 js_ids = re.findall(r"""getElementById\(['"]([^'"]+)['"]\)""", src)

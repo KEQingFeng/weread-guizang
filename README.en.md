@@ -70,7 +70,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 3. The first screen is a setup page. Click 「我思故我在」 to initialize: create a virtual environment, install dependencies, and download Chromium (about 370 MB; internet access required). If you use a proxy, enable "system proxy" in your proxy client and the app will inherit it. A browser then opens for QR-code login. After that, every launch goes straight to the UI.
 
-   Python 3.9+ must be installed; get it from <https://www.python.org/downloads/>. No restart is needed after installation. The package also includes a read-me file. See [部署说明.md](部署说明.md) for details and alternatives.
+   Python 3.9+ must be installed; get it from <https://www.python.org/downloads/>. No restart is needed after installation. The package also includes a read-me file. See [部署说明.md](docs/部署说明.md) for details and alternatives.
 
 ### Option 2: Run from source
 
@@ -263,6 +263,31 @@ Key decisions in the fetch engine and their reasons:
 - **Every page turn has a hard timeout.** Playwright's `page.evaluate` has no default timeout, so a frozen renderer process hangs the call forever; `asyncio.wait_for` does not help against calls that ignore cancellation, so the engine uses `asyncio.wait` to return on timeout and then kills the browser to reclaim the connection.
 - **Image downloads force IPv4.** On macOS, urllib tries IPv6 first; when the route is unavailable, every image stalls for about 120 seconds.
 
+## Repository layout
+
+```
+root       Runtime code: backend ui_server.py, interface ui.html, the engine and feature modules
+           —— this level is deliberately flat: task subprocesses run with the data
+              directory as cwd and locate sibling modules via dirname(__file__);
+              moving them breaks the installed app
+tests/     Verification gates. One command runs all of them: bash tests/run_all.sh
+           (--fast stops after the static checks)
+tools/     Development-machine only: icon generation, source zip, window screenshots
+docs/      Three documents: deployment, architecture and module map, development conventions
+shell/     macOS native shell and packaging: Swift shell → dist/归藏.app → 安装包/*.dmg
+mcp/       MCP stdio adapter: exposes the local API as 20 tools for agents
+skills/    Instructions written for agents (no executable logic)
+vendor/    Bundled third-party frontend library (markdown-it) and its license —
+           the interface never reaches for a CDN
+安装包/    Only the newest dmg is kept
+```
+
+| Document | When to read it |
+| --- | --- |
+| [部署说明.md](docs/部署说明.md) | Installing, running, troubleshooting, wiring up MCP |
+| [架构与模块地图.md](docs/架构与模块地图.md) | Before changing code: who calls whom, where data lands, the two book-id namespaces, the shortest path to add a feature |
+| [开发规范.md](docs/开发规范.md) | Before proposing a change: directory and path contract, single sources of truth, zero emoji, privacy red lines, verification gates, release flow |
+
 ## Changelog
 
 **0.9.8**
@@ -349,7 +374,7 @@ The fetch engine (`export_precise.py`, `download_images.py`) comes from [lbq110/
 
 **The upstream repository declares no open-source license.** Therefore no authorization decision is made for upstream here: the copyright and license status of those files are governed by upstream, and you should confirm with upstream before redistributing or using them commercially.
 
-The parts added by Guizang — `ui_server.py`, `ui.html`, `mcp/guizang-mcp.mjs`, `platform_compat.py`, `shelf_add.py`, `login.py`, `skills/`, `tools/`, the launcher scripts and the documentation — are used under **MIT**.
+The parts added by Guizang — `ui_server.py`, `ui.html`, `mcp/guizang-mcp.mjs`, `platform_compat.py`, `shelf_add.py`, `login.py`, `skills/`, `tools/`, `tests/`, `docs/`, the launcher scripts and the documentation — are used under **MIT**.
 
 The repository root **deliberately has no `LICENSE` file**: a root LICENSE would cover the entire repository, and the license of the upstream code is not decided here. Once upstream grants a clear license, an appropriate one can be added.
 

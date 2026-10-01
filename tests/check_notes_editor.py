@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+"""归藏真机验证：条目编辑器（Markdown 工具条 / 表格发生器 / 引用）+ 模板 + 思维导图 + 导出。
+
+前提：有一个指向沙盒书库的服务，且 seed 铺好了 GAPBOOK1（`python tests/seed.py`）。
+服务地址走命令行第一个参数或 GUIZANG_TEST_URL，缺省 8770。
+"""
+import json
+import pathlib
+import sys
+import urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import selftest  # noqa: E402
+from playwright.sync_api import sync_playwright
+
+BASE = selftest.need_base(1)
+BOOK = "GAPBOOK1"
+BDir = pathlib.Path(selftest.BOOKS) / BOOK
+selftest.SHOTS.mkdir(parents=True, exist_ok=True)
+SHOTS = [str(selftest.SHOTS / (n + ".png")) for n in ("notes-editor", "notes-template",
+                                                "notes-mindmap", "notes-panel")]
+
+checks = []
+
+
+def chk(name, ok, extra=""):
+    checks.append((bool(ok), name, "" if ok else str(extra)[:300]))
+    print(("  ok  " if ok else " FAIL ") + name + ("" if ok else "  <- " + str(extra)[:300]))
+
+
+def get(path):
+    with urllib.request.urlopen(BASE + path, timeout=10) as r:
+        return json.loads(r.read().decode("utf8"))
+
+
+def post(path, payload):
+    req = urllib.request.Request(BASE + path, data=json.dumps(payload).encode("utf8"),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode("utf8"))
+
+
+# 在正文里挑一段干净的字，造一个 Range（不靠鼠标拖选：那条路在 #108 已经验过了）。
+RANGE_JS = """([inside, at, len]) => {
+  const root = document.querySelector(inside || '#rdBody');
+  if (!root) return null;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) {
+    const raw = n.nodeValue || '';
+    const first = raw.search(/\\S/);
+    if (first < 0 || raw.trim().length < at + len) continue;
+    const s = first + at, e = s + len;
+    if (e > raw.length || /\\s/.test(raw.slice(s, e))) continue;
+    const r = document.createRange();
+    r.setStart(n, s); r.setEnd(n, e);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+    return String(sel);
+  }
+  return null;
+}"""
+
+
+def main():
+    post("/api/mynotes", {"book": BOOK, "doc": {"schema": 1, "marks": [], "entries": []}})
+    (BDir / "notes.md").unlink(missing_ok=True)
+    (BDir / "mindmap.svg").unlink(missing_ok=True)
+    s0 = get("/api/mynotes?book=" + BOOK)
+    chk("后端：清空后 counts 归零", (s0.get("counts") or {}) == {"marks": 0, "entries": 0}, s0.get("counts"))
+    t0 = get("/api/note_tpl")
+    official = [i for i in t0.get("items", []) if i.get("official")]
+    chk("后端：官方模板 ≥ 4 套", len(official) >= 4, len(official))
+
+    errors = []
+    with sync_playwright() as pw:
+        b = pw.chromium.launch()
+        page = b.new_page(viewport={"width": 1440, "height": 900}, device_scale_factor=2)
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+
+        def ta_value():
+            return page.evaluate("() => document.getElementById('ntEdTa').value")
+
+        def set_ta(text, a=None, bb=None):
+            page.evaluate("""([t, a, b]) => {
+              const ta = document.getElementById('ntEdTa');
+              ta.focus(); ta.value = t;
+              const s = a == null ? t.length : a, e = b == null ? s : b;
+              ta.setSelectionRange(s, e);
+              ta.dispatchEvent(new Event('input', {bubbles: true}));
+            }""", [text, a, bb])
+            page.wait_for_timeout(60)
+
+        def tool(t):
+            page.evaluate("""(x) => {
+              const b = document.querySelector('#ntEdTools button[data-t="' + x + '"]');
+              if (b) b.click();
+            }""", t)
+            page.evaluate("() => ntEdPreviewNow()")
+            page.wait_for_timeout(200)
+
+        def flush():
+            """headless Chromium 的动画时钟会整段卡住：transition 建好了却不推进，
+            读到的计算值还停在起始值。这里逼两帧，再把在跑的 transition 直接推到终点，
+            断言才落在「CSS 规则本身对不对」上，而不是截图时机上。"""
+            page.evaluate("""async () => {
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+              document.getAnimations().forEach(a => { try { a.finish(); } catch (e) {} });
+            }""")
+            page.wait_for_timeout(80)
+
+        def settled():
+            """存盘是 900ms 防抖 + 一次 POST：等 NT.timer 归零再问后端，别抢跑。"""
+            try:
+                page.wait_for_function("() => NT.timer === 0", timeout=6000)
+            except Exception:
+                pass
+            page.wait_for_timeout(250)
+
+        def pv():
+            return page.evaluate("() => document.getElementById('ntEdPv').innerHTML")
+
+        def layer(cls):
+            flush()
+            return page.evaluate("""(id) => {
+              const l = document.getElementById(id);
+              if (!l) return null;
+              const s = l.querySelector('section');
+              /* opacity 是 transition 属性，卡住的动画时钟会把它留在 0；
+                 pointer-events 不走 transition —— 它才如实反映 .open 那条规则生效了。 */
+              return {open: l.classList.contains('open'),
+                      vis: getComputedStyle(l).pointerEvents === 'auto'
+                           && getComputedStyle(l).visibility !== 'hidden',
+                      shown: s ? s.getBoundingClientRect().width > 200 : false};
+            }""", cls)
+
+        page.goto(BASE + "/", wait_until="networkidle")
+        page.evaluate("() => localStorage.clear()")
+        page.reload(wait_until="networkidle")
+        page.evaluate("() => openReader('%s', '缺口试验本', 'shelf')" % BOOK)
+        page.wait_for_selector("#rdBody", timeout=8000)
+        page.wait_for_function("() => NT.book === '%s' && NT.doc" % BOOK, timeout=8000)
+        chk("前端：这本书的笔记读进来了", True)
+
+        # ── 先落一道真划线，好在正文里点它 → 「引用这句」 ────────
+        picked = page.evaluate(RANGE_JS, ["#rdBody", 0, 8])
+        made = page.evaluate("""() => {
+          const sel = window.getSelection();
+          const txt = String(sel);
+          if (!txt.trim()) return {ok: false, txt};
+          return {ok: ntAdd(sel, txt, {kind: 'highlight', tag: 'quote',
+            ch: (RD.chapters[RD.at] || {}).file || '',
+            around: ntAround(document.querySelector('#rdBody'), sel)}), txt};
+        }""")
+        page.wait_for_timeout(500)
+        chk("前端：正文里能划出一道线", made["ok"] is True and made["txt"] == picked, (made, picked))
+        chk("前端：正文里出现了可点的划线",
+            page.evaluate("() => document.querySelectorAll('#rdBody mark.gzmk').length") == 1)
+
+        # ── 开编辑器 ─────────────────────────────────────
+        page.evaluate("() => document.querySelector('#rdBody mark.gzmk').click()")
+        page.wait_for_timeout(260)
+        last = page.evaluate("() => ({t: NTLAST.text, m: NTLAST.mark})")
+        chk("前端：点正文那道线就记住了「这句」", last["t"] == picked and last["m"], last)
+
+        page.evaluate("() => document.querySelector('.nttabs button[data-tab=entries]').click()")
+        page.wait_for_timeout(200)
+        page.evaluate("() => document.getElementById('ntNew').click()")
+        page.wait_for_timeout(420)
+        st = layer("ntEdLayer")
+        chk("前端：「写条目」开出编辑浮层", st and st["open"] and st["vis"] and st["shown"], st)
+        chk("前端：浮层在最上面（盖住 #veil）",
+            page.evaluate("() => +getComputedStyle(document.getElementById('ntEdLayer')).zIndex") > 60)
+        chk("前端：工具条一排钮都摆出来了",
+            page.evaluate("() => document.querySelectorAll('#ntEdTools button').length") >= 18)
+        mtop = page.evaluate("""() => [...document.querySelectorAll('#ntEdTools button[data-m]')]
+            .map(b => Math.round(b.getBoundingClientRect().top))""")
+        chk("工具：三种看法没被换行拆开", len(set(mtop)) == 1 and len(mtop) == 3, mtop)
+        seps = page.evaluate("""() => [...document.querySelectorAll('#ntEdTools .sep')]
+            .map(s => Math.round(s.getBoundingClientRect().width))""")
+        chk("工具：分组分隔是一根细线，不是一块灰",
+            seps and max(seps) <= 2, seps)
+        chk("前端：套上编辑器时正文仍是这本书",
+            page.evaluate("() => NT.book === '%s' && NT.lock === true" % BOOK))
+        seeded = page.evaluate("() => ({n: NTED.refs.length, t: (NTED.refs[0]||{}).text || ''})")
+        chk("前端：刚点的那句自动引了进来", seeded["n"] == 1 and seeded["t"] == picked, seeded)
+        chk("前端：引用条显示在编辑框下面",
+            page.evaluate("() => document.querySelectorAll('#ntEdRefs .edref').length") == 1)
+        set_ta("先写一行占位，看看编辑器和工具条排版。")
+        page.wait_for_timeout(120)
+        page.screenshot(path=SHOTS[3])
+
+        # ── Markdown 工具条 ───────────────────────────────
+        set_ta("神经网络与深度学习", 0, 4)
+        tool("bold")
+        chk("工具：加粗把选中的字包住", ta_value().startswith("**神经网络**"), ta_value())
+        tool("bold")
+        chk("工具：再点一次取消加粗", ta_value() == "神经网络与深度学习", ta_value())
+        tool("ital"); tool("ital")
+        tool("strike")
+        chk("工具：删除线 ~~ ~~", "~~神经网络~~" in ta_value(), ta_value())
+        tool("strike")
+        tool("code")
+        chk("工具：行内代码 ` `", "`神经网络`" in ta_value(), ta_value())
+        tool("code")
+        for n in range(1, 6):
+            tool("h%d" % n)
+            chk("工具：H%d 加在行首" % n, ta_value().startswith("#" * n + " "), ta_value())
+            tool("h%d" % n)
+        chk("工具：五级标题都能取消回原样", ta_value() == "神经网络与深度学习", ta_value())
+
+        set_ta("第一行\n第二行\n第三行", 0, 9)
+        tool("bull")
+        chk("工具：一次给三行加列表号",
+            ta_value() == "- 第一行\n- 第二行\n- 第三行", repr(ta_value()))
+        tool("bull")
+        set_ta("甲\n乙", 0, 3)
+        tool("num")
+        chk("工具：编号按 1. 2. 递增", ta_value() == "1. 甲\n2. 乙", repr(ta_value()))
+        tool("quote")
+        chk("工具：行首从编号换成引用号（不会两个都留着）",
+            ta_value() == "> 甲\n> 乙", repr(ta_value()))
+        tool("quote")
+        chk("工具：再点一次取消引用号", ta_value() == "甲\n乙", repr(ta_value()))
+        tool("bull")
+        chk("工具：无序列表 - ", ta_value() == "- 甲\n- 乙", repr(ta_value()))
+        tool("bull")
+        chk("工具：几种行首来回切不留残渣", ta_value() == "甲\n乙", repr(ta_value()))
+
+        tool("hr")
+        chk("工具：分隔线整段插入", "---" in ta_value().split("\n"), repr(ta_value()))
+        set_ta("", 0, 0)
+        tool("fence")
+        chk("工具：代码块 ``` 包裹",
+            ta_value().strip().startswith("```") and ta_value().strip().endswith("```"),
+            repr(ta_value()))
+        set_ta("点这里", 0, 3)
+        tool("link")
+        chk("工具：链接 []()", ta_value() == "[点这里](https://)", ta_value())
+
+        # 列表回车续行
+        set_ta("- 一", 3, 3)
+        page.keyboard.press("Enter")
+        page.keyboard.type("二")
+        page.wait_for_timeout(120)
+        chk("工具：回车自动接着上一项列表", ta_value() == "- 一\n- 二", repr(ta_value()))
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(100)
+        chk("工具：续行时行首自己补上", ta_value() == "- 一\n- 二\n- ", repr(ta_value()))
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(150)
+        chk("工具：空项再回车收掉列表（不留双空行）",
+            ta_value().rstrip() == "- 一\n- 二" and not ta_value().endswith("\n\n"),
+            repr(ta_value()))
+
+        # ── 表格发生器 ───────────────────────────────────
+        set_ta("", 0, 0)
+        tool("table")
+        pop = page.evaluate("""() => {
+          const p = document.querySelector('#ntEdTools .edpop');
+          return p ? {open: p.classList.contains('open'), cells: p.querySelectorAll('.tb i').length} : null;
+        }""")
+        chk("表格：点「表格」弹出 m×n 格子", pop and pop["open"] and pop["cells"] == 48, pop)
+        page.evaluate("""() => {
+          const cells = document.querySelectorAll('#ntEdTools .edpop .tb i');
+          cells[(3 - 1) * 8 + (2 - 1)].dispatchEvent(new MouseEvent('mouseenter'));
+        }""")
+        page.wait_for_timeout(80)
+        cap = page.evaluate("() => document.querySelector('#ntEdTools .edpop .cap').textContent")
+        chk("表格：光标指哪儿就报几乘几", "3" in cap and "2" in cap, cap)
+        page.evaluate("""() => {
+          const cells = document.querySelectorAll('#ntEdTools .edpop .tb i');
+          cells[(3 - 1) * 8 + (2 - 1)].click();
+        }""")
+        page.wait_for_timeout(220)
+        v = ta_value()
+        chk("表格：插进的是 3 行 × 2 列的 Markdown",
+            v.count("\n") >= 2 and v.split("\n")[0].count("|") == 3, repr(v))
+        chk("表格：弹出层收起",
+            page.evaluate("() => { const p=document.querySelector('#ntEdTools .edpop'); return p && !p.classList.contains('open'); }"))
+        ths = page.evaluate("() => document.querySelectorAll('#ntEdPv table th').length")
+        trs = page.evaluate("() => document.querySelectorAll('#ntEdPv table tr').length")
+        chk("表格：预览区渲染成 3 行 × 2 列的 <table>",
+            "<table>" in pv() and ths == 2 and trs == 3, (ths, trs, pv()[:120]))
+
+        # ── 预览 / 分栏 ──────────────────────────────────
+        set_ta("# 标题\n\n正文**加粗**\n\n- 一\n- 二\n")
+        page.evaluate("() => document.querySelector('#ntEdTools button[data-m=split]').click()")
+        page.wait_for_timeout(320)
+        flush()
+        split = page.evaluate("""() => {
+          const body = document.getElementById('ntEdBody');
+          const g = getComputedStyle(body).gridTemplateColumns.split(' ');
+          return {cls: body.className, a: g[0], b: g[1]};
+        }""")
+        chk("预览：边写边看时两栏都占地方",
+            "split" in split["cls"] and float(split["b"].replace("px", "")) > 200, split)
+        chk("预览：Markdown 真渲染出 h1 / strong / ul",
+            all(x in pv() for x in ["<h1>", "<strong>", "<li>"]), pv()[:200])
+        fill = page.evaluate("""() => {
+          const box = document.getElementById('ntEdBody').getBoundingClientRect();
+          const ta = document.getElementById('ntEdTa').getBoundingClientRect();
+          const pv = document.getElementById('ntEdPv').getBoundingClientRect();
+          return {box: Math.round(box.height), ta: Math.round(ta.height), pv: Math.round(pv.height)};
+        }""")
+        chk("版式：两栏铺满浮层，不是缩在顶上的一小截",
+            fill["ta"] >= fill["box"] * 0.9 and fill["pv"] >= fill["box"] * 0.9, fill)
+        page.evaluate("() => document.querySelector('#ntEdTools button[data-m=view]').click()")
+        page.wait_for_timeout(650)
+        flush()
+        chk("预览：只看时输入栏让位",
+            page.evaluate("""() => {
+              const b = document.getElementById('ntEdBody');
+              return b.classList.contains('view')
+                     && getComputedStyle(b).gridTemplateColumns.split(' ')[0] === '0px';
+            }"""))
+        page.evaluate("() => document.querySelector('#ntEdTools button[data-m=split]').click()")
+        page.wait_for_timeout(200)
+
+        # ── 标签色 + 引用这句 ─────────────────────────────
+        page.evaluate("() => document.querySelectorAll('#ntEdTools .dot')[1].click()")
+        page.wait_for_timeout(120)
+        chk("标签：点第二支笔就归类了",
+            page.evaluate("() => NTED.tag") and page.evaluate(
+                "() => document.querySelectorAll('#ntEdTools .dot.on').length") == 1,
+            page.evaluate("() => NTED.tag"))
+        chk("标签：无标那颗钮在排里",
+            page.evaluate("() => !!document.querySelector('#ntEdTools button[data-t=tag0]')"))
+
+        # ── 存条目 ───────────────────────────────────────
+        page.fill("#ntEdTitle", "关于神经网络的一条")
+        page.evaluate("() => document.getElementById('ntEdSave').click()")
+        page.wait_for_timeout(500)
+        settled()
+        closed = layer("ntEdLayer")
+        chk("保存：浮层收起来了", closed and not closed["open"], closed)
+        s1 = get("/api/mynotes?book=" + BOOK)
+        chk("保存：counts.entries = 1", (s1.get("counts") or {}).get("entries") == 1, s1.get("counts"))
+        ent = (s1.get("doc") or {}).get("entries") or []
+        chk("保存：盘上 notes.json 里真有这条",
+            bool(ent) and ent[0]["title"] == "关于神经网络的一条"
+            and len(ent[0].get("refs") or []) == 1
+            and ent[0]["refs"][0]["text"] == picked, ent[:1])
+        chk("保存：条目带上了标签", bool(ent and ent[0].get("tag")), ent[:1])
+        rows = page.evaluate("""() => [...document.querySelectorAll('#ntList .ntrow')].map(el => ({
+              en: el.dataset.en || '',
+              title: (el.querySelector('.q')||{}).textContent || '',
+              peek: (el.querySelector('.pvs')||{}).innerHTML || '',
+              rf: el.querySelectorAll('.rf').length,
+              acts: [...el.querySelectorAll('.nacts button')].map(b => b.dataset.act)}))""")
+        chk("列表：条目行渲染出 Markdown 预览",
+            bool(rows) and "<h1>" in rows[0]["peek"], rows[:1])
+        chk("列表：条目行上有引用 chip 和「接着写」",
+            rows and rows[0]["rf"] == 1 and "edit" in rows[0]["acts"], rows[:1])
+        chk("列表：条目计数写进页签",
+            page.evaluate("() => document.getElementById('ntCE').textContent") == "1")
+
+        # 引用 chip 点一下翻回正文
+        page.evaluate("() => document.querySelector('#ntList .ntrow .rf').click()")
+        page.wait_for_timeout(600)
+        chk("互跳：点条目的引用 chip 定位到正文那句",
+            page.evaluate("() => !!document.querySelector('#rdBody mark.gzmk.flash')"))
+
+        # 接着写
+        page.evaluate("() => document.querySelector('#ntList .ntrow button[data-act=edit]').click()")
+        page.wait_for_timeout(420)
+        re_open = page.evaluate("""() => ({on: NTED.on, id: NTED.id,
+              title: document.getElementById('ntEdTitle').value,
+              body: document.getElementById('ntEdTa').value.slice(0, 6),
+              refs: NTED.refs.length, tag: NTED.tag})""")
+        chk("编辑：「接着写」把原文捞回来",
+            re_open["on"] and re_open["title"] == "关于神经网络的一条"
+            and re_open["body"].startswith("# 标题") and re_open["refs"] == 1
+            and re_open["tag"], re_open)
+
+        # 脏稿保护
+        page.evaluate("() => { const ta=document.getElementById('ntEdTa'); ta.value += '\\n改了一下'; "
+                      "ta.dispatchEvent(new Event('input',{bubbles:true})); }")
+        page.evaluate("() => document.getElementById('ntEdClose').click()")
+        page.wait_for_timeout(220)
+        chk("关闭：没存的稿子第一下不放走",
+            page.evaluate("() => NTED.on")
+            and "还没存" in page.evaluate(
+                "() => (document.querySelector('.whisper')||{}).textContent || ''"),
+            page.evaluate("() => (document.querySelector('.whisper')||{}).textContent"))
+        page.evaluate("() => document.getElementById('ntEdClose').click()")
+        page.wait_for_timeout(260)
+        chk("关闭：再点一次才真的不收这篇了", page.evaluate("() => !NTED.on"))
+
+        # ── 模板 ─────────────────────────────────────────
+        page.evaluate("() => document.getElementById('ntNew').click()")
+        page.wait_for_timeout(300)
+        page.evaluate("() => document.querySelector('#ntEdTools button[data-t=tpl]').click()")
+        page.wait_for_timeout(700)
+        ts = layer("ntTplLayer")
+        chk("模板：抽屉开出来了", ts and ts["open"] and ts["vis"], ts)
+        page.screenshot(path=SHOTS[1])
+        tplrows = page.evaluate("""() => [...document.querySelectorAll('#ntTplList .tplrow')].map(r => ({
+            name: (r.querySelector('.tn')||{}).textContent || '',
+            badge: (r.querySelector('.badge')||{}).textContent || '',
+            del: !!r.querySelector('.del')}))""")
+        chk("模板：官方五套都列着且没有删除钮",
+            len(tplrows) == len(official) and all(r["badge"] == "官方" and not r["del"] for r in tplrows),
+            tplrows)
+
+        page.evaluate("""() => {
+          const rows = [...document.querySelectorAll('#ntTplList .tplrow')];
+          (rows.find(r => r.textContent.indexOf('费曼') >= 0) || rows[0]).click();
+        }""")
+        page.wait_for_timeout(800)
+        applied = page.evaluate("""() => ({on: NTED.on, tpl: NTED.tpl,
+              body: document.getElementById('ntEdTa').value,
+              title: document.getElementById('ntEdTitle').value})""")
+        chk("模板：点一下就插进编辑框",
+            "它是什么" in applied["body"] or applied["body"].strip(), applied["body"][:80])
+        chk("模板：套过哪一套记在条目上",
+            applied["tpl"] and applied["tpl"].startswith("official-"), applied["tpl"])
+        chk("模板：抽屉收了、编辑器还在",
+            page.evaluate("() => !document.getElementById('ntTplLayer').classList.contains('open')")
+            and applied["on"])
+
+        # 存为自己的模板
+        page.evaluate("() => document.getElementById('ntTplNew').click()")
+        page.wait_for_timeout(300)
+        chk("模板：「存为模板」表单开在抽屉里",
+            page.evaluate("() => !!document.querySelector('#ntTplList .tplform')"))
+        page.fill("#tplName", "我的回炉模板")
+        page.fill("#tplDesc", "把没懂的再走一遍")
+        page.evaluate("() => document.getElementById('tplGo').click()")
+        page.wait_for_timeout(900)
+        t1 = get("/api/note_tpl")
+        mine = [i for i in t1["items"] if not i.get("official")]
+        chk("模板：存完在列表里能看到「我的」",
+            bool(mine) and mine[0]["name"] == "我的回炉模板", mine[:1])
+        chk("模板：存完列表自动重铺",
+            page.evaluate("() => [...document.querySelectorAll('#ntTplList .badge')]"
+                          ".some(b => b.textContent === '我的')"))
+        page.evaluate("""() => { const d = document.querySelector('#ntTplList .tplrow .del'); if (d) d.click(); }""")
+        page.wait_for_timeout(900)
+        t2 = get("/api/note_tpl")
+        chk("模板：删掉自定义那套（官方的不许删）",
+            not [i for i in t2["items"] if not i.get("official")]
+            and len(t2["items"]) == len(official), t2["items"])
+        page.evaluate("() => document.getElementById('ntTplClose').click()")
+        page.wait_for_timeout(200)
+
+        # 存这条套了模板的条目
+        page.fill("#ntEdTitle", "费曼四步：反向传播")
+        page.evaluate("() => document.getElementById('ntEdSave').click()")
+        page.wait_for_timeout(400)
+        settled()
+        s2 = get("/api/mynotes?book=" + BOOK)
+        chk("保存：第二条条目也落盘（共 2 条）",
+            (s2.get("counts") or {}).get("entries") == 2, s2.get("counts"))
+
+        # ── 思维导图 ─────────────────────────────────────
+        settled()
+        page.evaluate("() => document.getElementById('ntMap').click()")
+        page.wait_for_timeout(1500)
+        ms = layer("ntMapLayer")
+        chk("导图：浮层开出来了", ms and ms["open"] and ms["vis"], ms)
+        img = page.evaluate("""() => {
+          const i = document.getElementById('ntMapImg');
+          return {src: i.src || '', ok: i.complete && i.naturalWidth > 40,
+                  info: document.getElementById('ntMapInfo').textContent};
+        }""")
+        chk("导图：SVG 画出来了（blob 且真有尺寸）",
+            img["src"].startswith("blob:") and img["ok"], img)
+        chk("导图：顶上报了节点数", "节点" in img["info"], img["info"])
+        page.screenshot(path=SHOTS[2])
+        chk("导图：书文件夹里也存了一份", (BDir / "mindmap.svg").exists())
+        page.evaluate("() => document.querySelector('#ntMapCut button[data-v=chapter]').click()")
+        page.wait_for_timeout(1400)
+        img2 = page.evaluate("""() => {
+          const i = document.getElementById('ntMapImg');
+          return {src: i.src || '', ok: i.complete && i.naturalWidth > 40,
+                  on: document.querySelector('#ntMapCut button.on').dataset.v,
+                  info: document.getElementById('ntMapInfo').textContent};
+        }""")
+        chk("导图：切「按章节」重画了一张",
+            img2["on"] == "chapter" and img2["ok"] and img2["src"] != img["src"], img2)
+        page.evaluate("() => document.getElementById('ntMapClose').click()")
+        page.wait_for_timeout(220)
+        chk("导图：关掉后浮层收干净",
+            page.evaluate("() => !document.getElementById('ntMapLayer').classList.contains('open')"))
+
+        # ── 导出 notes.md ────────────────────────────────
+        page.evaluate("() => document.getElementById('ntExp').click()")
+        page.wait_for_timeout(1800)
+        md = BDir / "notes.md"
+        chk("导出：notes.md 落在书文件夹里", md.exists())
+        txt = md.read_text(encoding="utf8") if md.exists() else ""
+        chk("导出：划线和条目都进去了",
+            picked in txt and "关于神经网络的一条" in txt and "费曼四步：反向传播" in txt,
+            txt[:160])
+        chk("导出：状态栏用人话说清了去处",
+            "已导出" in page.evaluate("() => document.getElementById('ntStatus').textContent"),
+            page.evaluate("() => document.getElementById('ntStatus').textContent"))
+        chk("导出：后端记下导出过（exported 有值）",
+            bool(get("/api/mynotes?book=" + BOOK).get("exported")))
+
+        # ── Esc 分层 / 溢出 / emoji ──────────────────────
+        page.evaluate("() => document.getElementById('ntNew').click()")
+        page.wait_for_timeout(300)
+        page.evaluate("() => document.getElementById('ntMap').click()")
+        page.wait_for_timeout(700)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(320)
+        chk("Esc：先关最上面那层（导图），编辑器不受惊",
+            page.evaluate("() => !document.getElementById('ntMapLayer').classList.contains('open')")
+            and page.evaluate("() => NTED.on"))
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(320)
+        chk("Esc：再按一下收编辑器（空稿没改过，一次就走）",
+            page.evaluate("() => !NTED.on")
+            and page.evaluate("() => !document.getElementById('ntEdLayer').classList.contains('open')"))
+
+        page.screenshot(path=SHOTS[0], full_page=False)
+        dom_emo = page.evaluate("""() => {
+          const t = document.body.innerText || '';
+          return [...t].filter(c => {
+            const p = c.codePointAt(0);
+            return (p >= 0x1F000 && p <= 0x1FAFF) || (p >= 0x2600 && p <= 0x27BF);
+          }).slice(0, 8);
+        }""")
+        chk("界面：屏幕上一个 emoji 也没有", not dom_emo, dom_emo)
+        of = page.evaluate("""() => {
+          const de = document.documentElement;
+          return {w: de.scrollWidth, cw: de.clientWidth,
+                  bad: [...document.querySelectorAll('.ntlay')].map(l => l.getBoundingClientRect().width)};
+        }""")
+        chk("版式：整页没有横向溢出", of["w"] <= of["cw"] + 1, of)
+        chk("运行期：控制台没有报错", not errors, errors[:3])
+        page.wait_for_timeout(400)
+        b.close()
+
+    # ── 收尾：源码级检查 ────────────────────────────────
+    src = (selftest.REPO / "ui.html").read_text(encoding="utf8")
+    # 源码里唯一允许出现 emoji 的地方是剪藏正文的清洗正则（STRIP），界面上一颗都不该有。
+    body = "\n".join(l for l in src.split("\n") if "STRIP = " not in l)
+    emo = [c for c in body if 0x1F000 <= ord(c) <= 0x1FAFF or 0x2600 <= ord(c) <= 0x27BF]
+    chk("界面：UI 源码零 emoji", not emo, emo[:10])
+    dupes = {}
+    for name in ["ntEdPreviewNow", "ntEntryRow", "ntEdOpen", "ntEdClose", "ntMapOpen",
+                 "ntExportNotes", "ntFloatsWire", "edTool", "edWrap", "ntLastSeed",
+                 "ntEntryPeek", "ntTplRefresh", "ntTplPaint"]:
+        dupes[name] = src.count("function " + name + "(")
+    chk("代码：关键函数没有重名覆盖", all(v == 1 for v in dupes.values()),
+        {k: v for k, v in dupes.items() if v != 1})
+
+    bad = [c for c in checks if not c[0]]
+    print("\n%d/%d 通过" % (len(checks) - len(bad), len(checks)))
+    for _, n, x in bad:
+        print("  ✗ " + n + ("  | " + x if x else ""))
+    print("截图：" + " ".join(SHOTS))
+    sys.exit(1 if bad else 0)
+
+
+if __name__ == "__main__":
+    main()

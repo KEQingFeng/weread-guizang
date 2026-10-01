@@ -1,5 +1,5 @@
 """前端布局校验：真实视口下量几何 + 抓 console 报错 + 截图。
-用法: .venv/bin/python ui_check.py [地址]
+用法: .venv/bin/python tests/ui_check.py [地址]
 地址默认 http://127.0.0.1:8770/；服务自己挑了别的端口时把它传进来。
 """
 import asyncio
