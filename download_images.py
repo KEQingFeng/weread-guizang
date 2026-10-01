@@ -3,6 +3,11 @@
 import json, glob, os, socket, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import platform_compat as pc
+
+# 书库位置：默认相对 cwd 的 output/，壳/后端用 GUIZANG_OUTPUT 指到「文档/归藏」。
+OUTPUT_DIR = pc.output_dir()
+
 # 强制 IPv4（macOS 上 IPv6 路由不通会导致每次连接卡 ~120s）
 _orig = socket.getaddrinfo
 socket.getaddrinfo = lambda *a, **k: [x for x in _orig(*a, **k) if x[0] == socket.AF_INET]
@@ -28,7 +33,7 @@ def download_one(url, fpath, retries=3):
 
 
 def main(book_id):
-    book_dir = os.path.join("output", book_id)
+    book_dir = os.path.join(OUTPUT_DIR, book_id)
     raw_dir = os.path.join(book_dir, "raw")
     img_dir = os.path.join(book_dir, "images")
     os.makedirs(img_dir, exist_ok=True)

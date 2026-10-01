@@ -111,7 +111,8 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     private let resDir: URL
     private let appDir: URL                        // Python 源码 + ui.html
     private let onboarding: URL
-    private let dataDir: URL                       // 可写：导出的书、缓存、虚拟环境
+    private let dataDir: URL                       // 可写：缓存、虚拟环境（藏在 Application Support）
+    private let booksDir: URL                      // 可写：取回的书（用户看得见的「文档/归藏」）
 
     override init() {
         let res = Bundle.main.resourceURL ?? Bundle.main.bundleURL
@@ -122,6 +123,10 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                in: .userDomainMask)[0]
         dataDir = support.appendingPathComponent(APP_TITLE, isDirectory: true)
+        // 书单独放用户文档下，装完就能在「访达 → 文稿」里看见，也方便直接拿出去用。
+        // 缓存、浏览器 profile 这些还是留在 Application Support，别把文档目录弄乱。
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        booksDir = docs.appendingPathComponent(APP_TITLE, isDirectory: true)
 
         let cfg = WKWebViewConfiguration()
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -177,6 +182,8 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         dbg("didFinishLaunching 进入")
         buildMenu()
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        // 书库文件夹建起来 —— 用户第一次打开就能在「文稿」里看到「归藏」，知道书存哪。
+        try? FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
         sweepStale()
 
         window.makeKeyAndOrderFront(nil)
@@ -300,6 +307,9 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         // 数据目录交给 Python 那边：源码在应用包里（不该写），
         // 导出的书与缓存改落用户目录。platform_compat.data_dir 认这个变量。
         env["GUIZANG_DATA"] = dataDir.path
+        // 书放用户文档下，别跟着源码躲在 Application Support 里。
+        // platform_compat.books_dir / output_dir 认这个变量。
+        env["GUIZANG_BOOKS"] = booksDir.path
         env["PYTHONUNBUFFERED"] = "1"
         // 源码躺在应用包里，是只读的。Python 默认会在源码旁边写 __pycache__，
         // 那等于每次运行都在往自己身体里刻字 —— 签名会被搞花，装到只读卷上还会报错。
@@ -468,6 +478,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         p.currentDirectoryURL = dataDir
         var env = ProcessInfo.processInfo.environment
         env["GUIZANG_DATA"] = dataDir.path
+        env["GUIZANG_BOOKS"] = booksDir.path   // 书库＝用户文档下的「归藏」
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"   // 别往只读的应用包里写 __pycache__
         // 让引擎里那些子进程用 .venv 的解释器，不走系统那套

@@ -877,7 +877,28 @@
     display:grid; grid-template-columns:252px minmax(0,1fr);
     height:100%; min-height:0; margin:0;
     border-top:1px solid var(--line);
+    /* 阅读偏好（字号/行距/栏宽/字体/底色）由「阅读器设置」面板写进这几个变量，
+       全落在 .rdwrap 上、向下渗。--solid 在每个主题里都有定义，当底色兜底。 */
+    --rd-fs:15px;
+    --rd-lh:1.92;
+    --rd-w:70ch;
+    --rd-font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",sans-serif;
+    --rd-bg:transparent;
+    --rd-ink:var(--ink);
+    --rd-ink2:var(--ink-2);
+    --rd-rule:var(--line);
   }
+  /* 阅读底色：默认跟界面走（透明），另给「羊皮纸」「深夜」两种安静的底色。
+     底色一变，正文里的分隔线/引用线也得跟着换色，不然浅底上会有脏线。 */
+  .rdwrap[data-rdtheme="paper"]{--rd-bg:#f6efe0; --rd-ink:#3a3226; --rd-ink2:#6d5f48;
+    --rd-rule:rgba(120,95,55,.2)}
+  .rdwrap[data-rdtheme="night"]{--rd-bg:#14161c; --rd-ink:#c9cfdc; --rd-ink2:#8d95a6;
+    --rd-rule:rgba(200,212,236,.14)}
+  /* 底色换深/换暖后，阅读条与翻页条那层浅白会突然刺眼，跟着调淡。 */
+  .rdwrap[data-rdtheme="night"] .rdbar,
+  .rdwrap[data-rdtheme="night"] .rdfoot{background:rgba(255,255,255,.035)}
+  .rdwrap[data-rdtheme="paper"] .rdbar,
+  .rdwrap[data-rdtheme="paper"] .rdfoot{background:rgba(246,239,224,.45)}
   /* 阅读器要「一屏刚好」：正文自己滚，整页不许跟着滚，否则翻章会看到整页在动。
      body.reading 由 paneEl 在切到阅读器时挂上。
      #view 是 <section>，会吃到全局 section{margin-bottom:22px}——阅读时清掉它，
@@ -927,26 +948,90 @@
   .rdch.on .ix{color:var(--accent)}
   .rdempty{padding:26px 12px; text-align:center; color:var(--ink-3); font-size:12px}
 
-  /* 右栏：正文。上下两行——正文自己滚，底部一条翻页工具条常驻。 */
-  .rdmain{display:grid; grid-template-rows:minmax(0,1fr) auto; min-width:0; min-height:0}
-  .rdscroll{overflow:auto; overscroll-behavior:contain; scroll-behavior:smooth}
-  .rdin{max-width:70ch; margin:0 auto; padding:30px 34px 64px}
+  /* 右栏：正文。四行——顶部阅读条、进度线、正文（自己滚）、底部翻页条。 */
+  .rdmain{display:grid; grid-template-rows:auto auto minmax(0,1fr) auto;
+    min-width:0; min-height:0}
+  /* 顶部一条：左边当前章节面包屑，右边「专注 / 设置」两颗小钮，读时抬头就知道在哪。 */
+  .rdbar{position:relative; display:flex; align-items:center; gap:9px;
+    padding:6px 12px 6px 16px; flex:none;
+    border-bottom:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.3)}
+  .rdcrumb{font-size:12px; font-weight:550; color:var(--rd-ink2, var(--ink-2));
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .rdcrumb .ix{color:var(--ink-3); font-variant-numeric:tabular-nums; margin-right:7px}
+  .rdbar .grow{flex:1}
+  .rdtool{display:inline-flex; align-items:center; justify-content:center; gap:5px;
+    height:28px; min-width:28px; padding:0 8px; border:0; border-radius:9px;
+    background:transparent; color:var(--ink-2); cursor:pointer; font:inherit;
+    font-size:12px; transition:background .16s ease, color .16s ease}
+  .rdtool:hover{background:var(--surface-2); color:var(--ink)}
+  .rdtool.on{background:var(--accent-soft); color:var(--accent)}
+  .rdtool svg{display:block}
+  /* 阅读进度：贴着阅读条下缘的一条细线，位置感全靠它。 */
+  .rdprog{height:2px; flex:none; background:var(--rd-rule, var(--line)); overflow:hidden}
+  .rdprog i{display:block; height:100%; width:0;
+    background:linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 62%, var(--rd-ink)));
+    transition:width .12s linear}
+  /* 阅读器设置面板：从右上角「Aa」掉下来的一张卡片。 */
+  .rdpop{position:absolute; right:10px; top:42px; z-index:8; width:252px;
+    padding:13px 14px 14px; border:1px solid var(--line-2); border-radius:16px;
+    background:var(--glass); -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%); box-shadow:var(--shadow);
+    transform-origin:top right; transform:scale(.94); opacity:0; pointer-events:none;
+    transition:opacity .18s ease, transform .18s var(--pop)}
+  .rdpop.show{opacity:1; transform:none; pointer-events:auto}
+  .rdrow{display:flex; align-items:center; gap:10px; margin-top:11px}
+  .rdrow:first-child{margin-top:0}
+  .rdlab{flex:none; width:40px; font-size:11.5px; color:var(--ink-3)}
+  .rdseg{display:flex; flex:1; gap:3px; padding:3px; border-radius:10px;
+    background:var(--surface-2)}
+  .rdseg button{flex:1; height:26px; border:0; border-radius:7px; background:transparent;
+    color:var(--ink-2); cursor:pointer; font:inherit; font-size:11.5px;
+    transition:background .14s ease, color .14s ease}
+  .rdseg button:hover{color:var(--ink)}
+  .rdseg button.on{background:var(--solid); color:var(--ink); font-weight:600;
+    box-shadow:0 1px 3px rgba(20,24,32,.14)}
+  /* 专注模式：把左栏目录收走，正文居中一栏到底，最大化每屏的字。
+     用 grid 而不是 display，宽度变化才有一小段过渡，不会「啪」地跳。 */
+  .rdwrap{transition:grid-template-columns .32s var(--spring)}
+  body.reading.focus .rdwrap{grid-template-columns:0 minmax(0,1fr)}
+  body.reading.focus .rdnav{overflow:hidden; opacity:0; pointer-events:none;
+    transition:opacity .2s ease}
+  .rdnav{transition:opacity .24s ease .06s}
+  body.reading.focus .rdin{max-width:min(96ch, 100%)}
+  .rdscroll{overflow:auto; overscroll-behavior:contain; scroll-behavior:smooth;
+    background:var(--rd-bg)}
+  .rdin{max-width:var(--rd-w); margin:0 auto; padding:30px 34px 64px;
+    transition:max-width .24s var(--spring)}
   .rdfoot{display:flex; align-items:center; gap:10px; padding:9px 16px;
-    border-top:1px solid var(--line); background:rgba(255,255,255,.32);
+    border-top:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.32);
     font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums}
   .rdfoot .grow{flex:1}
   .rdpos{white-space:nowrap}
+  /* 底部导出：md / epub / pdf 三档贴成一组，中间细线分格，看着像一枚控件。 */
+  .rddl{display:flex; flex:none; border:1px solid var(--line); border-radius:9px;
+    overflow:hidden}
+  .rddl .deed{border:none; border-left:1px solid var(--line); border-radius:0;
+    padding:0 12px; background:transparent; font-weight:600; letter-spacing:.03em}
+  .rddl .deed:first-child{border-left:none}
+  .rddl .deed:hover{background:var(--surface-2)}
+  /* 底部进度条：一根细的百分比，读长章时知道自己还剩多少。 */
+  .rdbar-mini{width:64px; height:4px; border-radius:99px; background:var(--surface-2);
+    overflow:hidden; flex:none}
+  .rdbar-mini i{display:block; height:100%; width:0; background:var(--accent);
+    opacity:.55; transition:width .12s linear}
   .rdhint{padding:72px 24px; text-align:center; color:var(--ink-3); font-size:12.5px; line-height:1.9}
 
-  /* 正文排版：抓回来的是纯 Markdown，按「好读」调，不抢界面本身的静。 */
-  .md{color:var(--ink); font-size:15px; line-height:1.92; word-wrap:break-word}
+  /* 正文排版：抓回来的是纯 Markdown，按「好读」调，不抢界面本身的静。
+     字号/行距/字体/墨色全部读 .rdwrap 上的阅读变量，设置面板一改就整体生效。 */
+  .md{color:var(--rd-ink); font-size:var(--rd-fs); line-height:var(--rd-lh);
+    font-family:var(--rd-font); word-wrap:break-word}
   .md > :first-child{margin-top:0}
   .md h1,.md h2,.md h3,.md h4{line-height:1.42; font-weight:600; letter-spacing:-.01em;
     margin:1.7em 0 .62em}
   .md h1{font-size:22px}
   .md h2{font-size:19px}
   .md h3{font-size:16.5px}
-  .md h4{font-size:15px; color:var(--ink-2)}
+  .md h4{font-size:15px; color:var(--rd-ink2)}
   .md p{margin:0 0 1.06em}
   .md a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(47,127,240,.32);
     transition:border-color .16s ease}
@@ -954,7 +1039,7 @@
   .md img{max-width:100%; height:auto; display:block; margin:1.15em auto; border-radius:12px;
     box-shadow:0 8px 26px -14px rgba(20,24,32,.45)}
   .md blockquote{margin:1.15em 0; padding:.15em 0 .15em 16px;
-    border-left:3px solid var(--accent-soft); color:var(--ink-2)}
+    border-left:3px solid var(--accent-soft); color:var(--rd-ink2)}
   .md blockquote p:last-child{margin-bottom:0}
   .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em;
     background:var(--surface-2); padding:.12em .4em; border-radius:5px}
@@ -963,9 +1048,9 @@
   .md pre code{background:none; padding:0; font-size:12.5px; line-height:1.72}
   .md ul,.md ol{margin:0 0 1.06em; padding-left:1.5em}
   .md li{margin:.3em 0}
-  .md hr{border:0; border-top:1px solid var(--line); margin:2.1em 0}
+  .md hr{border:0; border-top:1px solid var(--rd-rule); margin:2.1em 0}
   .md table{border-collapse:collapse; width:100%; margin:1.15em 0; font-size:13.5px}
-  .md th,.md td{border:1px solid var(--line-2); padding:7px 10px; text-align:left; vertical-align:top}
+  .md th,.md td{border:1px solid var(--rd-rule); padding:7px 10px; text-align:left; vertical-align:top}
   .md th{background:var(--surface-2); font-weight:600}
   /* 章节之间换页时的轻微淡入：让「切章」像翻页，而不是闪一下。 */
   .rdin.fade{animation:rdfade .32s ease both}
@@ -976,12 +1061,16 @@
     /* 叠成上下后不再锁高：整页滚回去，读者才看得到完整正文。 */
     body.reading #view > .vpane[data-pane="read"]{height:auto; min-height:0}
     .rdwrap{grid-template-columns:minmax(0,1fr); height:auto; min-height:0}
+    /* 窄窗本来就一栏，专注模式不能再把栏压成 0，只把目录片收掉。 */
+    body.reading.focus .rdwrap{grid-template-columns:minmax(0,1fr)}
+    body.reading.focus .rdnav{display:none}
     .rdnav{border-right:0; border-bottom:1px solid var(--line)}
     .rdlist{display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 10px 10px}
     .rdch{flex:none; max-width:210px; border:1px solid var(--line-2); background:rgba(255,255,255,.5)}
-    .rdmain{grid-template-rows:auto}
+    /* 四行布局在窄窗同样成立：阅读条 / 进度线 / 正文 / 翻页条。 */
+    .rdmain{grid-template-rows:auto auto auto auto}
     .rdscroll{overflow:visible}
-    .rdin{padding:22px 18px 56px}
+    .rdin{padding:22px 18px 56px; max-width:var(--rd-w)}
     .rdfoot{position:relative}
     /* 窄窗里右下角气泡正好压在「下载 md」上；读书时收起来，退出即回。 */
     body.reading .agent{display:none}
@@ -1542,6 +1631,14 @@
           </svg>
           我的书架<span class="badge" id="bgShelf"></span>
         </button>
+        <button data-v="local">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.4" y="4.2" width="13.2" height="11.6" rx="2"/>
+            <path d="M3.4 8.4h13.2M8 4.2v4.2"/>
+            <path d="M3.4 12.2h13.2"/>
+          </svg>
+          本地书库<span class="badge" id="bgLocal"></span>
+        </button>
         <button data-v="notes">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 15.5 5 12l7-7a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3l-7 7z"/>
@@ -1905,6 +2002,15 @@ async function clip(href, name) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
   return true;
+}
+
+/** 导出 EPUB / PDF：服务端现做现给，PDF 要打印整本、EPUB 要打包，先吱一声，
+ *  免得用户以为点空了。文件名走服务端的 Content-Disposition（用书名），不自己拼。 */
+async function exportBook(kind, id, name) {
+  if (!id) return;
+  whisper('正在生成 ' + kind.toUpperCase() + '…');
+  const ok = await clip('/api/' + kind + '?book=' + encodeURIComponent(id), '');
+  whisper(ok ? ('已导出 ' + kind.toUpperCase()) : '导出未完成');
 }
 /* ── 本地映射 + 任务记录 ───────────────── */
 
@@ -2408,6 +2514,10 @@ async function drawState(force) {
     if (keySet !== shellKeyAt && shownPane === 'shelf') renderShelfView();
     else if (force || stamp !== localStamp) { localStamp = stamp; renderShelfGrid(); }
     else paintProgress();
+  } else if (v === 'local') {
+    // 本地书库：书目一变（取回 / 导入 / 删除）就重铺。网格自带指纹，重复调用会早早返回。
+    if (force || stamp !== localStamp) { localStamp = stamp; localSig = ''; }
+    renderLocalGrid();
   } else if (force) renderView();
   // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
 }
@@ -3196,6 +3306,7 @@ const SHELF_BATCH = 60;
 
 function renderView() {
   if (v === 'shelf') { renderShelfView(); return; }
+  if (v === 'local') { renderLocalView(); return; }
   if (v === 'notes') { renderNotebooks(); return; }
   if (v === 'random') { renderRandomView(); return; }
   if (v === 'stats') { renderStatsView(); return; }
@@ -3510,6 +3621,316 @@ function wireShelfTools() {
     st.onchange = () => { window.__sstate = st.value; shelfShown = 0; renderShelfGrid(); };
   }
   paintBatch();
+}
+
+/* ── 本地书库（独立于微信读书） ───────────
+   这一屏只看「本机已经存下来的书」：从微信读书取回来的，和用户自己导进来的，
+   都摆在同一个书架上。取回来的读它的正文；导入的支持 MD / TXT / EPUB / PDF。
+   每本都能一键定位到它在硬盘上的文件夹（Finder 里打开），也能从本地删掉。 */
+let localFilter = '';   // '' 全部 / 'weread' 取回的 / 'local' 我导入的
+let localSig = '';      // 网格指纹：筛选 + 关键词 + 书目不变就不重画，切视图不闪
+
+/** 本地书库里的书。local 里每一条都是「已经在硬盘上」的
+ *  （list_books 只扫书库目录），所以这里直接取来即可。 */
+function localBooks() {
+  const q = (window.__lfilter || '').trim().toLowerCase();
+  let arr = Object.values(local);
+  if (localFilter) arr = arr.filter(b => (b.source || 'weread') === localFilter);
+  if (q) arr = arr.filter(b =>
+    ((b.title || '') + (b.author || '')).toLowerCase().includes(q));
+  arr.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  return arr;
+}
+
+/** 格式小签：取回来的都是分章 Markdown，导入的按原始格式标。 */
+function localFmt(b) {
+  if ((b.source || 'weread') !== 'local') return 'MD';
+  return (b.format || '').toUpperCase() || 'TXT';
+}
+
+/** 一行说清这本书：作者 · 章数 · 字数 · 来源。 */
+function localMeta(b) {
+  const bits = [];
+  if (b.author) bits.push(b.author);
+  bits.push(`${b.chapters || 0}${b.total && b.total !== b.chapters ? ' / ' + b.total : ''} 章`);
+  const c = b.chars || 0;
+  if (c) bits.push(c >= 10000 ? Math.round(c / 10000) + ' 万字' : c + ' 字');
+  bits.push((b.source || 'weread') === 'local' ? '我导入的' : '取回的');
+  return bits.join(' · ');
+}
+
+/** 本地书库里的一张卡：形状与书架卡一致（2:3 + 一行标题），
+ *  区别是操作只有阅读 / 定位 / 删除，格式签常驻显示。 */
+function localCard(b) {
+  const id = b.id;
+  const el = document.createElement('article');
+  el.className = 'wcard hasTag';
+  el.dataset.id = id;
+
+  const cv = document.createElement('div');
+  cv.className = 'cv';
+  const ph = () => {
+    const d = document.createElement('div');
+    d.className = 'spine';
+    d.style.setProperty('--h', spineHue(id));
+    const i = document.createElement('i');
+    i.textContent = (b.title || '书').slice(0, 1);
+    d.append(i);
+    return d;
+  };
+  if (b.cover) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.src = '/api/cover?book=' + encodeURIComponent(id);
+    img.onerror = () => img.replaceWith(ph());
+    img.onload = () => img.classList.add('in');
+    if (img.complete && img.naturalWidth) img.classList.add('in');
+    cv.append(img);
+  } else {
+    cv.append(ph());
+  }
+
+  // 格式签常驻：本地书库里一眼分清哪些是取回来的、哪些是自己导进来的
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = localFmt(b);
+  el.append(tag);
+
+  const act = document.createElement('div');
+  act.className = 'hoveract';
+  const read = document.createElement('button');
+  read.textContent = '阅读';
+  read.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, 'local'); };
+  act.append(read);
+
+  const strip = document.createElement('div');
+  strip.className = 'strip';
+  const mk = (label, fn) => {
+    const x = document.createElement('button');
+    x.textContent = label;
+    x.onclick = e => { e.stopPropagation(); fn(); closeAllCards(); };
+    return x;
+  };
+  strip.append(mk('阅读', () => openReader(id, b.title || id, 'local')));
+  strip.append(mk('定位', () => locateBook(id)));
+  strip.append(mk('删除', () => confirmDeleteLocal(id, b.title || id)));
+
+  const mt = document.createElement('div');
+  mt.className = 'mt';
+  const n = document.createElement('div');
+  n.className = 'n';
+  n.textContent = b.title || id;
+  n.style.cursor = 'pointer';
+  n.title = '开始阅读';
+  n.onclick = e => { e.stopPropagation(); openReader(id, b.title || id, 'local'); closeAllCards(); };
+  const a = document.createElement('div');
+  a.className = 'a';
+  a.textContent = localMeta(b);
+  mt.append(n, a);
+
+  cv.append(act);
+  function toggleCard() {
+    const was = el.classList.contains('open');
+    closeAllCards(el);
+    el.classList.toggle('open', !was);
+  }
+  cv.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    e.stopPropagation();
+    toggleCard();
+  });
+  cv.addEventListener('pointerdown', () => el.classList.add('tap'));
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+    cv.addEventListener(ev, () => el.classList.remove('tap')));
+
+  el.append(cv, strip, mt);
+  return el;
+}
+
+function localEmpty(filtered) {
+  const d = document.createElement('div');
+  d.className = 'emptyline';
+  d.innerHTML = filtered
+    ? '没有匹配的本地书'
+    : '<b>本地书库还是空的</b>去「我的书架」取一本回来，或点右上角「导入书籍」把你自己手里的 MD / EPUB / PDF 放进来。';
+  return d;
+}
+
+/** 定位某本书的文件夹：交给后端在各平台「打开文件管理器并选中」。 */
+async function locateBook(id) {
+  const r = await post('reveal', {book: id}).catch(() => null);
+  whisper((r && r.msg) || '已在文件夹中打开');
+}
+
+function confirmDeleteLocal(id, title) {
+  sheet({
+    title: '删除本地文件',
+    text: `将从本地书库删掉《${title || id}》的全部文件（正文、图片、进度）。微信读书里的原书和你的划线笔记都不受影响，需要时可以重新取回或再导入。`,
+    actions: [
+      { label: '确认删除', lead: true, run: async () => {
+        const r = await (await fetch('/api/delete_many', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({books: [id]}),
+        })).json();
+        whisper(r.msg || '已删除');
+        await drawState(true);
+        localSig = '';
+        renderLocalGrid();
+      } },
+      { label: '算了' },
+    ],
+  });
+}
+
+function renderLocalView() {
+  const {p, body, fresh} = viewPane('local', viewHeader('本地书库',
+    `<button class="deed" id="lOpen" style="height:30px">打开书库文件夹</button>
+     <button class="deed" id="lImport" style="height:30px;margin-left:8px">导入书籍</button>`));
+  if (fresh) {
+    body.innerHTML = `<div class="stools">
+        <input class="f" id="lfilter" placeholder="按书名 / 作者筛选本地书" autocomplete="off">
+        <span class="tabs" id="lSeg">
+          <button data-f="">全部</button>
+          <button data-f="weread">取回的</button>
+          <button data-f="local">我导入的</button>
+        </span>
+        <span class="cnt" id="lcnt"></span>
+      </div>
+      <div id="lWrap"></div>`;
+    // 文件选择器藏在页里，点「导入书籍」时替它点一下
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.multiple = true;
+    inp.accept = '.md,.markdown,.txt,.epub,.pdf';
+    inp.style.display = 'none';
+    inp.id = 'lFile';
+    body.append(inp);
+    wireLocalTools(p, body);
+  }
+  localSig = '';
+  renderLocalGrid(body);
+}
+
+function wireLocalTools(p, body) {
+  const find = sel => p.querySelector(sel);
+  const open = find('#lOpen');
+  if (open) open.onclick = () => post('openbooks').catch(() => {});
+  const imp = find('#lImport');
+  const file = find('#lFile');
+  if (imp && file) imp.onclick = () => file.click();
+  if (file) file.onchange = () => {
+    const files = [...file.files];
+    file.value = '';                       // 清空，同一个文件再选一次也能触发
+    if (files.length) importFiles(files);
+  };
+  const f = find('#lfilter');
+  if (f) {
+    f.value = window.__lfilter || '';
+    let timer = null;
+    f.addEventListener('input', () => {
+      window.__lfilter = f.value;
+      clearTimeout(timer);
+      timer = setTimeout(() => { localSig = ''; renderLocalGrid(body); }, 160);
+    });
+  }
+  [...p.querySelectorAll('#lSeg button')].forEach(b => {
+    b.onclick = () => {
+      localFilter = b.dataset.f || '';
+      localSig = '';
+      renderLocalGrid(body);
+    };
+  });
+}
+
+/** 键控复用：同一本书继续用老节点（封面已解码、展开状态、滚动位置都留着），
+ *  只补新增的、只删消失的 —— 和书架同一套「点一下不闪」的做法。 */
+function renderLocalGrid(body) {
+  body = body || (PANES.local && PANES.local.querySelector(':scope > .vbody'));
+  if (!body) return;
+  const all = localBooks();
+  const q = (window.__lfilter || '').trim();
+  const sig = localFilter + '|' + q + '|' + all.map(b => b.id).join(',');
+  if (sig === localSig) return;
+  localSig = sig;
+
+  setNote('local', all.length ? `共 ${all.length} 本` : '');
+  const cnt = body.querySelector('#lcnt');
+  if (cnt) cnt.textContent = (q || localFilter) && all.length ? `筛出 ${all.length} 本` : '';
+  const total = Object.keys(local).length;
+  const bg = $('#bgLocal');
+  if (bg) bg.textContent = total ? total : '';
+  [...body.querySelectorAll('#lSeg button')].forEach(b =>
+    b.classList.toggle('on', (b.dataset.f || '') === localFilter));
+
+  const wrap = body.querySelector('#lWrap');
+  if (!wrap) return;
+  if (!all.length) {
+    wrap.replaceChildren(localEmpty(!!q || !!localFilter));
+    return;
+  }
+  let grid = wrap.querySelector('.sgrid');
+  if (!grid) grid = document.createElement('div'), grid.className = 'sgrid';
+  const have = new Map();
+  for (const c of [...grid.children]) have.set(c.dataset.id, c);
+  const order = [];
+  for (const b of all) {
+    let c = have.get(b.id);
+    if (c) {
+      have.delete(b.id);
+      const a = c.querySelector('.mt .a');
+      if (a) a.textContent = localMeta(b);
+    } else c = localCard(b);
+    order.push(c);
+  }
+  have.forEach(c => c.remove());
+  const cur = [...grid.children];
+  if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
+  if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+}
+
+/* ── 导入自己的书 ─────────────────────────
+   前端把文件读成 base64 再 POST —— 不经过 multipart，后端就守着「只认 JSON」
+   这一条统一入口。一次可选多本，逐本走，报一句汇总。 */
+function fileB64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => reject(new Error('读不了这个文件'));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function importFiles(files) {
+  let ok = 0, fail = 0, lastMsg = '';
+  for (const f of files) {
+    try {
+      const data = await fileB64(f);
+      const r = await (await fetch('/api/import', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: f.name, data}),
+      })).json();
+      if (r.ok) { ok += 1; lastMsg = r.msg || ''; }
+      else { fail += 1; lastMsg = r.msg || '导入失败'; }
+    } catch (e) {
+      fail += 1;
+      lastMsg = '导入失败：' + (e.message || e);
+    }
+  }
+  if (!ok) { whisper(lastMsg || '没有导入成功'); return; }
+  whisper(fail ? `已导入 ${ok} 本，${fail} 本没成功` : `已导入 ${ok} 本`);
+  await drawState(true);
+  // 刚导进来的书就该在眼前，别被上一次的筛选藏起来
+  localFilter = '';
+  window.__lfilter = '';
+  const body = PANES.local && PANES.local.querySelector(':scope > .vbody');
+  if (body) {
+    const f = body.querySelector('#lfilter');
+    if (f) f.value = '';
+    localSig = '';
+    renderLocalGrid(body);
+  }
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
@@ -4064,6 +4485,8 @@ async function renderDetailView(storeId, readerId, title) {
       mk('完整包', () => clip('/api/zip?book=' + encodeURIComponent(id),
         (info.title || title || id) + '.zip')),
       mk('正文', () => openReader(id, info.title || title || id, 'detail')),
+      mk('EPUB', () => exportBook('epub', id, info.title || title || id)),
+      mk('PDF', () => exportBook('pdf', id, info.title || title || id)),
       mk('目录', async () => { const r = await post('reveal', {book: id}); if (!r.ok) whisper(r.msg); })
     );
   }
@@ -4077,6 +4500,39 @@ async function renderDetailView(storeId, readerId, title) {
 const RD = {book: '', title: '', chapters: [], at: -1, back: 'shelf'};
 let mdIt = null;
 let mdItTried = false;
+
+/* ── 阅读偏好 ──────────────────────────────
+   字号/行距/栏宽/字体/底色五个维度，存本机。每次开阅读器把这张配置写到 .rdwrap
+   的 CSS 变量上，正文自己读变量，改一处即整体生效，不用重铺 DOM。 */
+const RD_SANS = '-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",sans-serif';
+const RD_SERIF = 'Georgia,"Songti SC","STSong","Noto Serif CJK SC",serif';
+const RD_CFG_KEY = 'guizang-readcfg';
+const RD_CFG_DEF = {size: 15, lh: 1.92, w: 70, font: 'sans', theme: 'auto'};
+let rdCfg = Object.assign({}, RD_CFG_DEF);
+
+function rdLoadCfg() {
+  try {
+    const o = JSON.parse(localStorage.getItem(RD_CFG_KEY) || 'null') || {};
+    if ([14, 15, 17, 19].indexOf(+o.size) >= 0) rdCfg.size = +o.size;
+    if ([1.62, 1.92, 2.15].indexOf(+o.lh) >= 0) rdCfg.lh = +o.lh;
+    if ([58, 70, 86].indexOf(+o.w) >= 0) rdCfg.w = +o.w;
+    if (o.font === 'serif' || o.font === 'sans') rdCfg.font = o.font;
+    if (['auto', 'paper', 'night'].indexOf(o.theme) >= 0) rdCfg.theme = o.theme;
+  } catch (e) { /* 无痕模式等，退回默认 */ }
+}
+function rdSaveCfg() {
+  try { localStorage.setItem(RD_CFG_KEY, JSON.stringify(rdCfg)); } catch (e) { /* 忽略 */ }
+}
+
+/* 章节正文缓存：翻过的章不再打后端；翻页前顺手把相邻两章也拉进来，
+   下一次翻章就是「瞬间」，这是「更丝滑」最直接的一刀。 */
+const rdCache = new Map();
+function rdCacheKey(book, file) { return book + '|' + file; }
+function rdCachePut(book, file, md) {
+  rdCache.set(rdCacheKey(book, file), md || '');
+  // 上限 40 章，超了从最旧的开始丢，长书也不会把内存撑爆。
+  while (rdCache.size > 40) rdCache.delete(rdCache.keys().next().value);
+}
 
 /** 渲染 Markdown。本地随包带的是 markdown-it（html:false，抓回来的正文按数据处理）；
  *  万一那份资源没带上，退回 <pre> 纯文本，至少保证还能读。 */
@@ -4107,7 +4563,12 @@ function rdHaveBooks() {
 }
 
 function readerSkeleton() {
-  return `<div class="rdwrap">
+  const icon =
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"' +
+    ' stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M2 6V3.6A1.6 1.6 0 0 1 3.6 2H6M10 2h2.4A1.6 1.6 0 0 1 14 3.6V6' +
+    'M14 10v2.4a1.6 1.6 0 0 1-1.6 1.6H10M6 14H3.6A1.6 1.6 0 0 1 2 12.4V10"/></svg>';
+  return `<div class="rdwrap" id="rdWrap">
     <div class="rdnav">
       <div class="rdnavhd">
         <select class="rdpick" id="rdPick" aria-label="切换书籍"></select>
@@ -4118,6 +4579,29 @@ function readerSkeleton() {
       <div class="rdlist" id="rdList"></div>
     </div>
     <div class="rdmain">
+      <div class="rdbar">
+        <span class="rdcrumb" id="rdCrumb"></span>
+        <span class="grow"></span>
+        <button class="rdtool" id="rdFocus" title="专注模式（F）" aria-label="专注模式">${icon}</button>
+        <button class="rdtool" id="rdSet" title="阅读设置" aria-label="阅读设置">Aa</button>
+        <div class="rdpop" id="rdPop">
+          <div class="rdrow"><span class="rdlab">字号</span><div class="rdseg" data-rd="size">
+            <button data-v="14">小</button><button data-v="15">标准</button>
+            <button data-v="17">大</button><button data-v="19">特大</button></div></div>
+          <div class="rdrow"><span class="rdlab">行距</span><div class="rdseg" data-rd="lh">
+            <button data-v="1.62">紧凑</button><button data-v="1.92">标准</button>
+            <button data-v="2.15">宽松</button></div></div>
+          <div class="rdrow"><span class="rdlab">栏宽</span><div class="rdseg" data-rd="w">
+            <button data-v="58">窄</button><button data-v="70">中</button>
+            <button data-v="86">宽</button></div></div>
+          <div class="rdrow"><span class="rdlab">字体</span><div class="rdseg" data-rd="font">
+            <button data-v="sans">黑体</button><button data-v="serif">宋体</button></div></div>
+          <div class="rdrow"><span class="rdlab">底色</span><div class="rdseg" data-rd="theme">
+            <button data-v="auto">默认</button><button data-v="paper">羊皮纸</button>
+            <button data-v="night">深夜</button></div></div>
+        </div>
+      </div>
+      <div class="rdprog"><i id="rdProg"></i></div>
       <div class="rdscroll" id="rdScroll">
         <div class="rdin md" id="rdBody"><div class="rdhint">正在读取目录…</div></div>
       </div>
@@ -4125,8 +4609,13 @@ function readerSkeleton() {
         <button class="deed" id="rdPrev" style="height:26px" title="上一章（←）">上一章</button>
         <button class="deed" id="rdNext" style="height:26px" title="下一章（→）">下一章</button>
         <span class="grow"></span>
+        <span class="rdbar-mini" title="本章阅读进度"><i id="rdProg2"></i></span>
         <span class="rdpos" id="rdPos"></span>
-        <button class="deed" id="rdDl" style="height:26px">下载 md</button>
+        <div class="rddl">
+          <button class="deed" data-dl="md" style="height:26px" title="导出整本为 Markdown">MD</button>
+          <button class="deed" data-dl="epub" style="height:26px" title="导出整本为 EPUB">EPUB</button>
+          <button class="deed" data-dl="pdf" style="height:26px" title="导出整本为 PDF">PDF</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -4135,12 +4624,17 @@ function readerSkeleton() {
 /** 事件走委托：正文区每次换章都会重铺，绑在 pane 上才不会被 innerHTML 冲掉。 */
 function wireReader(p) {
   p.addEventListener('click', e => {
+    // 设置面板里的分段按钮先认（它们在 #rdPop 里，不是普通工具钮）。
+    const seg = e.target.closest && e.target.closest('.rdseg button');
+    if (seg && p.contains(seg)) { rdPickCfg(seg); return; }
     const t = e.target.closest('button');
     if (!t || !p.contains(t)) return;
     if (t.id === 'rdBack') { backTo(RD.back); return; }
     if (t.id === 'rdPrev') { rdGo(RD.at - 1); return; }
     if (t.id === 'rdNext') { rdGo(RD.at + 1); return; }
-    if (t.id === 'rdDl') { rdDownload(); return; }
+    if (t.dataset.dl) { rdDownload(t.dataset.dl); return; }
+    if (t.id === 'rdFocus') { rdSetFocus(!document.body.classList.contains('focus')); return; }
+    if (t.id === 'rdSet') { rdPopToggle(); return; }
     if (t.dataset.ch !== undefined) rdGo(+t.dataset.ch);
   });
   p.addEventListener('input', e => {
@@ -4152,6 +4646,10 @@ function wireReader(p) {
       openReader(e.target.value, (b && b.title) || e.target.value, RD.back);
     }
   });
+  // scroll 不冒泡，用捕获阶段听：每一章正文滚到哪，顶部进度线跟着走。
+  p.addEventListener('scroll', e => {
+    if (e.target && e.target.id === 'rdScroll') rdProgress();
+  }, true);
 }
 
 /** 把左栏「换一本」的选项铺好，并选中当前这本。 */
@@ -4179,6 +4677,9 @@ async function openReader(bookId, title, backPane) {
   const seq = (+p.dataset.seq || 0) + 1;
   p.dataset.seq = seq;
   p.dataset.chseq = 0;
+  rdApplyCfg();                                     // 把本机阅读偏好贴到新骨架上
+  rdSetFocus(document.body.classList.contains('focus'));   // 专注态跨开书保持
+  rdProgress();
 
   RD.book = bookId; RD.title = title || bookId; RD.chapters = []; RD.at = -1;
   rdPaintPick();
@@ -4226,7 +4727,79 @@ function rdHint(msg) {
   const b = p.querySelector('#rdBody');
   if (b) b.innerHTML = '<div class="rdhint">' + esc(msg) + '</div>';
   const pos = p.querySelector('#rdPos'); if (pos) pos.textContent = '';
+  const crumb = p.querySelector('#rdCrumb'); if (crumb) crumb.textContent = '';
   rdFootState();
+  rdProgress();
+}
+
+/** 顶部阅读条上的「第 N/M 章 · 章节名」，抬头就知道读到哪。 */
+function rdCrumb(i) {
+  const p = PANES.read; if (!p) return;
+  const el = p.querySelector('#rdCrumb'); if (!el) return;
+  const ch = RD.chapters[i];
+  const n = RD.chapters.length;
+  el.innerHTML = '<span class="ix">' + (i + 1) + '/' + n + '</span>'
+    + esc((ch && ch.title) || '');
+}
+
+/** 阅读进度：正文滚到哪，顶部细线与底部小条同步走。 */
+function rdProgress() {
+  const p = PANES.read; if (!p) return;
+  const sc = p.querySelector('#rdScroll'); if (!sc) return;
+  const max = sc.scrollHeight - sc.clientHeight;
+  const pct = max > 4 ? Math.min(100, Math.max(0, sc.scrollTop / max * 100)) : 100;
+  const a = p.querySelector('#rdProg'), b = p.querySelector('#rdProg2');
+  if (a) a.style.width = pct + '%';
+  if (b) b.style.width = pct + '%';
+}
+
+/** 专注模式：收起左栏目录，正文独占一栏到底；按钮状态与 body 上的类保持一致。 */
+function rdSetFocus(on) {
+  document.body.classList.toggle('focus', !!on);
+  const p = PANES.read; if (!p) return;
+  const btn = p.querySelector('#rdFocus');
+  if (btn) {
+    btn.classList.toggle('on', !!on);
+    btn.title = on ? '退出专注（F）' : '专注模式（F）';
+  }
+}
+
+function rdPopToggle() {
+  const p = PANES.read; if (!p) return;
+  const pop = p.querySelector('#rdPop'); if (!pop) return;
+  const open = !pop.classList.contains('show');
+  pop.classList.toggle('show', open);
+  const btn = p.querySelector('#rdSet');
+  if (btn) btn.classList.toggle('on', open);
+}
+
+/** 面板上的分段按钮被点：写进配置、存本机、立刻生效（不重铺正文）。 */
+function rdPickCfg(seg) {
+  const segs = seg.closest('.rdseg'); if (!segs) return;
+  const key = segs.dataset.rd;
+  let v = seg.dataset.v;
+  if (key === 'size' || key === 'w' || key === 'lh') v = +v;
+  rdCfg[key] = v;
+  rdSaveCfg();
+  rdApplyCfg();
+}
+
+/** 把配置贴到 .rdwrap：五个变量 + 一个底色属性，同时同步面板选中态。 */
+function rdApplyCfg() {
+  const p = PANES.read; if (!p) return;
+  const wrap = p.querySelector('#rdWrap'); if (!wrap) return;
+  wrap.style.setProperty('--rd-fs', rdCfg.size + 'px');
+  wrap.style.setProperty('--rd-lh', String(rdCfg.lh));
+  wrap.style.setProperty('--rd-w', rdCfg.w + 'ch');
+  wrap.style.setProperty('--rd-font', rdCfg.font === 'serif' ? RD_SERIF : RD_SANS);
+  if (rdCfg.theme === 'auto') wrap.removeAttribute('data-rdtheme');
+  else wrap.setAttribute('data-rdtheme', rdCfg.theme);
+  wrap.querySelectorAll('.rdseg').forEach(seg => {
+    const key = seg.dataset.rd;
+    seg.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('on', String(rdCfg[key]) === b.dataset.v);
+    });
+  });
 }
 
 /** 标记左栏当前章，并把它滚进可视区（别让选中项跑到列表外面）。 */
@@ -4247,15 +4820,27 @@ async function rdGo(i) {
   const ch = RD.chapters[i];
   RD.at = i;
   rdMark(i);
+  rdCrumb(i);
   try { localStorage.setItem(rdStoreKey(RD.book), String(i)); } catch (e) { /* 忽略 */ }
   const bookSeq = p.dataset.seq;
   const mySeq = (+p.dataset.chseq || 0) + 1;
   p.dataset.chseq = mySeq;
 
   const bg = p.querySelector('#rdBody');
-  const scroll = p.querySelector('#rdScroll');
-  if (scroll) scroll.scrollTop = 0;
+  const pos = p.querySelector('#rdPos');
+  if (pos) pos.textContent = (i + 1) + ' / ' + RD.chapters.length;
+  rdFootState();
+
+  // 命中缓存：直接铺，连「正在读取…」都不闪一下 —— 翻过的章再翻就是瞬时。
+  const cached = rdCache.get(rdCacheKey(RD.book, ch.file));
+  if (cached !== undefined) {
+    rdPaint(bg, cached);
+    rdPreload(i);
+    return;
+  }
+
   if (bg) bg.innerHTML = '<div class="rdhint">正在读取…</div>';
+  rdProgress();
 
   let d;
   try {
@@ -4265,17 +4850,38 @@ async function rdGo(i) {
     if (+p.dataset.chseq === mySeq && p.dataset.seq === bookSeq) rdHint('连不上本地服务');
     return;
   }
-  // dataset 读回来永远是字符串，比之前要转成数字——否则 '1' !== 1 恒真，
-  // 每次翻章都在这里提前 return，正文永远停在「正在读取…」。
   if (+p.dataset.chseq !== mySeq || p.dataset.seq !== bookSeq) return;   // 已经翻到别处/换了书
   if (!d.ok) { rdHint(d.msg || '这一章没能读出来'); return; }
 
-  bg.innerHTML = mdRender(d.md || '');
+  rdCachePut(RD.book, ch.file, d.md || '');
+  rdPaint(bg, d.md || '');
+  rdPreload(i);
+}
+
+/** 把一章正文铺进正文区：淡化淡入 + 修图/链接 + 回到顶部 + 进度归位。 */
+function rdPaint(bg, md) {
+  if (!bg) return;
+  bg.innerHTML = mdRender(md);
   rdFixMedia(bg);
+  const p = PANES.read;
+  const sc = p && p.querySelector('#rdScroll');
+  if (sc) sc.scrollTop = 0;
   bg.classList.remove('fade'); void bg.offsetWidth; bg.classList.add('fade');
-  const pos = p.querySelector('#rdPos');
-  if (pos) pos.textContent = (i + 1) + ' / ' + RD.chapters.length;
-  rdFootState();
+  rdProgress();
+}
+
+/** 预取相邻两章（上/下各一），把下一次翻章变成瞬时。 */
+function rdPreload(i) {
+  const book = RD.book;
+  [i + 1, i - 1].forEach(j => {
+    if (j < 0 || j >= RD.chapters.length) return;
+    const f = RD.chapters[j] && RD.chapters[j].file;
+    if (!f || rdCache.has(rdCacheKey(book, f))) return;
+    fetch('/api/read?book=' + encodeURIComponent(book) + '&ch=' + encodeURIComponent(f))
+      .then(r => r.json())
+      .then(d => { if (d && d.ok && book === RD.book) rdCachePut(book, f, d.md || ''); })
+      .catch(() => { /* 预取失败无所谓，翻到时再拉 */ });
+  });
 }
 
 /** 正文里的图和链接：本地图换成本地图片接口（后端只认白名单文件名），外链新窗口打开。 */
@@ -4316,26 +4922,69 @@ function rdFilter(q) {
   });
 }
 
-function rdDownload() {
+/** 导出当前这本：md / epub / pdf 三档，服务端现做现给。
+ *  md 快、直接下；epub/pdf 要打包/打印，先吱一声再等。文件名走服务端的
+ *  Content-Disposition（用书名），不自己拼。 */
+async function rdDownload(kind) {
   if (!RD.book) return;
-  clip('/api/md?book=' + encodeURIComponent(RD.book)
-    + '&name=' + encodeURIComponent(RD.title),
-    (RD.title || RD.book) + '.md');
+  kind = kind || 'md';
+  const base = RD.title || RD.book;
+  if (kind === 'md') {
+    clip('/api/md?book=' + encodeURIComponent(RD.book)
+      + '&name=' + encodeURIComponent(base), base + '.md');
+    return;
+  }
+  whisper('正在生成 ' + kind.toUpperCase() + '…');
+  const ok = await clip('/api/' + kind + '?book=' + encodeURIComponent(RD.book), '');
+  whisper(ok ? ('已导出 ' + kind.toUpperCase()) : '导出未完成');
 }
 
-/** 读书时键盘翻章：← 上一章 / → 下一章 / Esc 回书架。
- *  只在阅读态生效；焦点在筛选框或下拉里时放行，别抢输入；带修饰键的组合键
- *  （Cmd+← 之类是系统/浏览器的）一律不碰。 */
+/* 读书时的键盘：←/→ 或 [ ] 翻章，空格/Shift+空格翻屏，Home/End 到顶/底，
+   F 专注，Esc 先关设置面板、没有面板才退回。
+   只在阅读态生效；焦点在输入框/下拉里时放行，别抢输入；带修饰键的组合键
+   （Cmd+← 之类是系统/浏览器的）一律不碰。 */
 document.addEventListener('keydown', e => {
   if (!document.body.classList.contains('reading')) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT'
     || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-  if (e.key === 'ArrowLeft') { rdGo(RD.at - 1); e.preventDefault(); }
-  else if (e.key === 'ArrowRight') { rdGo(RD.at + 1); e.preventDefault(); }
-  else if (e.key === 'Escape') { backTo(RD.back); }
+  const p = PANES.read;
+  const sc = p && p.querySelector('#rdScroll');
+  if (e.key === 'ArrowLeft' || e.key === '[') { rdGo(RD.at - 1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight' || e.key === ']') { rdGo(RD.at + 1); e.preventDefault(); }
+  else if (e.key === 'f' || e.key === 'F') {
+    rdSetFocus(!document.body.classList.contains('focus')); e.preventDefault();
+  }
+  else if (e.key === ' ' || e.key === 'Spacebar') {
+    if (t && t.tagName === 'BUTTON') return;          // 按钮自己要响应空格，别抢
+    if (sc) {
+      sc.scrollBy({top: (e.shiftKey ? -1 : 1) * Math.round(sc.clientHeight * .86),
+        behavior: 'smooth'});
+      e.preventDefault();
+    }
+  }
+  else if (e.key === 'Home') { if (sc) { sc.scrollTo({top: 0, behavior: 'smooth'}); e.preventDefault(); } }
+  else if (e.key === 'End') {
+    if (sc) { sc.scrollTo({top: sc.scrollHeight, behavior: 'smooth'}); e.preventDefault(); }
+  }
+  else if (e.key === 'Escape') {
+    const pop = p && p.querySelector('#rdPop');
+    if (pop && pop.classList.contains('show')) { rdPopToggle(); return; }   // 先关面板
+    backTo(RD.back);
+  }
 });
+
+/* 设置面板点外面收起：点面板内或「Aa」钮本身不算外面。 */
+document.addEventListener('click', e => {
+  const p = PANES.read; if (!p) return;
+  const pop = p.querySelector('#rdPop');
+  if (!pop || !pop.classList.contains('show')) return;
+  if (e.target.closest && (e.target.closest('#rdPop') || e.target.closest('#rdSet'))) return;
+  rdPopToggle();
+});
+
+rdLoadCfg();   // 开界面时就把本机阅读偏好读进来
 
 /* ── 笔记索引 / 卡片 ──────────────────── */
 

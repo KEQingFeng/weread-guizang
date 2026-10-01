@@ -40,6 +40,8 @@ APP_FILES=(
   export_precise.py
   download_images.py
   shelf_add.py
+  book_export.py
+  book_import.py
   requirements.txt
 )
 APP_DIRS=(
