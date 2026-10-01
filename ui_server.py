@@ -34,13 +34,14 @@ from urllib.parse import urlparse, parse_qs, unquote
 import platform_compat as pc
 import book_export
 import book_import
+import sync as cloudsync
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.3"
+VERSION = "0.9.6"
 
 
 def py():
@@ -82,6 +83,8 @@ LIB_PATH = os.path.join(CACHE_DIR, "library.json")
 CFG_PATH = os.path.join(CACHE_DIR, "config.json")
 COVER_DIR = os.path.join(CACHE_DIR, "covers")
 WALL_PATH = os.path.join(CACHE_DIR, "wallpaper.bin")
+# 本机阅读时长账本：界面里翻书的时间按天累计在这儿（微信读书那边的时间另有来源）。
+READSTAT_PATH = os.path.join(CACHE_DIR, "readstat.json")
 UI_PATH = os.path.join(REPO, "ui.html")
 # 离线可用的第三方前端库（页面内读正文用的 markdown 渲染器，见 vendor/README.md）
 VENDOR_DIR = os.path.join(REPO, "vendor")
@@ -238,12 +241,28 @@ def load_lib():
     return d
 
 
-def save_lib(d):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    tmp = LIB_PATH + ".tmp"
+# 服务多线程跑，几个小账本（书架、配置、阅读时长）都会落盘。原来它们共用
+# 固定的「xxx.tmp」，两个请求同时写就会有一个的 os.replace 扑空、直接抛错把连接带崩。
+# 统一走这个原子写：临时名带 pid+随机串互不打架，整体再串行化一次，稳。
+_WRITE_LOCK = threading.RLock()
+
+
+def _write_json(path, obj, mode=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, LIB_PATH)
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    if mode is not None:
+        try:
+            os.chmod(path, mode)
+        except OSError:
+            pass
+
+
+def save_lib(d):
+    with _WRITE_LOCK:
+        _write_json(LIB_PATH, d)
 
 
 def prune_lib(lib):
@@ -270,15 +289,8 @@ def load_cfg():
 
 
 def save_cfg(d):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    tmp = CFG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CFG_PATH)
-    try:
-        os.chmod(CFG_PATH, 0o600)      # 里面存着 API Key
-    except OSError:
-        pass
+    with _WRITE_LOCK:
+        _write_json(CFG_PATH, d, 0o600)      # 里面存着 API Key，落盘后就收紧权限
 
 
 def weread_key():
@@ -316,6 +328,157 @@ def set_export_dir(path):
     cfg["export_dir"] = path
     save_cfg(cfg)
     return True, "导出位置已设为 " + path
+
+
+# ---------- 本机阅读时长 ----------
+#
+# 微信读书那边的时间只认在它 App 里读的；用户在「归藏」里翻本地书的那些时间它不知道。
+# 所以这里另立一本账：界面开着阅读器时，前端按心跳把「刚过去了几秒」报过来，
+# 后端按天、按书累加。它和微信读书的时间是两笔，合并在一起才是真正的「总阅读时长」。
+
+# 服务是多线程的，前端心跳可能并发打进来。账本是「读—改—写」，不锁就会出现
+# 两个请求各自读旧值再各自写回，把对方那几秒抹掉；多线程共用同一个 .tmp 名还会让
+# os.replace 找不到文件直接抛错。锁住整段、并用带随机后缀的临时文件，两个毛病都断掉。
+_READSTAT_LOCK = threading.RLock()
+
+
+def load_readstat():
+    try:
+        with open(READSTAT_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    d.setdefault("total", 0)
+    d.setdefault("days", {})
+    d.setdefault("books", {})
+    return d
+
+
+def save_readstat(d):
+    with _WRITE_LOCK:
+        _write_json(READSTAT_PATH, d)
+
+
+def readstat_tick(book, title, seconds):
+    """记一笔本机阅读时间。seconds 由前端算好（两次心跳的间隔），这里只累加。
+
+    夹在 0..120 之间：前端卡住/切到后台再回来，可能报一个很大的间隔，
+    不能让它一次把一整段挂机时间算进阅读时长。负数和 0 直接丢。
+    """
+    try:
+        sec = int(round(float(seconds)))
+    except Exception:
+        return False
+    if sec <= 0:
+        return False
+    sec = min(sec, 120)
+    # 整段「读—改—写」都在锁里，并发心跳才不会互相覆盖
+    with _READSTAT_LOCK:
+        d = load_readstat()
+        day = time.strftime("%Y-%m-%d")
+        d["total"] = int(d.get("total", 0)) + sec
+        days = d.setdefault("days", {})
+        days[day] = int(days.get(day, 0)) + sec
+        bid = book if isinstance(book, str) else ""
+        bid = bid.strip()
+        if bid:
+            b = d.setdefault("books", {}).setdefault(bid, {"title": "", "seconds": 0, "last": 0})
+            ttl = title if isinstance(title, str) else ""
+            if ttl.strip():
+                b["title"] = ttl.strip()[:120]
+            b["seconds"] = int(b.get("seconds", 0)) + sec
+            b["last"] = int(time.time())
+        # 只留最近 400 天，别让账本无限长
+        if len(days) > 400:
+            for k in sorted(days.keys())[:len(days) - 400]:
+                days.pop(k, None)
+        save_readstat(d)
+    return True
+
+
+def readstat_summary():
+    """把账本整理成界面要的样子：总秒数、逐日秒数、每本书的秒数。
+
+    逐日那份全给（账本本就只留最近 400 天）：界面按「本周／本月／本年／总计」
+    从这份逐日表里自己求和，跟微信读书那几档对齐，不必后端再按档位算一遍。
+    """
+    d = load_readstat()
+    days = sorted((d.get("days") or {}).items())
+    books = sorted(((d.get("books") or {}).items()),
+                   key=lambda kv: -(kv[1].get("seconds") or 0))[:100]
+    return {"total": int(d.get("total", 0)),
+            "days": [[k, int(v)] for k, v in days],
+            "books": [{"id": k, "title": (v.get("title") or ""),
+                       "seconds": int(v.get("seconds", 0)),
+                       "last": int(v.get("last", 0))} for k, v in books]}
+
+
+def readstat_clear():
+    with _READSTAT_LOCK:
+        save_readstat({"total": 0, "days": {}, "books": {}})
+    return True, "本机阅读时长已清零"
+
+
+# ---------- 云同步 ----------
+#
+# 通道与协议都在 sync.py 里，这边只做三件事：读写配置、给页面状态、把结果记进 config。
+
+_SYNC_PENDING = {}      # OneDrive 设备码：授权进行中时暂存在内存，重启即失效（本就要重来）
+
+
+def sync_state():
+    return cloudsync.state(load_cfg().get("sync") or {})
+
+
+def _sync_store(cfg):
+    c = load_cfg()
+    c["sync"] = cfg
+    save_cfg(c)
+
+
+def sync_save(incoming):
+    old = load_cfg().get("sync") or {}
+    ok, msg, cfg = cloudsync.save(old, incoming)
+    if ok:
+        _sync_store(cfg)
+    return ok, msg
+
+
+def sync_test():
+    c = cloudsync._norm(load_cfg().get("sync") or {})
+    return cloudsync.test(c)
+
+
+def sync_run_now():
+    """立刻跑一次同步。跑完把结果记进配置，界面上那行「上次同步」就有得看。"""
+    cfg = cloudsync._norm(load_cfg().get("sync") or {})
+    ok, msg = cloudsync.run(cfg, CACHE_DIR, OUT_DIR, log=log)
+    cfg["last"] = {"at": int(time.time()), "msg": msg}
+    _sync_store(cfg)
+    return ok, msg
+
+
+def sync_device_start():
+    ok, msg, info = cloudsync.device_start(load_cfg().get("sync") or {})
+    if ok and info:
+        _SYNC_PENDING["device_code"] = info.get("device_code")
+        _SYNC_PENDING["expires"] = time.time() + info.get("expires_in", 900)
+    return ok, msg, info
+
+
+def sync_device_poll():
+    code = _SYNC_PENDING.get("device_code")
+    if not code or time.time() > _SYNC_PENDING.get("expires", 0):
+        return False, "没在等授权，或者代码过期了，重新来一次"
+    cfg = load_cfg().get("sync") or {}
+    status, msg, updated = cloudsync.device_poll(cfg, code)
+    if status == "ok" and updated:
+        _sync_store(updated)
+        _SYNC_PENDING.pop("device_code", None)
+        return True, msg
+    return False, msg
 
 
 # ---------- 壁纸 ----------
@@ -1067,6 +1230,59 @@ def agent_test():
     return True, "通了，%d 毫秒。它说：%s" % (ms, (say or "（没说话）")[:60]), ms
 
 
+# ---------- 划词/点词问答（翻译、查词） ----------
+#
+# 与 agent_chat 同源：都走用户自己配的那个兼容 OpenAI 的接口。分别只在「问什么」——
+# 这里问的是「把这段翻成中文」或「这个词什么意思」，一次问完，所以不流式（要的是完整答案）。
+
+QUICK_SYS = {
+    # 长选正文 → 直接给中文。只译文，不解释、不寒暄，省得用户还要自己挑。
+    "translate": (
+        "你是翻译。把用户给的外文译成自然、准确的中文。"
+        "只输出译文本身，不要加引号、不要解释、不要复述原文。"
+        "若给了上下文，用上下文消歧，但译文只覆盖用户选中的那段。"
+    ),
+    # 点单个英文词 → 一个能一眼看完的小卡片：词性释义 + 一个例句。
+    "word": (
+        "你是英汉词典。用户点了一个英文词，给出简短答案："
+        "先给词性与中文释义（多个义项分行），再用这个词造一个简短例句并给中文。"
+        "若有常用搭配或易混点，用一句话点明。不要长篇大论，不要客套。"
+    ),
+}
+
+
+def agent_quick(mode, text, ctx=""):
+    """划词/点词问一次，等完整答案。返回 (ok, 文本或人话)。
+
+    非流式：这类问题是「一次问完、一次看全」，流式的逐字蹦反而不好读。
+    """
+    url, key, model = agent_cfg()
+    if not url or not model:
+        return False, "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"
+    text = (text or "").strip()
+    if not text:
+        return False, "没有选中内容"
+    sys = QUICK_SYS.get(mode) or QUICK_SYS["translate"]
+    user = text[:4000]
+    if (ctx or "").strip():
+        user = "上下文：%s\n\n需要处理的：%s" % (ctx.strip()[:1500], text[:4000])
+    body = {"model": model, "stream": False,
+            "messages": [{"role": "system", "content": sys},
+                         {"role": "user", "content": user}]}
+    try:
+        with agent_open({"url": url, "key": key, "body": body},
+                        stream=False, timeout=60) as r:
+            j = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception as e:
+        return False, str(e)[:200]
+    try:
+        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    except Exception:
+        say = ""
+    say = (say or "").strip()
+    return (True, say) if say else (False, "那边没给出内容，换个模型名试试")
+
+
 def list_books():
     books = []
     lib = prune_lib(load_lib())
@@ -1617,7 +1833,11 @@ class Handler(BaseHTTPRequestHandler):
                               "v": int(os.path.getmtime(WALL_PATH)) if os.path.isfile(WALL_PATH) else 0},
                 "export": {"dir": export_dir()},
                 "agent": agent_state(),
+                "sync": sync_state(),
             })
+
+        if path == "/api/readstat":
+            return self._json(readstat_summary())
 
         if path == "/api/log":
             with _lock:
@@ -1861,6 +2081,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             body = {}
+        # 所有 POST 接口都当 body 是个对象来 .get()。合法 JSON 也可能是数组/字符串/数字，
+        # 这里统一收成空对象，省得每个分支各自判类型（畸形体不该把连接搞崩）。
+        if not isinstance(body, dict):
+            body = {}
 
         if u.path == "/api/notes_index":
             rebuild = bool((body or {}).get("rebuild"))
@@ -1973,6 +2197,44 @@ class Handler(BaseHTTPRequestHandler):
                 self._chunk(json.dumps({"err": str(e)[:300]}, ensure_ascii=False) + "\n")
             self._chunk_end()
             return
+
+        if u.path == "/api/agent/quick":
+            # 划词翻译 / 点词查义：一次问完、一次看全，所以走普通 JSON 不走流式。
+            mode = ((body or {}).get("mode") or "translate").strip()
+            if mode not in QUICK_SYS:
+                mode = "translate"
+            ok, out = agent_quick(mode, (body or {}).get("text"),
+                                  (body or {}).get("ctx"))
+            return self._json({"ok": ok, "text": out if ok else "", "msg": "" if ok else out})
+
+        if u.path == "/api/readstat/tick":
+            ok = readstat_tick((body or {}).get("book"), (body or {}).get("title"),
+                               (body or {}).get("seconds"))
+            return self._json({"ok": ok})
+
+        if u.path == "/api/readstat/clear":
+            ok, msg = readstat_clear()
+            return self._json({"ok": ok, "msg": msg})
+
+        if u.path == "/api/sync/save":
+            ok, msg = sync_save((body or {}).get("cfg") or {})
+            return self._json({"ok": ok, "msg": msg, "sync": sync_state()})
+
+        if u.path == "/api/sync/test":
+            ok, msg = sync_test()
+            return self._json({"ok": ok, "msg": msg})
+
+        if u.path == "/api/sync/now":
+            ok, msg = sync_run_now()
+            return self._json({"ok": ok, "msg": msg, "sync": sync_state()})
+
+        if u.path == "/api/sync/onedrive/start":
+            ok, msg, info = sync_device_start()
+            return self._json({"ok": ok, "msg": msg, "info": info or {}})
+
+        if u.path == "/api/sync/onedrive/poll":
+            ok, msg = sync_device_poll()
+            return self._json({"ok": ok, "msg": msg, "sync": sync_state()})
 
         if u.path == "/api/action":
             return self._action(body)

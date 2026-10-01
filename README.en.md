@@ -27,9 +27,13 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 - **Whole-book export to Markdown**: text and illustrations interleaved in reading order, images downloaded with 8 concurrent threads, written chapter by chapter, resumable.
 - **Local multi-format reader**: read exported books in the UI with left/right panes, a table of contents that highlights on scroll, and keyboard chapter navigation; imported EPUB / TXT / PDF files use the same interface.
+- **Ask the AI from a selection while reading**: select a passage in the text and a small bar pops up with "copy / translate to Chinese / ask the assistant", so you can hand that sentence straight to the in-reader agent. Requires your own AI model API key, set in the settings.
+- **Foreign-language reading support**: long-select any passage to translate it to Chinese or copy the original; single-click an English word to get a pop-up with its meaning and usage (click-to-look-up is English-only; other languages use long-select).
+- **Dual-source reading time**: WeChat Reading time and local (Guizang) time are tracked separately and merged into a single unified total, shown side by side so you can see how the parts combine.
 - **Standalone local shelf**: displayed separately from the WeChat Reading shelf, listing both exported and imported books; locate any book's file in one click, and import your own Markdown / TXT / EPUB / PDF.
 - **EPUB / PDF export**: convert exported books to general e-book formats; EPUB preserves illustrations and chapter structure.
-- **In-app AI agent assistant**: call it from a bubble in the lower-right corner.
+- **WebDAV / OneDrive cloud sync**: sync reading time, reading records, and book files to your own cloud drive (Jianguoyun, Nextcloud, OneDrive, and other WebDAV services); the three categories can be toggled separately, and credentials stay on your machine.
+- **In-app AI agent assistant**: call it from a bubble in the lower-right corner; ask from a selection without copy-pasting.
 - **View data without opening WeChat Reading**: store search, book summaries, author and publisher, category, reading progress and last-read time are all shown locally.
 - **Search and fetch in one step**: search results convert directly into export tasks; all highlights are indexed for full-text search.
 - **Highlight review and Anki export**: draw random cards from all highlights; export highlights to `.apkg`.
@@ -47,7 +51,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 ### Option 1: Download the macOS app
 
-[**Download Guizang-0.9.3.dmg**](安装包/归藏-0.9.3.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
+[**Download Guizang-0.9.6.dmg**](安装包/归藏-0.9.6.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
 
 1. Double-click the dmg and drag **归藏.app** into Applications.
 2. On first launch, if you see **"归藏" is damaged and can't be opened. You should move it to the Trash.**, this is macOS blocking an unsigned app, not a corrupted file. Run:
@@ -113,6 +117,7 @@ Then open <http://127.0.0.1:8770>.
 1. Gear icon (top-left) → **Connect account** → scan the QR code with WeChat in the browser window that opens. The session persists in `cache/browser_profile/` and is reused afterwards.
 2. Enter the **API Key**: in WeChat Reading web, go to Settings → Open API, and copy the key of the form `wrk-…` into the field and save. The key is stored locally in `cache/config.json` (mode 600); the UI shows only the last 4 characters. The shelf, notes, stats, recommendations, store search and book detail all depend on it. Without it, only locally exported books are listed.
 3. To import highlights into flomo, fill in the **flomo** field (flomo web → Settings → API, of the form `https://flomoapp.com/iwh/xxxx/`). flomo PRO is required.
+4. To use **translate-a-selection / click-a-word lookup / ask-the-assistant** while reading, fill in the **AI assistant** section in the settings: an OpenAI-compatible endpoint (address up to `/v1`), key, and model name. The address and key stay on your machine and the UI only shows whether they are set; selected text is sent to that endpoint only when you ask.
 
 ## Command line
 
@@ -254,6 +259,15 @@ Key decisions in the fetch engine and their reasons:
 
 ## Changelog
 
+**0.9.6**
+
+- Ask the AI from a selection while reading: select a passage and a bar pops up with "copy / translate to Chinese / ask the assistant", handing that sentence directly to the in-reader agent.
+- Foreign-language reading support: long-select to copy or translate to Chinese; single-click an English word for a pop-up definition (other languages use long-select).
+- Dual-source reading time: WeChat Reading and local time are counted separately and merged into one unified total, with the sources shown side by side.
+- Cloud sync: added WebDAV and OneDrive, each able to sync reading time / reading records / book files independently; credentials stay on your machine.
+- Further reader UI polish: smoother page turns, selection and pop-up animations.
+- Stability fixes: race conditions and lost updates when writing local ledgers concurrently, and connections dropped by malformed request bodies (stress suite: 48/48 passing).
+
 **0.9.3**
 
 - Added a multi-format built-in reader: native Markdown reading, plus imported EPUB / TXT / PDF, with a table of contents that highlights on scroll, keyboard chapter navigation, and left/right panes.
@@ -299,6 +313,8 @@ The repository is named `weread-guizang`; the project is called 归藏 (Guizang)
 - Per-character Canvas extraction still drops a few characters across line breaks (e.g. `multi-agent` truncated to `ulti`).
 - The official gateway does not expose a "book list" endpoint, so the panel has no book lists; the closest is "recommendations".
 - The flomo request format has no official example; here it sends JSON by convention and falls back to form encoding on failure. **Real delivery is not verified** (no usable webhook token for end-to-end testing).
+- Translate-a-selection / word lookup / ask-the-assistant rely on the OpenAI-compatible endpoint you configure yourself; this parses the common `/chat/completions` response shape and has **not been tested against each vendor individually**, so unusual response formats may fail.
+- Cloud sync is implemented against the public WebDAV and Microsoft Graph APIs and has **not been verified end-to-end with a real cloud account**; for a first sync, try one small book before syncing everything.
 - Cross-platform: the Windows branch runs in unit tests with a mocked platform flag, but has **not been verified end-to-end on a real Windows machine**.
 
 ## Source and license

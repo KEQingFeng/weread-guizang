@@ -1056,6 +1056,32 @@
   .rdin.fade{animation:rdfade .32s ease both}
   @keyframes rdfade{from{opacity:0; transform:translate3d(0,6px,0)} to{opacity:1; transform:none}}
 
+  /* 划词小条：选中正文里的一段就贴出来 —— 复制 / 译成中文 / 问小助手；
+     单击英文单词则直接弹一张释义卡。挂在 body 上，换章重铺正文也不会被冲掉。 */
+  .selpop{position:fixed; z-index:70; left:0; top:0; display:none; opacity:0;
+    transform:translateY(5px) scale(.985); transform-origin:50% 100%;
+    transition:opacity .13s ease, transform .13s cubic-bezier(.22,.61,.36,1);
+    background:rgba(24,26,33,.94); color:#fff; border-radius:12px; overflow:hidden;
+    box-shadow:0 16px 40px -14px rgba(8,12,20,.6), 0 0 0 .5px rgba(255,255,255,.08) inset;
+    -webkit-backdrop-filter:blur(16px) saturate(180%); backdrop-filter:blur(16px) saturate(180%)}
+  .selpop.show{display:block; opacity:1; transform:none}
+  .selpop .selbar{display:flex; align-items:stretch}
+  .selpop .selbar button{border:none; background:transparent; color:#f4f5f7; cursor:pointer;
+    padding:8px 13px; font-size:12.5px; font-weight:600; letter-spacing:.01em; white-space:nowrap;
+    transition:background .14s ease}
+  .selpop .selbar button:hover{background:rgba(255,255,255,.14)}
+  .selpop .selbar button:active{background:rgba(255,255,255,.22)}
+  .selpop .selbar button + button{box-shadow:-.5px 0 0 rgba(255,255,255,.14)}
+  .selpop .selcard{padding:11px 14px 12px; width:max-content; max-width:min(380px,84vw);
+    max-height:min(340px,60vh); overflow:auto; line-height:1.66; font-size:13px;
+    white-space:pre-wrap; word-break:break-word}
+  .selpop .selcard .hd{display:block; margin-bottom:5px; font-size:11px; letter-spacing:.04em;
+    color:rgba(255,255,255,.58); font-weight:600; text-transform:none}
+  .selpop .selcard .bd{color:#eef0f4}
+  .selpop .selcard .bd.spin{color:rgba(255,255,255,.6)}
+  .selpop .selcard .bd.spin::after{content:'…'}
+  .selpop .selcard .bd.err{color:#ffb4a8}
+
   /* 窄窗：左右栏叠成上下——目录变一排可横滑的章节片，正文整页滚（不锁高）。 */
   @media (max-width:840px){
     /* 叠成上下后不再锁高：整页滚回去，读者才看得到完整正文。 */
@@ -1449,6 +1475,7 @@
     <button class="pcat" data-cat="out">导出</button>
     <button class="pcat" data-cat="notes">笔记</button>
     <button class="pcat" data-cat="agent">小 Agent</button>
+    <button class="pcat" data-cat="sync">云同步</button>
     <button class="pcat" data-cat="about">关于</button>
   </aside>
   <div class="popbody" id="popbody">
@@ -1566,6 +1593,91 @@
       </div>
       <div class="hint" id="agenthint">填一个兼容 OpenAI 的接口（/chat/completions 那一套），右下角那颗气泡就能说话了。地址写到 /v1 为止，Key 只存在本机、不会进界面。</div>
       <div class="hint">它会看到：你的书架与读到哪里、下载到本机的书的划线笔记、以及阅读统计的汇总。这些都是你本机的东西 —— 问了才会发给上面那个接口，介意的话就别问。</div>
+    </section>
+
+    <section class="popcat" data-cat="sync">
+      <div class="sechd">云同步</div>
+      <div class="row">
+        <span class="k">状态</span>
+        <span class="live" id="v-sync"><b></b>未配置</span>
+        <span class="grow"></span>
+        <button class="deed" id="syncOn">开启同步</button>
+      </div>
+      <div class="row">
+        <span class="k">云服务</span>
+        <span class="grow"></span>
+        <span class="tabs" id="syncProv">
+          <button data-p="webdav">WebDAV</button>
+          <button data-p="onedrive">OneDrive</button>
+        </span>
+      </div>
+
+      <div id="syncDavBox">
+        <div class="sechd">WebDAV 连接</div>
+        <div class="row">
+          <span class="k">地址</span>
+          <input id="syncUrl" type="text" spellcheck="false" autocomplete="off" placeholder="https://dav.example.com/dav/"
+                 style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        </div>
+        <div class="row">
+          <span class="k">账号</span>
+          <input id="syncUser" type="text" spellcheck="false" autocomplete="off" placeholder="用户名"
+                 style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        </div>
+        <div class="row">
+          <span class="k">密码</span>
+          <input id="syncPass" type="password" spellcheck="false" autocomplete="off" placeholder="••••••"
+                 style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        </div>
+        <div class="hint">坚果云、Nextcloud 这类都走 WebDAV：把我们那个文件夹的地址填进来（写到要存放的目录为止），账号密码只留在本机。</div>
+      </div>
+
+      <div id="syncMsBox">
+        <div class="sechd">OneDrive 连接</div>
+        <div class="row">
+          <span class="k">应用 ID</span>
+          <input id="syncClient" type="text" spellcheck="false" autocomplete="off" placeholder="Azure 应用（客户端）ID"
+                 style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        </div>
+        <div class="row">
+          <span class="k">授权</span>
+          <span class="v" id="v-msauth">未授权</span>
+          <span class="grow"></span>
+          <button class="deed" id="syncAuth">去授权</button>
+        </div>
+        <div class="hint">在 Azure 门户注册一个应用（支持「个人 Microsoft 账户」），把它的客户端 ID 填到上面。点「去授权」会给你一串代码，到微软页面输一下、登进去就行；登一次会记住，不用每次来。</div>
+      </div>
+
+      <div class="sechd">同步什么</div>
+      <div class="row">
+        <span class="k">阅读时长</span>
+        <span class="grow"></span>
+        <input type="checkbox" id="swTime" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div class="row">
+        <span class="k">阅读记录</span>
+        <span class="grow"></span>
+        <input type="checkbox" id="swRecords" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div class="row">
+        <span class="k">书籍文件</span>
+        <span class="grow"></span>
+        <input type="checkbox" id="swBooks" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div class="hint">时长＝本机阅读账本；记录＝划线笔记与进度；书籍文件＝下载到本机的书（体积大，按需开）。同步是往云上叠，不会把云上的东西抹掉。</div>
+
+      <div class="row">
+        <span class="k">上次</span>
+        <span class="v" id="v-synclast">还没同步过</span>
+        <span class="grow"></span>
+        <button class="deed" id="syncTest">测一下</button>
+        <button class="deed" id="syncNow" style="margin-left:6px">立即同步</button>
+      </div>
+      <div class="row">
+        <span class="grow"></span>
+        <button class="deed" id="syncSave">保存设置</button>
+      </div>
+      <div class="hint" id="synchint">配好之后点「保存设置」，再点「立即同步」就把东西送上去。密钥只存在本机、不会进界面，也不会写进日志。</div>
     </section>
 
     <section class="popcat" data-cat="about">
@@ -2472,6 +2584,7 @@ async function drawState(force) {
   const ve = $('#v-export');
   if (ve) { ve.textContent = exDir || '默认'; ve.title = exDir || '系统「下载」文件夹'; }
   paintAgent(s.agent || {});
+  paintSync(s.sync || {});
 
   // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
   const ki = $('#keyinput'), fi = $('#flomoinput');
@@ -3032,6 +3145,7 @@ function paneEl(name) {
   }
   const changed = shownPane !== name;
   if (changed && PANES[shownPane]) paneScroll[shownPane] = window.scrollY;
+  if (changed && shownPane === 'read' && name !== 'read') rdTimeStop();   // 离开阅读器就停表
   for (const k in PANES) PANES[k].hidden = (k !== name);
   // 阅读器要「一屏刚好」：正文自己在栏内滚，整页不许跟着滚。切到阅读器时
   // 把 main 底部那段呼吸留白收窄（配合 .rdwrap 的定高），离开时再还回去。
@@ -4110,6 +4224,89 @@ function setHtml(el, html) {
 
 let statsCache = {};          // mode → 已渲染的 HTML，重复进来不再闪白
 
+/** 「本周／本月／本年／总计」在本机逐日表里对应的起点日期（YYYY-MM-DD）。
+ *  日期是等长字符串，直接比大小就是比先后，不必转成时间戳。 */
+function rdModeFrom(mode) {
+  const n = new Date();
+  const pad = x => String(x).padStart(2, '0');
+  const ymd = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  if (mode === 'weekly') {
+    const back = (n.getDay() + 6) % 7;      // 周一算一周的头一天
+    const m = new Date(n); m.setDate(n.getDate() - back);
+    return ymd(m);
+  }
+  if (mode === 'monthly') return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-01`;
+  if (mode === 'annually') return `${n.getFullYear()}-01-01`;
+  return '';                                // 总计：全都要
+}
+
+/** 本机账本里落进这一档的秒数。账本只有「逐日」没有「逐日×每本」，
+ *  所以按日期把逐日那列加起来就行。 */
+function localReadSeconds(days, mode) {
+  const from = rdModeFrom(mode);
+  let s = 0;
+  for (const [k, v] of (days || [])) if (!from || k >= from) s += (v || 0);
+  return s;
+}
+
+/** 把某本书「最后读过」的秒级时间戳归到哪一天（本地时区）。 */
+function rdDayOf(ts) {
+  const d = new Date((ts || 0) * 1000);
+  const pad = x => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** 归藏本机那一半：读得最多的几本 + 一个两步确认的清零按钮。
+ *  清零这动作没有后悔药，所以第一次点先变「真清？」—— 再点才真发请求。 */
+function localSection(local, mode) {
+  if (!local) return '';
+  const books = local.books || [];
+  if (!(local.total > 0) && !books.length) return '';
+  const from = rdModeFrom(mode);
+  const list = books.filter(b => !from || rdDayOf(b.last) >= from).slice(0, 6);
+  const rows = list.map(b =>
+    `<div class="wrrow"><span class="nm">${esc(b.title || b.id || '')}</span>
+      <span class="ct">${Math.round((b.seconds || 0) / 60)} 分钟</span></div>`).join('');
+  return `<div class="wrrow" style="border-top:1px solid var(--line)">
+      <span class="nm" style="color:var(--ink-3);font-size:11.5px">归藏本机读得最多的</span>
+      <button class="deed" id="rsClear">清零本机时长</button>
+    </div>`
+    + (rows || '<div class="emptyline" style="padding:12px 16px">这一档还没有本机阅读记录</div>');
+}
+
+/** 清零按钮的两步确认：点一下先换成质问，隔 3 秒没再点就自己撤回。 */
+function wireRsClear(body) {
+  const btn = body.querySelector('#rsClear');
+  if (!btn) return;
+  let armed = false, timer = null;
+  btn.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      btn.classList.add('cut');
+      btn.textContent = '真清？本机时长全没了';
+      timer = setTimeout(() => {
+        armed = false;
+        btn.classList.remove('cut');
+        btn.textContent = '清零本机时长';
+      }, 3000);
+      return;
+    }
+    clearTimeout(timer);
+    btn.disabled = true;
+    btn.classList.remove('cut');
+    btn.textContent = '清…';
+    try {
+      const r = await (await fetch('/api/readstat/clear', {method: 'POST'})).json();
+      whisper(r.msg || '已清零');
+      statsCache = {};               // 每档都是从同一份账本求和出来的，全作废重拉
+      renderStatsView();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '清零本机时长';
+    }
+  };
+}
+
 async function renderStatsView() {
   const {p, body, fresh} = viewPane('stats', viewHeader('阅读统计',
     '<span class="tabs" id="modeTabs">'
@@ -4130,41 +4327,66 @@ async function renderStatsView() {
   });
   paintTabs();
   const mode = window.__mode || 'monthly';
-  if (!keySet) { setHtml(body, notReady()); return; }
   // 上次这一档的数据直接摆上来，不给「读取中…」占位闪一下
   if (statsCache[mode]) setHtml(body, statsCache[mode]);
   else body.innerHTML = '<div class="emptyline">读取中…</div>';
-  let d;
-  try {
-    // 悬停侧边栏时预取的就在手边，直接贴上去，不再等一趟
-    const hot = await preAwait('stats:' + mode);
-    d = hot != null ? hot : await wcall('/readdata/detail', {mode, baseTime: 0});
-  }
-  catch (e) { setHtml(body, `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`); return; }
 
-  const cmp = (typeof d.compare === 'number')
-    ? (d.compare >= 0 ? `+${Math.round(d.compare * 100)}%` : `${Math.round(d.compare * 100)}%`) : '—';
+  // 本机那份账谁也拦不住，先抓；微信读书那份要连上账号才有。
+  // 两趟并着走，谁先回来都不影响另一趟。
+  const [local, d] = await Promise.all([
+    (async () => {
+      try { return await (await fetch('/api/readstat')).json(); }
+      catch (e) { return null; }
+    })(),
+    (async () => {
+      if (!keySet) return null;
+      try {
+        // 悬停侧边栏时预取的就在手边，直接贴上去，不再等一趟
+        const hot = await preAwait('stats:' + mode);
+        return hot != null ? hot : await wcall('/readdata/detail', {mode, baseTime: 0});
+      } catch (e) { return null; }
+    })(),
+  ]);
+
+  if (!local && !d) { setHtml(body, notReady()); return; }
+
+  const wxSec = d ? (d.totalReadTime || 0) : 0;
+  const locSec = localReadSeconds(local && local.days, mode);
+  const both = keySet && local;         // 两份都在，才谈得上「合并」
+
+  const cmp = (d && typeof d.compare === 'number')
+    ? (d.compare >= 0 ? `+${Math.round(d.compare * 100)}%` : `${Math.round(d.compare * 100)}%`) : '';
   const box = (k, v) => `<div class="statbox"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   const bg = [
-    box('总时长', hrs(d.totalReadTime)),
-    box('阅读天数', `${d.readDays || 0}<small>天</small>`),
-    box('日均', hrs(d.dayAverageReadTime)),
-    box('与上期', cmp),
-  ].join('');
-  const stat = (d.readStat || []).map(s => box(esc(s.stat), esc(s.counts))).join('');
-  const top = (d.readLongest || []).slice(0, 6).map(x => {
+    box(both ? '合并时长' : '总时长', hrs(wxSec + locSec)),
+    d ? box('阅读天数', `${d.readDays || 0}<small>天</small>`)
+      : box('本机天数', `${((local && local.days) || []).length}<small>天</small>`),
+    d ? box('日均', hrs(d.dayAverageReadTime)) : '',
+    cmp ? box('与上期', cmp) : '',
+  ].filter(Boolean).join('');
+
+  // 两份账各占一格，放在一起才看得出「合并」是从哪两段拼出来的
+  const srcBox = both ? [
+    box('微信读书', hrs(wxSec)),
+    box('归藏本机', hrs(locSec)),
+  ].join('') : '';
+
+  const stat = d ? (d.readStat || []).map(s => box(esc(s.stat), esc(s.counts))).join('') : '';
+  const top = d ? (d.readLongest || []).slice(0, 6).map(x => {
     const info = x.book || x.albumInfo || {};
     return `<div class="wrrow"><span class="nm">${esc(info.title || '')}</span>
       <span class="ct">${Math.round((x.readTime || 0) / 60)} 分钟</span></div>`;
-  }).join('');
+  }).join('') : '';
   const html =
     `<div class="statgrid">${bg}</div>`
+    + (srcBox ? `<div class="statgrid">${srcBox}</div>` : '')
     + (stat ? `<div class="statgrid">${stat}</div>` : '')
-    + (d.preferTimeWord ? `<div class="emptyline" style="padding:6px 16px 12px">${esc(d.preferTimeWord)}</div>` : '')
+    + (d && d.preferTimeWord ? `<div class="emptyline" style="padding:6px 16px 12px">${esc(d.preferTimeWord)}</div>` : '')
     + (top ? `<div class="wrrow" style="border-top:1px solid var(--line)">
-        <span class="nm" style="color:var(--ink-3);font-size:11.5px">读得最多的</span></div>${top}` : '');
+        <span class="nm" style="color:var(--ink-3);font-size:11.5px">微信读书读得最多的</span></div>${top}` : '')
+    + localSection(local, mode);
   statsCache[mode] = html;
-  if ((window.__mode || 'monthly') === mode) setHtml(body, html);
+  if ((window.__mode || 'monthly') === mode) { setHtml(body, html); wireRsClear(body); }
 }
 
 /* ── 为我推荐（一次 6 本，随容器缩放） ── */
@@ -4568,6 +4790,11 @@ function readerSkeleton() {
     ' stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M2 6V3.6A1.6 1.6 0 0 1 3.6 2H6M10 2h2.4A1.6 1.6 0 0 1 14 3.6V6' +
     'M14 10v2.4a1.6 1.6 0 0 1-1.6 1.6H10M6 14H3.6A1.6 1.6 0 0 1 2 12.4V10"/></svg>';
+  const ask =
+    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"' +
+    ' stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M13.5 8.6c0 2.5-2.5 4.6-5.5 4.6-.7 0-1.4-.1-2-.3L3 14l.7-2.1' +
+    'C2.6 11 2 9.9 2 8.6 2 6.1 4.5 4 7.5 4s6 2.1 6 4.6Z"/></svg>';
   return `<div class="rdwrap" id="rdWrap">
     <div class="rdnav">
       <div class="rdnavhd">
@@ -4582,6 +4809,7 @@ function readerSkeleton() {
       <div class="rdbar">
         <span class="rdcrumb" id="rdCrumb"></span>
         <span class="grow"></span>
+        <button class="rdtool" id="rdAsk" title="问小助手（选中一段更准）" aria-label="问小助手">${ask}</button>
         <button class="rdtool" id="rdFocus" title="专注模式（F）" aria-label="专注模式">${icon}</button>
         <button class="rdtool" id="rdSet" title="阅读设置" aria-label="阅读设置">Aa</button>
         <div class="rdpop" id="rdPop">
@@ -4633,9 +4861,23 @@ function wireReader(p) {
     if (t.id === 'rdPrev') { rdGo(RD.at - 1); return; }
     if (t.id === 'rdNext') { rdGo(RD.at + 1); return; }
     if (t.dataset.dl) { rdDownload(t.dataset.dl); return; }
+    if (t.id === 'rdAsk') { rdAsk(); return; }
     if (t.id === 'rdFocus') { rdSetFocus(!document.body.classList.contains('focus')); return; }
     if (t.id === 'rdSet') { rdPopToggle(); return; }
     if (t.dataset.ch !== undefined) rdGo(+t.dataset.ch);
+  });
+  // 划词：拖选一段就贴出小条；单击英文单词直接查义。
+  // 「问」钮按下时 preventDefault —— 不让按钮抢走焦点、把选区弄没了。
+  p.addEventListener('mousedown', e => {
+    if (e.target.closest && e.target.closest('#rdAsk, #rdPrev, #rdNext')) e.preventDefault();
+    selDown = {x: e.clientX, y: e.clientY};
+  });
+  p.addEventListener('mouseup', e => {
+    if (selPop && selPop.contains(e.target)) return;      // 点在小条自己身上
+    const down = selDown; selDown = null;
+    const inBody = e.target.closest && e.target.closest('#rdScroll');
+    if (!inBody) return;
+    setTimeout(() => selAfterUp(e, down), 0);             // 等浏览器把选区定下来
   });
   p.addEventListener('input', e => {
     if (e.target.id === 'rdFilter') rdFilter(e.target.value);
@@ -4648,7 +4890,7 @@ function wireReader(p) {
   });
   // scroll 不冒泡，用捕获阶段听：每一章正文滚到哪，顶部进度线跟着走。
   p.addEventListener('scroll', e => {
-    if (e.target && e.target.id === 'rdScroll') rdProgress();
+    if (e.target && e.target.id === 'rdScroll') { rdProgress(); selPopHide(); }
   }, true);
 }
 
@@ -4683,6 +4925,7 @@ async function openReader(bookId, title, backPane) {
 
   RD.book = bookId; RD.title = title || bookId; RD.chapters = []; RD.at = -1;
   rdPaintPick();
+  rdTimeStart();                                    // 开书即开始记本机阅读时长
 
   let d;
   try {
@@ -4969,8 +5212,9 @@ document.addEventListener('keydown', e => {
     if (sc) { sc.scrollTo({top: sc.scrollHeight, behavior: 'smooth'}); e.preventDefault(); }
   }
   else if (e.key === 'Escape') {
+    if (selPop && selPop.classList.contains('show')) { selPopHide(); return; }   // 先收小条
     const pop = p && p.querySelector('#rdPop');
-    if (pop && pop.classList.contains('show')) { rdPopToggle(); return; }   // 先关面板
+    if (pop && pop.classList.contains('show')) { rdPopToggle(); return; }   // 再关面板
     backTo(RD.back);
   }
 });
@@ -4985,6 +5229,283 @@ document.addEventListener('click', e => {
 });
 
 rdLoadCfg();   // 开界面时就把本机阅读偏好读进来
+
+/* ── 本机阅读时长 ──────────────────────────
+   微信读书那边的时间由官方接口给；这一份记的是「在归藏阅读器里真正坐着读的时间」。
+   进阅读器开始计时，每 30 秒落一笔账，离开阅读器或切到后台就结清 —— 挂在别的窗口
+   上的时间不算读书。账目存在后端 cache/readstat.json，最后在「阅读统计」里
+   与微信读书那段合成一个总时长。 */
+
+let rdTimeBook = '';     // 正在计时的书 id
+let rdTimeAt = 0;        // 这一段起算的时刻（毫秒）
+let rdTimeTimer = null;  // 心跳
+
+function rdTimeFlush() {
+  if (!rdTimeBook || !rdTimeAt) return;
+  const sec = Math.round((Date.now() - rdTimeAt) / 1000);
+  rdTimeAt = Date.now();                 // 结完这段，从此刻重新起算
+  if (sec < 1) return;
+  // keepalive：切后台/关页那一刻这一笔也得发出去，别随页面一起被掐掉
+  try {
+    fetch('/api/readstat/tick', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({book: rdTimeBook, title: RD.title || '', seconds: sec}),
+      keepalive: true
+    });
+  } catch (e) { /* 记账失败不该影响读书 */ }
+}
+
+function rdTimeStart() {
+  if (!RD.book) return;
+  rdTimeStop();                          // 换书了，先把上一本结清
+  rdTimeBook = RD.book;
+  rdTimeAt = Date.now();
+  rdTimeTimer = setInterval(rdTimeFlush, 30000);
+}
+
+function rdTimeStop() {
+  rdTimeFlush();
+  rdTimeBook = '';
+  rdTimeAt = 0;
+  if (rdTimeTimer) { clearInterval(rdTimeTimer); rdTimeTimer = null; }
+}
+
+// 切到别的窗口就停表，回来看阅读器再接着计；关页前也补最后半笔
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) rdTimeStop();
+  else if (shownPane === 'read' && RD.book) rdTimeStart();
+});
+window.addEventListener('pagehide', rdTimeFlush);
+
+/* ── 划词小助手 ────────────────────────────
+   正文里选中一段，贴出「复制 / 译成中文 / 问小助手」；选中的正好是一个英文词，
+   先给「释义」。单击（没拖动）英文单词，直接弹一张释义卡 —— 其他语言不猜词，
+   只走长选。译与释义都问后端配置的那个兼容 OpenAI 的接口（/api/agent/quick）。 */
+
+let selPop = null;      // 浮动小条本体，懒建，挂在 body 上
+let selDown = null;     // 按下时的坐标，用来分辨「点一下」和「拖选」
+let selText = '';       // 最近一次选中的文字
+
+function selPopEl() {
+  if (selPop) return selPop;
+  selPop = document.createElement('div');
+  selPop.className = 'selpop';
+  selPop.id = 'selpop';
+  // 在小条上按下别把正文选区弄丢，也别触发外面的「点外收起」
+  selPop.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
+  document.body.append(selPop);
+  return selPop;
+}
+
+function selPopHide() {
+  if (selPop) selPop.classList.remove('show');
+  selText = '';
+}
+
+/** 摆位：默认贴在 (x,y) 上方居中，放不下就翻到下方，再夹回视口。 */
+function selPopPlace(x, y) {
+  const el = selPopEl();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let left = x - w / 2;
+  let top = y - h - 9;
+  if (top < 8) top = y + 18;
+  left = Math.max(8, Math.min(vw - w - 8, left));
+  top = Math.max(8, Math.min(vh - h - 8, top));
+  el.style.left = Math.round(left) + 'px';
+  el.style.top = Math.round(top) + 'px';
+}
+
+/** 工具条模式：一排按钮。 */
+function selPopBar(x, y, items) {
+  const el = selPopEl();
+  const bar = document.createElement('div');
+  bar.className = 'selbar';
+  items.forEach(it => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = it.label;
+    b.onclick = () => it.fn();
+    bar.append(b);
+  });
+  el.replaceChildren(bar);
+  el.classList.add('show');
+  selPopPlace(x, y);
+}
+
+/** 答案卡模式：标题 + 正文；busy 时先给个「在问」。返回正文节点供回填。 */
+function selPopCard(x, y, title) {
+  const el = selPopEl();
+  const card = document.createElement('div');
+  card.className = 'selcard';
+  const hd = document.createElement('span');
+  hd.className = 'hd';
+  hd.textContent = title;
+  const bd = document.createElement('div');
+  bd.className = 'bd spin';
+  bd.textContent = '在问';
+  card.append(hd, bd);
+  el.replaceChildren(card);
+  el.classList.add('show');
+  selPopPlace(x, y);
+  return bd;
+}
+
+/** 划词/点词去问一次，等完整答案，边等边把卡的尺寸摆正。 */
+async function selAskCard(x, y, title, mode, text, ctx) {
+  const bd = selPopCard(x, y, title);
+  let j;
+  try {
+    const r = await fetch('/api/agent/quick', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode, text, ctx: ctx || ''}),
+    });
+    j = await r.json();
+  } catch (e) {
+    bd.className = 'bd err';
+    bd.textContent = '连不上本地服务';
+    selPopPlace(x, y);
+    return;
+  }
+  bd.className = 'bd' + (j.ok ? '' : ' err');
+  bd.textContent = j.ok ? (j.text || '（空）') : (j.msg || '没问出结果');
+  selPopPlace(x, y);
+}
+
+/** 复制：优先走剪贴板 API，退回 textarea 选中。 */
+function selCopy(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => whisper('已复制'),
+      () => selCopyFallback(text));
+  } else selCopyFallback(text);
+}
+function selCopyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.append(ta); ta.select();
+  try { document.execCommand('copy'); whisper('已复制'); } catch (e) { whisper('复制没成'); }
+  ta.remove();
+}
+
+/** 认指针下面的英文单词：取点击处的字符，向两边扩到词边界。
+ *  只认英文（允许词内连字符与撇号）；中文、日文等不猜词，走长选。 */
+function selWordAt(x, y) {
+  let node = null, off = 0;
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (r) { node = r.startContainer; off = r.startOffset; }
+  } else if (document.caretPositionFromPoint) {
+    const r = document.caretPositionFromPoint(x, y);
+    if (r) { node = r.offsetNode; off = r.offset; }
+  }
+  if (!node || node.nodeType !== 3) return '';
+  const data = node.data || '';
+  if (!data) return '';
+  const isW = c => /[A-Za-z'’-]/.test(c);
+  let i = Math.min(off, data.length - 1);
+  if (!isW(data[i]) && i > 0 && isW(data[i - 1])) i -= 1;
+  if (!isW(data[i])) return '';
+  let a = i, b = i;
+  while (a > 0 && isW(data[a - 1])) a--;
+  while (b < data.length - 1 && isW(data[b + 1])) b++;
+  const w = data.slice(a, b + 1).replace(/^['’-]+|['’-]+$/g, '');
+  return /^[A-Za-z][A-Za-z'’-]+$/.test(w) ? w : '';
+}
+
+/** 指针所在那一段的纯文字，给译/释义当消歧上下文。取最近的块级元素，截 320 字。 */
+function selParaAt(x, y) {
+  let node = null;
+  if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); node = r && r.startContainer; }
+  else if (document.caretPositionFromPoint) { const r = document.caretPositionFromPoint(x, y); node = r && r.offsetNode; }
+  if (!node) return '';
+  let el = node.nodeType === 1 ? node : node.parentElement;
+  while (el && el !== document.body &&
+    !/^(P|LI|BLOCKQUOTE|H1|H2|H3|H4|TD|TH|DD|FIGCAPTION)$/.test(el.tagName)
+    && !el.classList.contains('md')) el = el.parentElement;
+  // 兜到根容器上了：退一步，取包含这个节点的直接子块
+  if (el && el.classList.contains('md')) {
+    let c = node.nodeType === 1 ? node : node.parentElement;
+    while (c && c.parentElement && c.parentElement !== el) c = c.parentElement;
+    if (c && c !== el) el = c;
+  }
+  return el ? (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 320) : '';
+}
+
+/** 鼠标松开之后定夺：有选区走工具条，没选区才试着认单词。 */
+function selAfterUp(e, down) {
+  const sel = window.getSelection();
+  const txt = sel && !sel.isCollapsed ? String(sel).trim() : '';
+  const moved = down ? Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) : 99;
+
+  if (txt && txt.length > 1) {
+    const p = PANES.read;
+    if (!p || !sel.anchorNode || !p.contains(sel.anchorNode)) { selPopHide(); return; }
+    selShowBar(sel, e.clientX, e.clientY, txt);
+    return;
+  }
+  if (moved > 6) { selPopHide(); return; }      // 拖了一把却没选上，不收就算了
+  const w = selWordAt(e.clientX, e.clientY);
+  if (w) {
+    selText = w;
+    selAskCard(e.clientX, e.clientY, w, 'word', w, selParaAt(e.clientX, e.clientY));
+  } else selPopHide();
+}
+
+/** 选中一段：贴出小条。锚点取选区上沿中点，贴着文字走。 */
+function selShowBar(sel, cx, cy, txt) {
+  selText = txt;
+  let x = cx, y = cy;
+  try {
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    if (r && r.width) { x = r.left + r.width / 2; y = r.top; }
+  } catch (e) { /* 用落点 */ }
+  const ctx = selParaAt(x, y);
+  const single = /^[A-Za-z][A-Za-z'’-]+$/.test(txt);
+  const items = [];
+  if (single) items.push({label: '释义', fn: () => selAskCard(x, y, txt, 'word', txt, ctx)});
+  items.push({label: '复制', fn: () => { selCopy(txt); selPopHide(); }});
+  items.push({label: '译成中文', fn: () =>
+    selAskCard(x, y, txt.length > 16 ? txt.slice(0, 15) + '…' : txt, 'translate', txt, ctx)});
+  items.push({label: '问小助手', fn: () => selAskAgent(txt, ctx)});
+  selPopBar(x, y, items);
+}
+
+/** 把选段递给右下角的小助手：带上「正在读哪本·哪章」当引子。 */
+function selAskAgent(text, ctx) {
+  selPopHide();
+  const where = RD.title
+    ? '我正在读《' + RD.title + '》' + (RD.chapters[RD.at] ? '·' + RD.chapters[RD.at].title : '') + '。'
+    : '';
+  agOpen(true);
+  agAsk(where + '帮我讲讲这一段：\n' + text, ctx ? '这一段在原文的上下文：' + ctx : '');
+}
+
+/** 阅读条上的「问」：有选中就把选段当引子，没有就单开面板。 */
+function rdAsk() {
+  const sel = window.getSelection();
+  const p = PANES.read;
+  if (sel && !sel.isCollapsed && sel.anchorNode && p && p.contains(sel.anchorNode)) {
+    const txt = String(sel).trim();
+    if (txt.length > 1) {
+      let x = 0, y = 0;
+      try { const r = sel.getRangeAt(0).getBoundingClientRect(); x = r.left + r.width / 2; y = r.top; } catch (e) {}
+      selShowBar(sel, x, y, txt);
+      return;
+    }
+  }
+  if (!agReady()) { whisper('先在设置里配好小助手接口'); agOpen(true); return; }
+  agOpen(true);
+}
+
+/** 点界面别处收掉小条。 */
+document.addEventListener('click', e => {
+  if (!selPop || !selPop.classList.contains('show')) return;
+  if (e.target.closest && e.target.closest('#selpop')) return;
+  selPopHide();
+});
+window.addEventListener('scroll', () => selPopHide(), true);
+window.addEventListener('resize', () => selPopHide());
 
 /* ── 笔记索引 / 卡片 ──────────────────── */
 
@@ -5419,7 +5940,7 @@ function agentContext() {
   return out.join('\n');
 }
 
-async function agAsk(text) {
+async function agAsk(text, extraCtx) {
   const q = (text || '').trim();
   if (!q || agBusy) return;
   if (!agReady()) {
@@ -5451,7 +5972,8 @@ async function agAsk(text) {
   try {
     const r = await fetch('/api/agent/chat', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({q, history, ctx: agentContext()}),
+      body: JSON.stringify({q, history,
+        ctx: [agentContext(), (extraCtx || '').trim()].filter(Boolean).join('\n\n')}),
     });
     if (!r.ok || !r.body) throw new Error('本机服务没有响应');
     const rd = r.body.getReader();
@@ -5572,6 +6094,213 @@ $('#agenttest').onclick = async () => {
     btn.textContent = keep;
   }
 };
+
+/* ── 云同步（设置里那一块） ─────────────
+   通道与协议都在后端 sync.py，这边只管把状态画出来、把几个动作发出去。
+   注意：sync / readstat 这些是各自的 POST 路由，不走 /api/action，
+   所以直接 fetch，不能用上面那个 post() 助手。 */
+
+let syncCfg = {};         // 后端回的那份状态（密码 / 令牌只回「填没填」）
+let syncProv = '';        // 界面上正选着的通道：webdav / onedrive
+let syncFilled = false;   // 地址那几栏只回填一次，别把用户正改的值顶掉
+let syncDirty = false;    // 用户动过就先把回填停下，别让 2.6s 一次的刷状态把勾选改回去
+let msPoll = null;        // OneDrive 设备码轮询句柄
+
+function spost(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {}),
+  }).then(r => r.json());
+}
+
+/** 把设置里那几栏读成一份请求体。空密码 = 「不改」，交给后端按原值留着。 */
+function syncForm() {
+  return {
+    enabled: !!syncCfg.enabled,
+    provider: syncProv,
+    webdav: {url: ($('#syncUrl') || {}).value || '',
+             user: ($('#syncUser') || {}).value || '',
+             pass: ($('#syncPass') || {}).value || ''},
+    onedrive: {client_id: ($('#syncClient') || {}).value || ''},
+    what: {time: !!($('#swTime') || {}).checked,
+           records: !!($('#swRecords') || {}).checked,
+           books: !!($('#swBooks') || {}).checked},
+  };
+}
+
+function paintSync(cfg) {
+  syncCfg = cfg || {};
+  if (!syncProv) syncProv = syncCfg.provider || '';
+
+  const st = $('#v-sync');
+  if (st) {
+    const on = !!syncCfg.enabled;
+    const txt = on
+      ? (syncCfg.provider === 'onedrive' ? 'OneDrive 已开'
+        : syncCfg.provider === 'webdav' ? 'WebDAV 已开' : '已开启')
+      : '未开启';
+    const cls = 'live' + (on ? ' on' : '');
+    if (st.dataset.t !== txt) {              // 只在变的时候写，免得呼吸点动画每 2.6s 重来一次
+      st.dataset.t = txt;
+      st.textContent = txt;
+      st.prepend(document.createElement('b'));
+    }
+    if (st.dataset.c !== cls) { st.dataset.c = cls; st.className = cls; }
+  }
+
+  const on = $('#syncOn');
+  if (on) on.textContent = syncCfg.enabled ? '关闭同步' : '开启同步';
+
+  const prov = $('#syncProv');
+  if (prov) [...prov.querySelectorAll('button')].forEach(b =>
+    b.classList.toggle('on', b.dataset.p === syncProv));
+  const dav = $('#syncDavBox');
+  const ms = $('#syncMsBox');
+  if (dav) dav.style.display = syncProv === 'onedrive' ? 'none' : '';
+  if (ms) ms.style.display = syncProv === 'webdav' ? 'none' : '';
+
+  if (!syncFilled && !syncDirty && (syncCfg.webdav || syncCfg.onedrive)) {
+    syncFilled = true;
+    const u = $('#syncUrl');   if (u) u.value = (syncCfg.webdav || {}).url || '';
+    const n = $('#syncUser');  if (n) n.value = (syncCfg.webdav || {}).user || '';
+    const c = $('#syncClient'); if (c) c.value = (syncCfg.onedrive || {}).client_id || '';
+  }
+  const pu = $('#syncPass');
+  if (pu) pu.placeholder = (syncCfg.webdav || {}).pass_set ? '已保存 ····' : '在这儿填密码';
+
+  const authed = !!((syncCfg.onedrive || {}).authed);
+  const auth = $('#v-msauth');
+  if (auth) auth.textContent = authed ? '已授权' : '未授权';
+  const authBtn = $('#syncAuth');
+  if (authBtn) authBtn.textContent = authed ? '重新授权' : '去授权';
+
+  if (!syncDirty) {
+    const w = syncCfg.what || {};
+    const t = $('#swTime');    if (t) t.checked = !!w.time;
+    const r = $('#swRecords'); if (r) r.checked = !!w.records;
+    const b = $('#swBooks');   if (b) b.checked = !!w.books;
+  }
+
+  const last = $('#v-synclast');
+  if (last) {
+    const l = syncCfg.last || {};
+    last.textContent = l.at ? (when(l.at) + ' · ' + (l.msg || '完成')) : '还没同步过';
+  }
+}
+
+function stopMsPoll() { if (msPoll) { clearTimeout(msPoll); msPoll = null; } }
+
+function startMsPoll(sec) {
+  stopMsPoll();
+  let tries = 0;
+  const tick = async () => {
+    if (++tries > 120) { stopMsPoll(); return; }   // 约十分钟封顶，别一直敲
+    let r = null;
+    try { r = await spost('/api/sync/onedrive/poll'); } catch (e) { r = null; }
+    if (r && r.ok) {
+      stopMsPoll();
+      whisper(r.msg || '授权成功');
+      if (r.sync) paintSync(r.sync);
+      closeSheet();
+      return;
+    }
+    if (r && r.msg && /过期|重新/.test(r.msg)) { stopMsPoll(); return; }
+    msPoll = setTimeout(tick, Math.max(3, sec) * 1000);
+  };
+  msPoll = setTimeout(tick, Math.max(3, sec) * 1000);
+}
+
+$('#syncProv').onclick = e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  syncProv = b.dataset.p;
+  paintSync(syncCfg);
+};
+
+$('#syncOn').onclick = async () => {
+  const next = !syncCfg.enabled;
+  syncProv = syncProv || syncCfg.provider || '';
+  if (next && !syncProv) { whisper('先选一个云服务：WebDAV 或 OneDrive'); return; }
+  const btn = $('#syncOn');
+  btn.disabled = true;
+  try {
+    const r = await spost('/api/sync/save',
+      {cfg: Object.assign(syncForm(), {enabled: next, provider: syncProv})});
+    whisper(r.msg || (r.ok ? '已保存' : '没存上'));
+    if (r.ok) { syncCfg = r.sync || syncCfg; syncDirty = false; }
+    if (r.sync) paintSync(r.sync);
+  } catch (e) { whisper('存不动：本机服务没响应'); }
+  finally { btn.disabled = false; }
+};
+
+$('#syncSave').onclick = async () => {
+  syncProv = syncProv || '';
+  if (!syncProv) { whisper('先选一个云服务：WebDAV 或 OneDrive'); return; }
+  const btn = $('#syncSave');
+  btn.disabled = true;
+  try {
+    const r = await spost('/api/sync/save', {cfg: syncForm()});
+    whisper(r.msg || (r.ok ? '已保存' : '没存上'));
+    if (r.ok) { syncDirty = false; $('#syncPass').value = ''; }
+    if (r.sync) paintSync(r.sync);
+  } catch (e) { whisper('存不动：本机服务没响应'); }
+  finally { btn.disabled = false; }
+};
+
+$('#syncTest').onclick = async () => {
+  const btn = $('#syncTest');
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '测…';
+  try {
+    const r = await spost('/api/sync/test');
+    whisper(r.msg || (r.ok ? '连上了' : '没连上'));
+  } catch (e) { whisper('测不动：本机服务没响应'); }
+  finally { btn.disabled = false; btn.textContent = keep; }
+};
+
+$('#syncNow').onclick = async () => {
+  const btn = $('#syncNow');
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '同步中…';
+  try {
+    const r = await spost('/api/sync/now');
+    whisper(r.msg || (r.ok ? '同步完成' : '没同步成'));
+    if (r.sync) paintSync(r.sync);
+  } catch (e) { whisper('同步失败：本机服务没响应'); }
+  finally { btn.disabled = false; btn.textContent = keep; }
+};
+
+$('#syncAuth').onclick = async () => {
+  const btn = $('#syncAuth');
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '取码…';
+  try {
+    const r = await spost('/api/sync/onedrive/start');
+    if (!r.ok) { whisper(r.msg || '发起授权失败'); return; }
+    const info = r.info || {};
+    sheet({
+      title: 'OneDrive 去授权',
+      text: '照下面这串代码，去微软页面登录一次就授权好了（登一次会记住）。授权成功后这里会自己提示。',
+      body: (info.user_code || '') + '\n\n' + (info.verify_uri || ''),
+      actions: [{label: '知道了', lead: true}],
+    });
+    startMsPoll(info.interval || 5);
+  } catch (e) { whisper('取码失败：本机服务没响应'); }
+  finally { btn.disabled = false; btn.textContent = keep; }
+};
+
+/* 这一块里动过任何一栏，就先别让刷状态把值顶回去；保存成功后再放开。 */
+['#syncUrl', '#syncUser', '#syncPass', '#syncClient', '#swTime', '#swRecords', '#swBooks']
+  .forEach(sel => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener('input', () => { syncDirty = true; });
+    el.addEventListener('change', () => { syncDirty = true; });
+  });
 
 /* ── 启动 ─────────────────────────────── */
 renderView();
