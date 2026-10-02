@@ -483,6 +483,53 @@ def load_used_titles(md_dir):
     return used
 
 
+def load_catalog_ordered(catalog_path):
+    """目录标题，**保持目录里的原序**（顺序就是 DOM 里的顺序）。
+
+    和 load_catalog_titles 分工不同：那个按长度降序排、只服务「正文标题匹配」
+    （长标题优先，免得短标题抢先咬走长标题的前缀）；这个要的是「第几项」，
+    用来把阅读器的位置用目录钉到「第一个还没写出来的章节」。两者都从同一份
+    _catalog.json 来，dump_catalog_titles 存的就是 DOM 顺序，所以下标是对得上的。
+    """
+    try:
+        with open(catalog_path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return []
+    out = []
+    for t in raw:
+        t = re.split(r"当前读到", t or "")[0].strip()
+        if t:
+            out.append((norm_title(t), t))
+    return out
+
+
+def resume_catalog_index(catalog_path, md_dir):
+    """断点续传该从目录第几项接着读 = 「最后一个已写出项」的下一项。
+
+    为什么不取「第一个缺项」：目录里的「缺」有一大半是假缺 —— 标题没被正文单独
+    画出来（跟正文粘在同一个块里），于是匹配不上、切不出章，可它的正文其实已经
+    落在相邻那章里了（实测《你身体里的奥秘》：223 项只切出 84 章，缺的散在
+    1、2、11、14~30… 中段，而 弱视/谵妄的症状 这些「缺项」的文字在成书里搜得到）。
+    真按第一个缺项重读一遍，已写出的几章内容会被整段塞进下一个缺章 —— 那是重复，
+    不是补缺。而阅读本来就是顺序的，所以正确的续传语义是「接着往下读」：
+    从最后一个写出来的目录项之后继续。这样每一轮都能往前推进，也不会重复。
+    """
+    ordered = load_catalog_ordered(catalog_path)
+    if not ordered:
+        return None
+    used = load_used_titles(md_dir)
+    last = -1
+    for i, (n, _o) in enumerate(ordered):
+        if n in used:
+            last = i
+    if last < 0:
+        return 0              # 一章都没写出来：从目录第一项开始
+    if last + 1 >= len(ordered):
+        return None           # 目录末项都写出来了，没有「下一项」可续
+    return last + 1
+
+
 def match_heading(line, titles, used):
     """这一行是不是某个目录标题（可能后面直接粘了正文，或被换行截断）。"""
     nline = norm_title(line)
@@ -743,17 +790,29 @@ async def dismiss_masks(page):
         pass
 
 
-async def jump_to_first_item(page):
-    """打开目录 → 点首项 → 关掉目录。跳到全书开头的动作本体。"""
+async def jump_to_catalog_item(page, idx=0):
+    """打开目录 → 点第 idx 项 → 关掉目录。跳到全书开头（idx=0）或断点续传的落点。
+
+    目录列表在 DOM 里是整份渲染的（不是虚拟滚动），所以第 idx 项一定拿得到；
+    跨屏的那一项要先滚进视野里才点得着。idx=0 就是原来的 jump_to_first_item，
+    实测那个「先把滚动条置 0」的动作对首项仍然最稳，保留。
+    """
     await dismiss_masks(page)
     await page.click("button.readerControls_item.catalog", timeout=5000)
     await asyncio.sleep(1.5)
-    await page.evaluate("""() => {
-        const sc = document.querySelector('.readerCatalog_list_scroll_area, [class*="readerCatalog_list_scroll"]');
-        if (sc) sc.scrollTop = 0;
-    }""")
-    await asyncio.sleep(1)
-    item = page.locator(".readerCatalog_list_item").first
+    if idx == 0:
+        await page.evaluate("""() => {
+            const sc = document.querySelector('.readerCatalog_list_scroll_area, [class*="readerCatalog_list_scroll"]');
+            if (sc) sc.scrollTop = 0;
+        }""")
+        await asyncio.sleep(1)
+    item = page.locator(".readerCatalog_list_item").nth(idx)
+    if idx:
+        try:
+            await item.scroll_into_view_if_needed(timeout=4000)
+            await asyncio.sleep(0.6)
+        except Exception:
+            pass
     text = (await item.text_content() or "").strip()
     if not text:
         # 目录还挂着浮层时点下去是空的（实测过），收掉再取一次
@@ -768,6 +827,11 @@ async def jump_to_first_item(page):
         await page.keyboard.press("Escape")
     await asyncio.sleep(2)
     return text
+
+
+async def jump_to_first_item(page):
+    """跳到全书开头的动作本体（目录首项）。"""
+    return await jump_to_catalog_item(page, 0)
 
 
 async def ensure_first_chapter(page, catalog_path, tries=3):
@@ -908,7 +972,7 @@ async def goto_ready(page, url, timeout=30000, need_canvas=True):
 
 async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
                       goto_first=False, catalog_path=None,
-                      book_dir=None, deadline=None):
+                      book_dir=None, deadline=None, resume_at=None):
     reached_end = False
     t0 = time.time()
     # deadline = 整次导出还剩下多少秒（墙钟）。本轮最多用 min(单轮预算, 剩余)。
@@ -1004,6 +1068,18 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
             await page.mouse.click(600, 450)
             await asyncio.sleep(0.8)
             await run_bounded(wait_position_settled(page), 25, "等阅读器恢复上次位置")
+
+        if resume_at is not None:
+            # 断点重定位续传：阅读器自己的「上次读到」有时停在一个再也翻不出内容
+            # 的地方（实测《你身体里的奥秘》卡在 84/223：重跑照样落在同一个死点，
+            # 方向键按 12 次一个字都抓不到，外层就因为「本轮没有写出新章节」永久收工）。
+            # 这时候只有目录能把位置拽回来：直接点到「第一个还没写出来的章节」。
+            # 上面那一下点击 + 等落定照做（它唤醒恢复动作，先让它落定才不跟跳转打架）；
+            # 跳完绝对不再点正文中心 —— 一点就被拉回旧阅读位置（见 one_turn 注释）。
+            land_title = (await run_bounded(jump_to_catalog_item(page, resume_at),
+                                            PREP_TIMEOUT, "按目录定位到续传章节")) or ""
+            land_title = re.split(r"当前读到", land_title)[0].strip()
+            print(f"  ↻ 已用目录重新定位到第 {resume_at + 1} 项:「{land_title}」")
 
         current_chapter = await run_bounded(_title(page), 20, "读取章节名")
         print(f"  📖 {book_title} — {book_author}")
@@ -1130,7 +1206,8 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
         # one_turn 是「翻页 → 抓这一页」，所以刚跳到的那一页永远抓不到。
         # 钩子已经在跳转前清过空，此刻里面正是开头那一屏，直接收下即可。
         # 续传时不能这么干 —— 阅读器停在上一轮已经写过的那一页，抓了就是把同一页写两遍。
-        async def capture_landing():
+        # want_title/jump_idx 是给「目录重定位续传」用的：落在哪一章、钩子空时该重跳哪一项。
+        async def capture_landing(want_title=None, jump_idx=0):
             blocks = await hook_blocks(page, seen_imgs)
             if not blocks:
                 # 跳到开头之后，那一屏常常根本不长新东西 —— 实测从跳完那一刻逐秒
@@ -1154,24 +1231,32 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
                     blocks = blocks[n_fwd:]
                 elif not blocks:
                     # 连翻带退都榨不出东西：退回用整屏原始钩子，收尾靠目录核对缺章。
+                    # 重跳的还是同一项（开头就跳首项，续传就跳落点那一项）。
                     await page.evaluate("() => window.__wr_reset()")
-                    await jump_to_first_item(page)
+                    await jump_to_catalog_item(page, jump_idx)
                     await wait_settled(page)
                     blocks = await snapshot(page, seen_imgs)
-            want = bare(first_catalog_title(catalog_path)) if titles else ""
+            want = bare(want_title) if want_title else (
+                bare(first_catalog_title(catalog_path)) if titles else "")
             at = front_title_index(blocks, want)
             top = await _title(page) if titles else ""
             if at is None:
-                print(f"  ⚠️  开头这一屏认不出首章标题「{want}」（当前:「{top}」），"
+                print(f"  ⚠️  这一屏认不出首章标题「{want}」（当前:「{top}」），"
                       f"按原样收下 {len(blocks)} 块，收尾时会核对目录是否缺章")
                 at = 0
             elif at:
-                print(f"  开头这一屏前 {at} 块是「上次读到」的残留，丢掉")
+                print(f"  这一屏前 {at} 块是「上次读到」的残留，丢掉")
             return await capture_current_page(top, blocks=blocks[at:])
 
         if goto_first:
             landed = await run_bounded(capture_landing(), ITER_TIMEOUT, "开头这一页")
             print(f"  开头这一页抓到 {landed} 块（不抓就会丢掉全书最前面的内容）", flush=True)
+        elif resume_at is not None:
+            # 目录跳转同样会强制重画，但第一屏也可能已经画过 —— 走和「开头这一页」
+            # 一模一样的收法，别让续传章节的第一屏也跟着丢掉。
+            landed = await run_bounded(capture_landing(land_title, resume_at),
+                                       ITER_TIMEOUT, "续传这一页")
+            print(f"  续传这一页抓到 {landed} 块", flush=True)
 
         # 首页：开头那一屏已经由 capture_landing 收下了，这里从「翻一页」开始。
         await run_bounded(one_turn(), ITER_TIMEOUT, "开头后的第一轮")
@@ -1321,6 +1406,9 @@ async def main(book_id):
     # 用户按成功去用那份 md，才发现少了大半 —— 这是比抓不到更糟的骗人。
     full_book = False
     stop_reason = ""
+    # 上一轮是不是「一章都没写出来」。是的话下一轮不赌阅读器自己的「上次读到」，
+    # 改用目录把落点钉到第一个还没写出来的章节（见 resume_at）。
+    recovering = False
     while session < MAX_SESSIONS:
         if STOP:
             stop_reason = "用户中止"
@@ -1338,12 +1426,22 @@ async def main(book_id):
         print(f"\n--- 会话 {session} ---")
         print(f"  上次: {last_title or '(无)'}, 编号: {last_idx}")
         goto_first = (session == 1 and last_idx == 0)
+        resume_at = None
+        if recovering:
+            resume_at = resume_catalog_index(catalog_path, md_dir)
+            if resume_at is None:
+                stop_reason = "已读到目录最后一项，没法再往下读"
+                print("\n  已经读到目录最后一项了 —— 再往下没有新章节可读。"
+                      "\n  收尾时若还列出「缺项」，那些多半是标题没被正文单独画出来"
+                      "（跟正文粘在同一段里），文字已在相邻章节中，不是漏抓。")
+                break
+            print(f"  ↻ 改用目录定位续传：从目录第 {resume_at + 1} 项接着读")
         kill_stray_browsers()   # 上一轮卡死/异常留下的浏览器会占着 profile，先清掉再起
         try:
             title, author, added, chars_added, end_idx, reached_end = await run_session(
                 book_id, md_dir, raw_dir, start_idx, seen_imgs,
                 goto_first=goto_first, catalog_path=catalog_path,
-                book_dir=book_dir, deadline=left)
+                book_dir=book_dir, deadline=left, resume_at=resume_at)
             fails = 0
         except Exception as e:
             # 浏览器被关掉 / 渲染进程卡死 / 页面崩掉：都不丢弃已导出的章节，
@@ -1373,8 +1471,18 @@ async def main(book_id):
         if added == 0:
             # 关键：这里数的是「真的写出了内容的章节数」。
             # 旧实现数的是「顶栏标题变化次数」，而顶栏每翻一页都会变 → 每轮都 >0 → 死循环。
-            stop_reason = "本轮没有写出新章节"
-            print("\n  本轮没有写出任何新章节，先收尾。"); break
+            if not recovering:
+                # 但「本轮 0 章」不等于到头了：阅读器自己的「上次读到」可能停在一个
+                # 再也翻不出内容的地方，重跑还会落在同一个点上（这就是《你身体里的
+                # 奥秘》永久卡在 84/223 的原因）。给它一次「用目录重新定位」的机会。
+                recovering = True
+                print("\n  本轮没有写出新章节 —— 换用目录重新定位续传，再试一轮。")
+                await asyncio.sleep(2)
+                continue
+            stop_reason = "目录重新定位后仍然写不出新章节"
+            print("\n  重新定位后仍然没有写出新章节，先收尾。已导出的章节都在。")
+            break
+        recovering = False      # 有进展，后面的会话恢复正常续传
         print("  3 秒后自动重开继续..."); await asyncio.sleep(3)
     else:
         stop_reason = f"会话数达到上限 {MAX_SESSIONS}"

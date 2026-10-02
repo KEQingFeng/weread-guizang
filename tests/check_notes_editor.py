@@ -158,6 +158,95 @@ def main():
         chk("前端：正文里出现了可点的划线",
             page.evaluate("() => document.querySelectorAll('#rdBody mark.gzmk').length") == 1)
 
+        # ── 笔记栏里那道划线下的「写想法」────────────────────
+        # 这颗钮是在 click 里同步把小条 show 出来的，而这一下 click 还会继续冒泡到
+        # document 上「点别处就把小条收掉」那条监听 —— 同一个事件里刚摊开就被自己收走，
+        # 表现就是「点写想法毫无反应」。这里用真鼠标点（事件照常冒泡），守住这条。
+        #
+        # 动它之前得先 hover 那一行：动作条平时是 max-height:0 收着的，按钮虽然
+        # 有几何尺寸，却整条被裁掉、点不着 —— 直接按收起时的矩形去点会打空。
+        page.evaluate("() => rdSetPane('notes', true)")
+        page.wait_for_timeout(200)
+        row_q = page.evaluate("""() => {
+          const r = document.querySelector('#ntList .ntrow[data-mk] .q').getBoundingClientRect();
+          return [Math.round(r.x + 40), Math.round(r.y + r.height / 2)];
+        }""")
+        page.mouse.move(row_q[0], row_q[1])
+        page.wait_for_timeout(460)                     # 等动作条浮出来（.18s 展开）
+        memo_btn = page.evaluate("""() => {
+          const b = document.querySelector('#ntList .ntrow[data-mk] button[data-act=memo]');
+          if (!b) return null;
+          const r = b.getBoundingClientRect();
+          const hit = document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                                Math.round(r.y + r.height / 2));
+          return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2),
+                  b.textContent.trim(), hit === b];
+        }""")
+        chk("笔记栏：划到那一行上，下面浮出可点的「写想法」",
+            bool(memo_btn) and memo_btn[2] == "写想法" and memo_btn[3], memo_btn)
+        pop = None
+        if memo_btn:
+            page.mouse.click(memo_btn[0], memo_btn[1])
+            page.wait_for_timeout(320)
+            pop = page.evaluate("""() => {
+              const el = document.getElementById('selpop');
+              if (!el || !el.classList.contains('show')) return null;
+              const r = el.getBoundingClientRect();
+              const ta = el.querySelector('.selnote textarea');
+              return {q: (el.querySelector('.selnote .q') || {}).textContent || '',
+                      val: ta ? ta.value : null,
+                      focused: ta ? document.activeElement === ta : false,
+                      onscreen: r.width > 120 && r.left >= 0 && r.top >= 0
+                                && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1};
+            }""")
+        chk("写想法：点一下真摊出小条（没被「点别处」当场收走）", bool(pop), pop)
+        chk("写想法：小条上带着这句原文", bool(pop) and pop["q"] == picked, pop)
+        chk("写想法：光标已经落进输入框", bool(pop) and pop["focused"], pop)
+        chk("写想法：小条整个落在视口里", bool(pop) and pop["onscreen"], pop)
+
+        if pop:
+            page.fill("#selpop .selnote textarea", "这一句是要点，回头写进卡片。")
+            page.evaluate("() => document.querySelector('#selpop .selnote .go').click()")
+            page.wait_for_timeout(300)
+            settled()
+            chk("写想法：存完小条自己收起",
+                page.evaluate("() => { const e = document.getElementById('selpop');"
+                              "return !e || !e.classList.contains('show'); }"))
+            chk("写想法：那一行上显出这句想法",
+                page.evaluate("""() => {
+                  const m = document.querySelector('#ntList .ntrow[data-mk] .memo');
+                  return m ? m.textContent : '';
+                }""") == "这一句是要点，回头写进卡片。")
+            chk("写想法：钮改口叫「改想法」",
+                page.evaluate("""() => {
+                  const b = document.querySelector('#ntList .ntrow[data-mk] button[data-act=memo]');
+                  return b ? b.textContent.trim() : '';
+                }""") == "改想法")
+            mks = ((get("/api/mynotes?book=" + BOOK).get("doc") or {}).get("marks") or [])
+            chk("写想法：跟着这一笔落盘到书文件夹",
+                bool(mks) and mks[0].get("memo") == "这一句是要点，回头写进卡片。", mks[:1])
+
+            # 再走一遍「改想法」：这回得把已经存下的那句捞回输入框
+            page.mouse.move(row_q[0], row_q[1])
+            page.wait_for_timeout(460)
+            again = page.evaluate("""() => {
+              const b = document.querySelector('#ntList .ntrow[data-mk] button[data-act=memo]');
+              const r = b.getBoundingClientRect();
+              return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2),
+                      b.textContent.trim()];
+            }""")
+            page.mouse.click(again[0], again[1])
+            page.wait_for_timeout(320)
+            chk("写想法：钮确实改口叫「改想法」", again[2] == "改想法", again)
+            chk("写想法：改的时候把存过的那句捞回输入框",
+                page.evaluate("""() => {
+                  const ta = document.querySelector('#selpop .selnote textarea');
+                  return ta ? ta.value : '';
+                }""") == "这一句是要点，回头写进卡片。")
+            page.evaluate("() => selPopHide()")
+        else:
+            chk("写想法：小条都没开，后面几条存盘断言一并记失败", False, "no popup")
+
         # ── 开编辑器 ─────────────────────────────────────
         page.evaluate("() => document.querySelector('#rdBody mark.gzmk').click()")
         page.wait_for_timeout(260)
