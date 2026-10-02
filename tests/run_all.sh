@@ -46,6 +46,12 @@ run "内联 JS 语法" "$PY" tests/check_inline_js.py
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
+# 三条新线（订阅 / 视频 / 平台解析）都是离线自测：夹具跑在本机临时 http.server 上，
+# 数据目录全指进各自沙盒，不联网、不碰用户真实书库。
+run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.py
+run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
+run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
+run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
@@ -99,6 +105,7 @@ fresh_shelf; run "视口回归" "$PY" tests/check_viewports.py "$BASE"
 fresh_shelf; run "书架交互" "$PY" tests/check_shelf.py "$BASE"
 fresh_shelf; run "笔记编辑器" "$PY" tests/check_notes_editor.py "$BASE"
 fresh_shelf; run "阅读器续读与大纲" "$PY" tests/check_reader_flow.py "$BASE"
+fresh_shelf; run "订阅与视频两屏" "$PY" tests/check_media_views.py "$BASE"
 run "首启页" "$PY" tests/check_onboarding.py
 fresh_shelf; run "异常兜底" "$PY" tests/test_server_fallback.py
 

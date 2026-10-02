@@ -120,6 +120,44 @@ function resolveFolder(folders, key) {
   return f.id;
 }
 
+/** 视频时长的口语写法：秒 → 「1 分 20 秒」/「12 分」。 */
+function hrs(sec) {
+  const s = Math.round(Number(sec) || 0);
+  if (!s) return "—";
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60), r = s % 60;
+  if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`;
+  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+}
+
+/** 认链接属于哪个平台。只为在回复里点名来源，不参与任何解析决策。 */
+function platformName(u) {
+  const s = String(u || "").toLowerCase();
+  if (s.includes("zhihu.com")) return "知乎";
+  if (s.includes("xiaohongshu.com") || s.includes("xhslink.com")) return "小红书";
+  if (/(^|\.)x\.com|twitter\.com/.test(s)) return "X（推特）";
+  if (s.includes("mp.weixin.qq.com")) return "微信公众号";
+  return "";
+}
+
+/** 读订阅：参数里空值一律不带上，免得把「没筛」和「筛空串」混成一样。 */
+async function readFeed(params = {}) {
+  await ensureServer();
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    qs.set(k, String(v));
+  }
+  const d = await req(`/api/feed?${qs.toString()}`, { ms: 60000 });
+  if (!d.ok) throw new Error(d.msg || "读订阅出错");
+  return d;
+}
+
+async function postFeed(body, { ms = 120000 } = {}) {
+  await ensureServer();
+  return req("/api/feed", { method: "POST", body, ms });
+}
+
 /* ── 工具实现 ───────────────────────────── */
 let shelfCache = {at: 0, books: []};
 async function shelfBooks() {
@@ -205,6 +243,13 @@ const tools = {
       lines.push("提示：取书是长任务，别在这里等，隔一会儿再查，或让用户看界面。");
     } else {
       lines.push(t.exit_code ? `当前任务：空闲（上次退出码 ${t.exit_code}）` : "当前任务：空闲");
+    }
+    if (s.feed) lines.push(`订阅：${s.feed.subs || 0} 个源，未读 ${s.feed.unread || 0} 条`);
+    const v = s.video || {};
+    if (v.available) {
+      const a = v.available;
+      const asr = (a.asr || {}).local ? "本地语音识别就绪" : ((a.asr || {}).cloud ? "只能走云端语音识别" : "没有可用语音识别");
+      lines.push(`视频转笔记：${a.ytdlp ? "下载器就绪" : "缺下载器"} · ${a.ffmpeg ? "ffmpeg 就绪" : "缺 ffmpeg"} · ${asr} · 大模型${a.llm ? "已配置" : "未配置（可只转写）"}`);
     }
     lines.push(`存放位置：${s.out}`);
     return lines.join("\n");
@@ -527,6 +572,175 @@ const tools = {
     out.push("微信读书书架与「归藏本地书架」是两回事，取正文仍要用 book_fetch。");
     return out.join("\n");
   },
+
+  /* ── 剪藏：知乎 / 小红书 / X / 普通网页 ─────────────────── */
+
+  async clip_url({ url, mode = "save" }) {
+    await ensureServer();
+    const u = String(url || "").trim();
+    if (!/^https?:\/\//i.test(u)) throw new Error("请给出以 http(s):// 开头的完整链接");
+    const r = await req("/api/clip", { method: "POST", ms: 180000, body: { mode, url: u } });
+    if (!r.ok) throw new Error(r.msg || "这篇剪不动");
+    if (mode === "preview") {
+      const p = r.preview || {};
+      return [`《${p.title || "（无标题）"}》${p.author ? " · " + p.author : ""}`,
+        `${p.site || ""} · ${fmtChars(p.words)} · ${p.url || u}`,
+        "", "正文开头：", (p.head || "").slice(0, 400),
+        "", "要收进书架的话，再调一次 clip_url 并把 mode 留空（默认 save）。"].join("\n");
+    }
+    const b = r.book || {};
+    // 平台不同，能拿到的完整度不同：知乎/小红书常常要登录才给全文，这里如实说。
+    const plat = platformName(u);
+    const out = [`已剪进书架：《${b.title || ""}》${b.chars || b.words || 0} 字`];
+    out.push(`本地 id：${b.id || ""}（可以用 book_files / book_detail 继续操作）`);
+    if (plat) out.push(`来源：${plat}${(b.title || "").length <= 2 ? "（拿到的标题很短，多半只抓到登录墙，建议用 preview 先看一眼）" : ""}`);
+    return out.join("\n");
+  },
+
+  /* ── RSS 订阅 ────────────────────────────────────────── */
+
+  async feed_list() {
+    const d = await readFeed({ mode: "list" });
+    const subs = d.subs || [], sum = d.summary || {};
+    if (!subs.length) return "还没有订阅任何源。给一个站点链接，用 feed_discover 找出它的 RSS 地址。";
+    const out = [`共 ${subs.length} 个订阅源，未读 ${sum.unread || 0} 条`];
+    for (const f of subs) {
+      const bad = f.error ? `  · 最近抓取失败：${String(f.error).slice(0, 60)}` : "";
+      out.push(`- ${f.title || f.url}${f.site ? " · " + f.site : ""}  [id: ${f.id}]`);
+      out.push(`  未读 ${f.unread || 0} 条 · 最近抓取 ${f.last_fetched ? fmtWhen(f.last_fetched) : "—"}${bad}`);
+    }
+    out.push("", "看更新：feed_entries；把某条收进本地书架：feed_to_shelf。");
+    return out.join("\n");
+  },
+
+  async feed_discover({ url }) {
+    const r = await postFeed({ act: "discover", url: String(url || "").trim() });
+    const cands = r.cands || [];
+    if (!cands.length) {
+      return [`在 ${url} 身上没找到能订阅的地址。`,
+        "常见原因是：这个站点没有 RSS；或者页面是纯前端渲染、抓不到 <link rel=alternate>。",
+        "可以试试该站的「/feed」「/rss」「/atom.xml」后缀，或换个站点。"].join("\n");
+    }
+    const out = [`找到 ${cands.length} 个可订阅地址：`];
+    for (const c of cands) out.push(`- ${c.title || "（无标题）"}\n  ${c.url}`);
+    out.push("", "挑一个，用 feed_add 订阅（url 传上面那条）。");
+    return out.join("\n");
+  },
+
+  async feed_add({ url, folder }) {
+    const r = await postFeed({ act: "add", url: String(url || "").trim(), folder: folder || "" });
+    if (!r.ok) throw new Error(r.msg || "订阅没成");
+    const f = r.feed || {};
+    return [`已订阅：《${f.title || f.url}》`, `本地 id：${f.id || ""}`,
+      "要立刻抓一批文章回来看，调 feed_refresh；看条目用 feed_entries。"].join("\n");
+  },
+
+  async feed_entries({ feed, unread = false, q, limit = 40 }) {
+    const qs = new URLSearchParams({ mode: "entries", limit: String(Math.max(1, Math.min(Number(limit) || 40, 200))) });
+    if (feed) qs.set("feed", String(feed));
+    if (unread) qs.set("unread", "1");
+    if (q) qs.set("q", String(q));
+    const d = await readFeed(Object.fromEntries(qs));
+    const rows = d.entries || [];
+    if (!rows.length) return "没有符合条件的条目。可能还没抓过：先调 feed_refresh。";
+    const out = [`${rows.length} 条${unread ? "（只看未读）" : ""}${q ? `（匹配「${q}」）` : ""}`];
+    for (const e of rows) {
+      out.push(`- [${e.read ? "已读" : "未读"}] ${e.title || "（无标题）"}`);
+      out.push(`  ${e.feed_title || ""}${e.published ? " · " + e.published : ""}  [id: ${e.id}]`);
+    }
+    out.push("", "读全文：feed_entry；收进本地书架：feed_to_shelf（收完就能用阅读器读、做笔记、导出）。");
+    return out.join("\n");
+  },
+
+  async feed_entry({ id }) {
+    const eid = String(id || "").trim();
+    if (!eid) throw new Error("请给出条目 id，用 feed_entries 可以拿到");
+    const d = await readFeed({ mode: "entry", id: eid });
+    const e = d.entry;
+    if (!e) throw new Error(`没找到 id 为 ${eid} 的条目，先用 feed_entries 确认`);
+    const body = (e.content_text || e.summary || "").trim();
+    return [`《${e.title || "（无标题）"}》`,
+      `${e.feed_title || ""}${e.author ? " · " + e.author : ""}${e.published ? " · " + e.published : ""}`,
+      `${e.link || ""}`, "", body.slice(0, 6000),
+      body.length > 6000 ? `\n……（正文共 ${body.length} 字，余下部分请打开本机链接看）` : ""].join("\n");
+  },
+
+  async feed_refresh({ feed, force = false }) {
+    const r = await postFeed({ act: "refresh", id: feed || "", force: !!force },
+      { ms: 180000 });
+    if (!r.ok) throw new Error(r.msg || "刷新没成");
+    const out = [r.msg || "已刷新"];
+    if ((r.errors || []).length) out.push("有源没抓成，可能是站点临时抽风或需要代理，过会儿再试。");
+    out.push("看新条目：feed_entries。");
+    return out.join("\n");
+  },
+
+  async feed_to_shelf({ id, mark_read = true }) {
+    const r = await postFeed({ act: "shelf", id: String(id || "") }, { ms: 180000 });
+    if (!r.ok) throw new Error(r.msg || "收进书架没成");
+    const b = r.book || {};
+    const out = [`已收进本地书架：《${b.title || ""}》${b.chars ? " · " + fmtChars(b.chars) : ""}`];
+    out.push(`本地 id：${b.id || ""} —— 现在可以像别的书一样读、做笔记、导出 EPUB/PDF。`);
+    if (mark_read) await postFeed({ act: "read", ids: [String(id || "")], read: true }).catch(() => {});
+    return out.join("\n");
+  },
+
+  async feed_remove({ feed }) {
+    const r = await postFeed({ act: "remove", id: String(feed || "") });
+    if (!r.ok) throw new Error(r.msg || "退订没成");
+    return `${r.msg || "已退订"}。已经收进本地书架的文章不受影响。`;
+  },
+
+  /* ── 视频转笔记 ──────────────────────────────────────── */
+
+  async video_capability() {
+    await ensureServer();
+    const d = await req("/api/video?mode=status");
+    const a = d.available || {};
+    const out = ["视频转笔记依赖四样东西，缺哪样都会如实告诉你：",
+      `- 下载器 yt-dlp：${a.ytdlp ? "就绪" : "缺（设置里点「补齐组件」）"}`,
+      `- ffmpeg（抽音轨/转码）：${a.ffmpeg ? "就绪" : "缺（点「装组件」让归藏自己下一份）"}`,
+      `- 本地语音识别：${(a.asr || {}).local ? "就绪（" + (a.engines || []).join(" / ") + "）" : "没装 mlx-whisper / faster-whisper"}`,
+      `- 云端语音识别：${(a.asr || {}).cloud ? "可用（需在设置里填 Key）" : "没配"}`,
+      `- 大模型（写摘要/笔记/导图）：${a.llm ? "已配置" : "没配 —— 没配也能转写，只是没有 AI 摘要与导图"}`,
+    ];
+    return out.join("\n");
+  },
+
+  async video_plan({ url }) {
+    const u = String(url || "").trim();
+    if (!u) throw new Error("请给出视频链接");
+    const d = await req(`/api/video?mode=plan&url=${encodeURIComponent(u)}`, { ms: 60000 });
+    if (!d.ok) throw new Error(d.msg || "这个链接认不出来");
+    const p = d.plan || {};
+    const out = [`认出来了：《${p.title || ""}》`];
+    if (p.site) out.push(`平台：${p.site}`);
+    if (p.duration) out.push(`时长：${hrs(p.duration)}`);
+    if (p.parts && p.parts > 1) out.push(`分 P：${p.parts} 个`);
+    out.push("", "确认无误就调 video_to_shelf 开跑：它会下载音频 → 语音转文字 → 生成摘要/知识笔记/思维导图 → 存成本地书架里的一本书。");
+    return out.join("\n");
+  },
+
+  async video_to_shelf({ url, engine, language }) {
+    await ensureServer();
+    const s = await getState();
+    if (s.task && s.task.running) {
+      return `现在有任务在跑（${s.task.kind}${s.task.book ? " · " + s.task.book : ""}）。`
+        + "后端一次只跑一件，等它跑完或用 task_stop 中止后再来。";
+    }
+    const avail = (s.video && s.video.available) || (await req("/api/video?mode=status")).available || {};
+    if (!avail.ytdlp) throw new Error("还没装下载器 yt-dlp，先在界面设置里点「补齐组件」");
+    const body = { act: "start", url: String(url || "").trim() };
+    if (engine) body.asr = { engine: String(engine) };
+    if (language) body.language = String(language);
+    const r = await req("/api/video", { method: "POST", body });
+    if (!r.ok) throw new Error(r.msg || "这条视频没跑起来");
+    const out = [r.msg || "已开始转笔记"];
+    if (!avail.llm) out.push("提醒：现在没配大模型，这次只会存下转写文字，没有 AI 摘要和思维导图。");
+    out.push("这是分钟级的长任务（要下音频、跑语音识别），我不在这里等。");
+    out.push("隔一会儿用 app_status / task_log 看进度；跑完可以在书架里找到这本。");
+    return out.join("\n");
+  },
 };
 
 const TOOL_DEFS = [
@@ -718,6 +932,132 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "clip_url",
+    description: "把一个网页链接剪藏成归藏本地书架里的一本书。知乎、小红书、X（推特）有专门的解析（尽量免登录，拿不到全文会如实说，不会把验证页当正文）；其它网页走通用正文提取。mode 传 preview 可先看标题/字数而不入架。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "以 http(s):// 开头的完整链接" },
+        mode: { type: "string", description: "save（默认，直接入库）/ preview（只看一眼）" },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_list",
+    description: "列出全部 RSS 订阅源与各自的未读数、最近抓取时间。第一次用订阅功能时先调它看现状。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "feed_discover",
+    description: "给一个网站或页面链接，找出它可以订阅的 RSS / Atom / JSON Feed 地址（返回候选列表，不自动订阅）。",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string", description: "网站首页或某个页面的链接" } },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_add",
+    description: "订阅一个 RSS 源（写操作）。url 用 feed_discover 给出的地址，也可以直接给带 /feed 的地址。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "订阅源地址" },
+        folder: { type: "string", description: "可选：给这个源一个分组名" },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_entries",
+    description: "列出订阅里的文章条目（最新在前），可按订阅源、未读、关键词过滤。拿到 id 后可读全文或收进书架。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        feed: { type: "string", description: "只看某个订阅源，传它的 id；不传就是全部" },
+        unread: { type: "boolean", description: "true 则只看未读" },
+        q: { type: "string", description: "在标题与摘要里搜的关键词" },
+        limit: { type: "number", description: "最多几条，默认 40，最多 200" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_entry",
+    description: "读一条订阅文章的正文（本地已存的全文本，不需要联网）。id 从 feed_entries 取。",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "条目 id" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_refresh",
+    description: "立刻去抓一遍订阅源，把新文章拉回来（写操作，会联网）。不传 feed 就刷新全部。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        feed: { type: "string", description: "只刷某个源，传它的 id；不传就是全部" },
+        force: { type: "boolean", description: "true 则忽略上次的缓存标记，硬抓一次" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_to_shelf",
+    description: "把一条订阅文章收进归藏本地书架，成为一本可以阅读、做笔记、导出 EPUB/PDF 的书，并自动标为已读。",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "条目 id（从 feed_entries 取）" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "feed_remove",
+    description: "退订一个订阅源（写操作）。已经收进本地书架的文章不受影响。",
+    inputSchema: {
+      type: "object",
+      properties: { feed: { type: "string", description: "订阅源 id" } },
+      required: ["feed"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "video_capability",
+    description: "查「视频转笔记」这条线现在能走到哪一步：下载器、ffmpeg、本地/云端语音识别、大模型各就绪没有。用户问「能不能转视频」时先调它。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "video_plan",
+    description: "给一个视频链接（B 站 / YouTube 等），先认一下它是哪支视频：标题、时长、平台、分 P 数。确认后再开跑。",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string", description: "视频链接" } },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "video_to_shelf",
+    description: "把一支视频转成一本本地书：下载音频 → 语音转文字 →（配了大模型时）生成摘要、知识笔记与思维导图 → 存进本地书架，之后可阅读、做笔记、导出。这是分钟级长任务，本工具立即返回，进度用 app_status / task_log 查。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "视频链接" },
+        engine: { type: "string", description: "转写引擎：auto（默认）/ mlx / faster / cloud" },
+        language: { type: "string", description: "语言代码，如 zh、en；留空自动" },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /* ── 协议 ───────────────────────────────── */
@@ -725,7 +1065,7 @@ function send(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 
-const serverInfo = { name: "guizang", version: "1.1.0" };
+const serverInfo = { name: "guizang", version: "1.2.0" };
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async line => {

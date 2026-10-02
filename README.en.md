@@ -2,7 +2,7 @@
 
 # Guizang · weread-guizang
 
-Export WeChat Reading data to your local machine: whole-book export to Markdown, a local multi-format reader, shelf and note management, and an MCP adapter for AI agents. Everything runs locally; the server binds to `127.0.0.1` only.
+Export WeChat Reading data to your local machine, and pull outside content (WeChat Official Account articles, Zhihu / Xiaohongshu / X posts, RSS feeds, videos) into the same local shelf: whole-book export to Markdown, a local multi-format reader, shelf and note management, and an MCP adapter for AI agents. Everything runs locally; the server binds to `127.0.0.1` only.
 
 ## Problem
 
@@ -19,7 +19,7 @@ Guizang reconstructs that gateway as a usable local tool and fills the gaps it l
 
 - For data the official gateway exposes, it provides a local web UI: shelf, store search, book detail, reading stats, recommendations, and all highlights and thoughts.
 - For what the gateway omits — full-text export, image download, adding books to the shelf — it reuses your logged-in session to call the web endpoints directly.
-- For agents, it ships a zero-dependency MCP adapter (20 tools) alongside the UI.
+- For agents, it ships a zero-dependency MCP adapter (32 tools) alongside the UI.
 
 All three capabilities run locally. The server binds to `127.0.0.1` and never contacts a third-party server.
 
@@ -31,7 +31,9 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 - **Foreign-language reading support**: long-select any passage to translate it to Chinese or copy the original; single-click an English word to get a pop-up with its meaning and usage (click-to-look-up is English-only; other languages use long-select).
 - **Dual-source reading time**: WeChat Reading time and local (Guizang) time are tracked separately and merged into a single unified total, shown side by side so you can see how the parts combine.
 - **Standalone local shelf**: displayed separately from the WeChat Reading shelf, listing both exported and imported books; locate any book's file in one click, and import your own Markdown / TXT / EPUB / PDF.
-- **Article clipping**: paste a WeChat Official Account article link and its main text is parsed into the shelf as a book. Clipped articles run through the same chapter splitting and table of contents as fetched books, so EPUB / PDF export, locating the file and every reader interaction work on them too, and you can jump back to the original link after reading.
+- **Article clipping**: paste a WeChat Official Account article link and its main text is parsed into the shelf as a book. Clipped articles run through the same chapter splitting and table of contents as fetched books, so EPUB / PDF export, locating the file and every reader interaction work on them too, and you can jump back to the original link after reading. Beyond WeChat, **Zhihu / Xiaohongshu / X (Twitter)** each have a dedicated parser: X posts come through directly; Zhihu and Xiaohongshu need the site to let you in — when logged out they usually return a CAPTCHA page, and Guizang says so plainly instead of storing that page as an article.
+- **RSS subscriptions**: paste any URL, or just a site's home page — Guizang finds the feed itself from `<link rel="alternate">`. The subscription list can be refreshed and read entry by entry, and a single entry can be pushed to the local shelf in one click: entries that carry full text go straight in, summary-only ones are refetched from the source. The same entry is never added twice.
+- **Video to notes**: paste a Bilibili / YouTube link and Guizang pulls the audio with yt-dlp, transcribes it with local Whisper (mlx-whisper / faster-whisper) or a cloud endpoint, has the AI shape it into notes and a mind map, and lands it on the local shelf as a book you then read and annotate like any other. For multi-part videos only the part you picked is transcribed, and the UI says which one. Audio lives in a temp directory and is deleted as soon as it is done.
 - **Notes while reading**: select a passage in the text to highlight, bold, underline or strike it, or attach an annotation. The note rail on the right and the body jump to each other — clicking a note returns you to the exact sentence without losing your place. Both the rail and the table of contents collapse away, leaving only the text.
 - **Two kinds of notes, kept apart**: quick highlights with a one-line thought (light, in bulk) and standalone note entries (long, able to quote other passages in the book). Select-and-note: write the thought in the floating panel and the original text plus its position are attached when you save.
 - **Highlight colours are semantic tags**: point / question / quotable / to-check / idea, one colour each. The colour says what you intend to do with the sentence, it is not decoration.
@@ -43,7 +45,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 - **View data without opening WeChat Reading**: store search, book summaries, author and publisher, category, reading progress and last-read time are all shown locally.
 - **Search and fetch in one step**: search results convert directly into export tasks; all highlights are indexed for full-text search.
 - **Highlight review and Anki export**: draw random cards from all highlights; export highlights to `.apkg`.
-- **MCP integration**: 20 tools; fetching is a long task that does not block the call, and the adapter starts the server if it is not running.
+- **MCP integration**: 32 tools; fetching is a long task that does not block the call, and the adapter starts the server if it is not running.
 - **Highlight migration to flomo**: forward selected highlights in bulk, with the original text wrapped in 「」 and annotated with book title and tags.
 - **Bundled skills**: the in-repo [`skills/`](skills/) install directly; the UI provides a "one-click MCP setup" that copies the integration prompt to your agent.
 
@@ -51,13 +53,15 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 
 - Python 3.10+ (3.9+ when using the packaged macOS app)
 - Node (required only for the MCP adapter; `node -v` must print a version)
-- A valid WeChat Reading account with access to the target books (unlimited plan or purchased)
+- **WeChat Reading account (optional)**: needed only to fetch WeChat Reading books and to view highlights, notes and stats, and the account must have access to the target books (unlimited plan or purchased). Clipping, RSS subscriptions and video-to-notes do not depend on it.
+- **ffmpeg (video-to-notes only)**: no need to install it beforehand. The "Install ffmpeg" button downloads a static build into Guizang's own data directory without touching the system; an existing system ffmpeg is reused.
+- **Transcription engine (video-to-notes only; local or cloud)**: use mlx-whisper locally (Apple silicon, fastest) or faster-whisper (portable), or point the settings at an OpenAI-compatible transcription endpoint. Local engines are not part of the default dependencies; if one is missing, the UI tells you exactly which to install.
 
 ## Installation
 
 ### Option 1: Download the macOS app
 
-[**Download Guizang-0.9.8.dmg**](安装包/归藏-0.9.8.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
+[**Download Guizang-0.9.9.dmg**](安装包/归藏-0.9.9.dmg) (about 2 MB; requires macOS 13 or later; supports Intel and Apple silicon)
 
 1. Double-click the dmg and drag **归藏.app** into Applications.
 2. On first launch, if you see **"归藏" is damaged and can't be opened. You should move it to the Trash.**, this is macOS blocking an unsigned app, not a corrupted file. Run:
@@ -82,8 +86,11 @@ cd weread-guizang
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium     # about 368 MB
+.venv/bin/pip install mlx-whisper                  # optional: local transcription for video-to-notes (Apple silicon)
 .venv/bin/python ui_server.py --port 8770
 ```
+
+On other platforms use `faster-whisper` instead of `mlx-whisper` (mlx runs on Apple silicon only). You can skip both and set a transcription endpoint under AI assistant in the settings to use the cloud instead. ffmpeg needs no prior install: the "Install ffmpeg" button fetches a static build for you.
 
 You can also double-click `启动归藏.command`: it detects the directory, creates the virtual environment and installs dependencies if missing, and opens the UI if the server is already running.
 
@@ -111,6 +118,7 @@ cd weread-guizang
 py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe -m playwright install chromium
+.venv\Scripts\python.exe -m pip install faster-whisper   :: optional: local transcription for video-to-notes
 .venv\Scripts\python.exe ui_server.py --port 8770
 ```
 
@@ -143,6 +151,20 @@ set EXPORT_DEBUG=1 && .venv\Scripts\python.exe export_precise.py <ID>
 
 Login and shelf-adding can also run standalone: `login.py` (login and login-state detection), `shelf_add.py <store id>`.
 
+Clipping, subscriptions and video each have a command you can run directly to debug without the UI (use `.venv/bin/python` on macOS / Linux, `.venv\Scripts\python.exe` on Windows):
+
+```bash
+.venv/bin/python clip_article.py <article URL>       # see what this article yields (WeChat / Zhihu / Xiaohongshu / X routed automatically)
+.venv/bin/python web_parse.py <URL>                  # see which platform it is routed to and the first 1200 characters
+.venv/bin/python feed.py <site or feed URL>          # find the feed behind any URL
+.venv/bin/python feed.py --list                     # current subscriptions and each entry's fetch state
+.venv/bin/python feed.py --refresh                  # refresh all subscriptions
+.venv/bin/python video_note.py <video URL> [out dir] # print the video info, then run the whole pipeline
+.venv/bin/python video_note.py --task <URL>          # the path the UI uses: options come from GUIZANG_VIDEO_OPTS, result on one ##GUIZANG## line
+.venv/bin/python ffmpeg_tool.py --status            # check whether ffmpeg is ready
+.venv/bin/python ffmpeg_tool.py --ensure            # download a static ffmpeg into the data directory
+```
+
 ## AI agent integration (MCP)
 
 The repo ships a zero-dependency Node adapter (`mcp/guizang-mcp.mjs`, stdio + JSON-RPC 2.0). Add an entry to your MCP configuration, replacing the path with your Guizang directory:
@@ -161,19 +183,23 @@ For Qoder CN, write it under `mcpServers`; for ZCode, under `mcp.servers` in `co
 
 The adapter locates the project directory in this order: the `GUIZANG_REPO` environment variable → inferring from "this file lives under the project's `mcp/`" → common-path fallback. It selects the interpreter per platform (`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` on macOS / Linux) and falls back to the system `python`. It starts the server if it is not running.
 
-**20 tools**, in four groups:
+**32 tools**, in seven groups:
 
 | Group | Tools |
 | --- | --- |
 | Shelf and status | `shelf_list`, `app_status`, `task_log`, `book_files`, `folder_create`, `book_move` |
 | Fetching | `book_fetch`, `task_stop`, `batch_fetch`, `account_connect` |
 | Books and notes | `book_detail`, `search_books`, `notes_index`, `notes_search`, `notes_random`, `book_mark`, `shelf_add` |
+| Clipping | `clip_url` |
+| Subscriptions | `feed_list`, `feed_discover`, `feed_add`, `feed_entries`, `feed_entry`, `feed_refresh`, `feed_to_shelf`, `feed_remove` |
+| Video | `video_capability`, `video_plan`, `video_to_shelf` |
 | Export | `apkg_export`, `zip_export`, `cache_delete` |
 
-Two constraints are written into the adapter's tool descriptions and are visible to the agent:
+Three constraints are written into the adapter's tool descriptions and are visible to the agent:
 
-- Fetching is a minute-to-hour long task. `book_fetch` / `batch_fetch` return immediately; poll progress with `app_status` / `task_log`. Do not wait for completion inside a tool call, or it will time out.
-- `shelf_add` is the only write operation and modifies your real WeChat Reading shelf. `cache_delete` lists by default and deletes only with `confirm=true`.
+- Fetching and video-to-notes are both minute-to-hour long tasks (video also downloads audio and then transcribes). `book_fetch` / `batch_fetch` / `video_to_shelf` return immediately; poll progress with `app_status` / `task_log`. Do not wait for completion inside a tool call, or it will time out.
+- `shelf_add` is the only operation that writes to your **real WeChat Reading shelf**. `cache_delete` lists by default and deletes only with `confirm=true`. `feed_add` / `feed_remove` / `feed_refresh` / `feed_to_shelf` only touch local subscriptions and the local shelf.
+- The video path needs its toolchain first: `video_capability` reports what is still missing (yt-dlp / ffmpeg / a local transcription engine). Fill the gap before starting a job instead of firing blind.
 
 ## Bundled skills
 
@@ -192,7 +218,15 @@ The UI's "**one-click MCP setup**" copies the integration prompt to the clipboar
 
 ## Output layout
 
-Books are stored under `~/Documents/归藏/`. Books fetched from WeChat Reading are named by book id; imported books are named `imp_<name fragment>_<random string>`. Both share the same structure, so the reader, EPUB/PDF export and file-locating features treat them identically.
+Books are stored under `~/Documents/归藏/`, all with the same structure, so the reader, EPUB/PDF export, file-locating and notes treat them identically. The name prefix tells you where a book came from:
+
+| Source | Folder name | `meta.json` `source` |
+| --- | --- | --- |
+| Fetched from WeChat Reading | `<book id>` | none (named by book id) |
+| Imported | `imp_<name>_<str>` | `local` |
+| Clipped article | `clip_<name>_<str>` | `clip` |
+| RSS entry | `feed_<name>_<str>` | `feed` |
+| Video to notes | `video_<name>_<str>` | `video` |
 
 ```
 ~/Documents/归藏/
@@ -204,10 +238,15 @@ Books are stored under `~/Documents/归藏/`. Books fetched from WeChat Reading 
 │   ├── _progress.json        # fetch progress (source of the UI progress bar)
 │   └── meta.json             # title/author/export completed
 ├── imp_<name>_<str>/         # imported books (MD / TXT / EPUB / PDF), same structure
-│   └── meta.json             # adds source:"local" and format fields
+├── clip_<name>_<str>/        # clipped articles; meta adds url (jump back to the source)
+├── feed_<name>_<str>/        # feed entries; meta adds feed_id / feed_title / date
+├── video_<name>_<str>/       # video notes; meta adds url / asr_engine / duration
+│   └── notes.json / notes.md / mindmap.svg   # notes and mind map live with the book
 ├── <title>.md                # merged file (image paths are relative; copying it alone breaks images)
 └── <title>.apkg              # Anki deck (highlight export)
 ```
+
+Every kind except fetched WeChat Reading books carries a `format` field in `meta.json` (`local` / `clip` / `feed` / `video`); the UI groups the shelf by source accordingly.
 
 Images in the merged `.md` file are relative `images/…` paths; copying the file alone breaks them. The "complete package" ZIP in the UI flattens text and images together.
 
@@ -236,22 +275,33 @@ flowchart TB
   S[ui_server.py<br/>stdlib backend · binds 127.0.0.1 only]
   E[export_precise.py<br/>fetch engine · subprocess]
   SA[shelf_add.py<br/>add to shelf · subprocess]
+  CL[clip_article.py + web_parse.py<br/>clipping: WeChat · Zhihu · Xiaohongshu · X]
+  FS[feed.py<br/>RSS discover · fetch · shelf]
+  VN[video_note.py<br/>video to notes · subprocess]
+  FF[ffmpeg_tool.py<br/>static ffmpeg, on demand]
+  YT[yt-dlp<br/>audio · metadata]
   WG[WeChat Reading Agent Gateway<br/>wrk- key · 16 api_names · read-only]
   WP[WeChat Reading web /mp/<br/>reuses login cookie · the only write path]
   FL[flomo]
   PC[platform_compat.py<br/>interpreter / process group / abort / kill tree]
-  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 20 tools]
+  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 32 tools]
   AG[AI Agent]
 
   UI <-->|JSON| S
   S --> E
   S --> SA
+  S --> CL
+  S --> FS
+  S --> VN
   S -->|HTTPS| WG
   SA -->|HTTPS| WP
   S -->|HTTPS| FL
   S --- PC
   E --- PC
   SA --- PC
+  VN --- PC
+  VN --> YT
+  VN --> FF
   M <-->|HTTP| S
   AG <--> M
 ```
@@ -262,20 +312,26 @@ Key decisions in the fetch engine and their reasons:
 - **Page turns use the arrow keys only, never a click on the body center.** The click triggers WeChat Reading's "return to last reading position", and jumping to the beginning from the TOC does not update the reading record, so "click → settle → jump back" never converges; the symptom was that the first several chapters were lost entirely.
 - **Every page turn has a hard timeout.** Playwright's `page.evaluate` has no default timeout, so a frozen renderer process hangs the call forever; `asyncio.wait_for` does not help against calls that ignore cancellation, so the engine uses `asyncio.wait` to return on timeout and then kills the browser to reclaim the connection.
 - **Image downloads force IPv4.** On macOS, urllib tries IPv6 first; when the route is unavailable, every image stalls for about 120 seconds.
+- **A feed is recognised only when the root element is a feed.** Blog footers often embed a Creative Commons `<rdf:RDF>` licence block (sometimes inside an HTML comment). Matching a bare `<rdf` would take the whole HTML page for a feed and push the real source pointed at by `<link rel="alternate">` out of the way. The test is now: no `<!doctype` / `<html` may appear before the feed's root element.
+- **Zhihu / Xiaohongshu / X each get their own extractor and do not go through the generic parser.** X's text is not on the page at all (it comes from the public syndication endpoint), Xiaohongshu buries it in a `window.__INITIAL_STATE__` blob inside `<script>`, and Zhihu serves text sometimes and a CAPTCHA page other times. These differences are "one site, one method"; folding them into the generic parser would break clipping for every other site, so they live in their own module — when one site changes, only that section moves, and the comment there records the current state so no shell that looks fine but always throws is left behind.
+- **Only the video part you picked is transcribed.** Transcribing a whole multi-part video can take hours, and what you want is usually one episode; the link check lists the parts first and hands only the selected one to yt-dlp. Audio exists only in a temp directory and is deleted afterwards — what you want is the book, not the soundtrack.
+- **The transcription engine is honoured as named.** If you asked for mlx and it is not installed, you get a plain explanation rather than a silent downgrade to faster — having "use the large model" quietly swapped for a small one is more infuriating than an error.
 
 ## Repository layout
 
 ```
 root       Runtime code: backend ui_server.py, interface ui.html, the engine and feature modules
+           (fetch: export_precise.py; clipping: clip_article.py / web_parse.py;
+            feeds: feed.py; video: video_note.py / ffmpeg_tool.py)
            —— this level is deliberately flat: task subprocesses run with the data
               directory as cwd and locate sibling modules via dirname(__file__);
               moving them breaks the installed app
 tests/     Verification gates. One command runs all of them: bash tests/run_all.sh
            (--fast stops after the static checks)
 tools/     Development-machine only: icon generation, source zip, window screenshots
-docs/      Three documents: deployment, architecture and module map, development conventions
+docs/      Four documents: deployment, architecture and module map, development conventions, handover
 shell/     macOS native shell and packaging: Swift shell → dist/归藏.app → 安装包/*.dmg
-mcp/       MCP stdio adapter: exposes the local API as 20 tools for agents
+mcp/       MCP stdio adapter: exposes the local API as 32 tools for agents
 skills/    Instructions written for agents (no executable logic)
 vendor/    Bundled third-party frontend library (markdown-it) and its license —
            the interface never reaches for a CDN
@@ -287,8 +343,25 @@ vendor/    Bundled third-party frontend library (markdown-it) and its license �
 | [部署说明.md](docs/部署说明.md) | Installing, running, troubleshooting, wiring up MCP |
 | [架构与模块地图.md](docs/架构与模块地图.md) | Before changing code: who calls whom, where data lands, the two book-id namespaces, the shortest path to add a feature |
 | [开发规范.md](docs/开发规范.md) | Before proposing a change: directory and path contract, single sources of truth, zero emoji, privacy red lines, verification gates, release flow |
+| [交接说明.md](docs/交接说明.md) | When taking over the project: what 0.9.9 added, the boundary of each new module, and what remains unverified |
 
 ## Changelog
+
+**0.9.9**
+
+- Outside content now lands on the same shelf. This round opens three more ways to pull content in, all of it ending up in the one library under `~/Documents/归藏/`, and read, annotated and exported like any fetched book:
+  - **Clipping extended to Zhihu / Xiaohongshu / X.** WeChat Official Accounts work as before; Zhihu, Xiaohongshu and X each get a dedicated parser (X via the public syndication endpoint, Xiaohongshu by reading the `window.__INITIAL_STATE__` blob, Zhihu within what is readable while logged out). Logged out, the latter two usually return a CAPTCHA page; Guizang says plainly that it could not get the text rather than storing that page as an article.
+  - **RSS subscriptions.** Paste a URL, or just a site's home page — Guizang picks the best feed from `<link rel="alternate">` itself (RSS / Atom / JSON Feed, with a fallback for old GBK sites). The list refreshes and reads entry by entry; a single entry goes to the local shelf in one click. Full-text entries are used as-is, summary-only ones are refetched from the source, and the same entry is never added twice.
+  - **Video to notes.** Paste a Bilibili / YouTube link → yt-dlp pulls the audio → local Whisper (mlx-whisper / faster-whisper) or a cloud endpoint transcribes it → the AI shapes notes and a mind map → it lands on the local shelf as a book. Multi-part videos transcribe only the part you picked, and the UI says which one. Audio lives in a temp directory and is deleted when done. If no LLM is configured the book is still usable: the transcript is kept and the task result states why the AI stage was skipped.
+- The video toolchain is filled in on demand: ffmpeg needs no prior install (the "Install ffmpeg" button downloads a static build into Guizang's own data directory, leaving the system alone and reusing an existing binary); yt-dlp and feedparser joined the default dependencies; transcription engines stay optional because of their size and platform split (mlx runs on Apple silicon only), and the UI names the one to install when it is missing.
+- The MCP adapter grew from 20 tools to 32: clipping 1 (`clip_url`), subscriptions 8 (`feed_list` / `feed_discover` / `feed_add` / `feed_entries` / `feed_entry` / `feed_refresh` / `feed_to_shelf` / `feed_remove`), video 3 (`video_capability` / `video_plan` / `video_to_shelf`). A tool note now states that video-to-notes is a long task like fetching: `video_to_shelf` returns immediately, poll with `app_status` / `task_log`.
+- UI: two new views, Subscriptions and Video to notes, plus their settings (engine, language, ffmpeg status); the clipping box now spells out the difference between the four platforms, which one works logged out and which needs the site to let you in.
+- Fixed: feed detection mistook a whole HTML page for a feed. Blog footers often carry a Creative Commons `<rdf:RDF>` licence block (sometimes inside an HTML comment); matching a bare `<rdf` made the page itself look like the subscription, hiding the real source behind `<link rel="alternate">` and returning zero entries on refresh. The test is now "no `<!doctype` / `<html` before the feed root", with a regression case.
+- Fixed: the "how many parts" hint on the video link check never appeared — the module returns `pages` / `count` while the UI read `parts`, so the value was always empty. It now reports the total from `count` and matches the returned URL to name which part is being transcribed.
+- Fixed: the video "Transcription settings" button closed as soon as it opened — the button sits outside the popup and the global "click elsewhere to close" listener shut it immediately; `stopPropagation` now stops it, the same treatment as the gear button.
+- Fixed: the video shelf's empty state never rendered — an empty list has an empty signature, which equals the initial value, so a change was never detected; the signature now includes the count.
+- Gates: new offline suites `tests/check_web_parse.py`, `tests/check_feed.py`, `tests/check_ffmpeg_tool.py`, `tests/check_video_note.py` (the live pipeline needs `GUIZANG_VIDEO_LIVE=1`) and the browser suite `tests/check_media_views.py` (the two new screens, overflow, the multi-part card). All 18 gates pass.
+- All of this leans on existing projects rather than reinventing: feedparser for feeds, yt-dlp for downloads, MLX Whisper / faster-whisper for transcription, and the repo's own notes and mind-map layer (`book_notes.py` / `notes.json` / `mindmap.svg`) for the rest.
 
 **0.9.8**
 
@@ -365,7 +438,7 @@ The repository is named `weread-guizang`; the project is called 归藏 (Guizang)
 
 ## Known limitations
 
-- A valid WeChat Reading account is required, with access to the target books (unlimited plan or purchased).
+- Fetching WeChat Reading books requires a valid account with access to the target books (unlimited plan or purchased); clipping, RSS subscriptions and video-to-notes need no WeChat Reading login.
 - Some publishers restrict web reading (showing "read in the app"); such books cannot be exported.
 - Fetching is not guaranteed to be 100%: the reader reuses already-drawn cache, so some pages genuinely do not trigger `fillText`, and chapter assignment can differ slightly between two exports (different drawing batches), though the total amount of text is stable.
 - In image-gallery-only chapters with dense images, a caption and its image occasionally end up off by one; in body chapters, an image's position relative to paragraphs is accurate.
@@ -374,6 +447,11 @@ The repository is named `weread-guizang`; the project is called 归藏 (Guizang)
 - The official gateway does not expose a "book list" endpoint, so the panel has no book lists; the closest is "recommendations".
 - The flomo request format has no official example; here it sends JSON by convention and falls back to form encoding on failure. **Real delivery is not verified** (no usable webhook token for end-to-end testing).
 - Translate-a-selection / word lookup / ask-the-assistant rely on the OpenAI-compatible endpoint you configure yourself; this parses the common `/chat/completions` response shape and has **not been tested against each vendor individually**, so unusual response formats may fail.
+- The Zhihu / Xiaohongshu / X parsers depend on how those sites serve their pages **today** and can break at any time. Logged out, Zhihu and Xiaohongshu mostly return a CAPTCHA page — a platform limit, not a bug that can be worked around; Guizang reports it honestly and does not attempt login bypass (which also means your cookies are never uploaded anywhere).
+- RSS covers the minimal loop "subscribe → read → push to shelf": no read/unread sync, no two-way sync, no background polling (hit refresh for new entries).
+- Video-to-notes supports Bilibili and YouTube in this first version. Transcription uses a general Whisper model, so accuracy on proper nouns, multi-speaker audio and heavy accents is not guaranteed; local transcription downloads a model on first use (large-v3-turbo is about 1.5 GB) and keeps it afterwards.
+- yt-dlp is the kind of tool that must be updated as platforms change: if a video will not come down, run `.venv/bin/pip install -U yt-dlp` and retry.
+- The AI notes and mind map for videos depend on the OpenAI-compatible endpoint you configure. Without it only the transcript is stored — deliberately, so your audio or text is never sent to a third party you did not set up.
 - Cloud sync is implemented against the public WebDAV and Microsoft Graph APIs and has **not been verified end-to-end with a real cloud account**; for a first sync, try one small book before syncing everything.
 - Cross-platform: the Windows branch runs in unit tests with a mocked platform flag, but has **not been verified end-to-end on a real Windows machine**.
 
@@ -389,4 +467,4 @@ The repository root **deliberately has no `LICENSE` file**: a root LICENSE would
 
 ## Disclaimer
 
-For personal study and research, and for backing up content **you have purchased**. Do not redistribute exported content or use it commercially; respect copyright and the platform's terms of service. The tool binds only to the loopback address and never sends your account, key or book content to any third-party server.
+For personal study and research, and for backing up content **you have purchased**. Do not redistribute exported content or use it commercially; respect copyright and the platform's terms of service. The tool binds only to the loopback address and never sends your account, key or book content to any third-party server — **the only outbound traffic is to endpoints you configured yourself**: translate-a-selection / ask-the-assistant sends the passage you selected to the AI endpoint in your settings, and video-to-notes sends the audio to your transcription endpoint when cloud transcription is chosen and hands the transcript to your AI endpoint when one is set. Those addresses are all entered by you; Guizang preinstalls none of them and forwards nothing on its own.

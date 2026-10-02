@@ -2,7 +2,7 @@
 
 # 归藏 · weread-guizang
 
-把微信读书的阅读数据导出到本地：整本导出为 Markdown、本地多格式阅读器、书架与笔记管理，以及面向 AI Agent 的 MCP 适配器。全部在本机运行，服务只监听 `127.0.0.1`。
+把微信读书的阅读数据导出到本地，也把外部内容（公众号文章、知乎 / 小红书 / X 的帖子、RSS 订阅、视频）收进同一个本地书架：整本导出为 Markdown、本地多格式阅读器、书架与笔记管理，以及面向 AI Agent 的 MCP 适配器。全部在本机运行，服务只监听 `127.0.0.1`。
 
 ## 问题
 
@@ -19,7 +19,7 @@
 
 - 官方 Gateway 提供的数据，做成本地网页界面：书架、书城搜索、书籍详情、阅读统计、推荐、全部划线与想法。
 - Gateway 不提供的功能——正文导出、图片下载、把书加入书架——复用登录态直接调用网页端接口。
-- 面向 Agent，除界面外另提供一套零依赖的 MCP 适配器（20 个工具）。
+- 面向 Agent，除界面外另提供一套零依赖的 MCP 适配器（32 个工具）。
 
 三项能力都在本机完成，服务只监听 `127.0.0.1`，不经第三方服务器。
 
@@ -31,7 +31,9 @@
 - **外文阅读优化**：长按选中任意段落即可译成中文或复制原文；英文正文里单击一个单词，直接弹窗给出释义与用法（仅英文支持单击取词，其他语言用长选）。
 - **阅读时长双源记录**：分别记录微信读书与本机（归藏）的阅读时长，并自动合并为一个统一时长；两份账目分列展示，看得出合并从哪两段拼出来。
 - **独立的本地书架**：与微信读书书架分开显示，集中列出已取回与自行导入的书；可一键定位到文件所在位置，也可导入自己的 Markdown / TXT / EPUB / PDF。
-- **剪藏文章**：粘贴微信公众号推文链接即可解析正文、加入书架并阅读；解析结果走取书那套分章与目录，因此导出 EPUB / PDF、定位文件对剪藏的文章同样可用，读完还能点回原链接看配图版式。
+- **剪藏文章**：粘贴微信公众号推文链接即可解析正文、加入书架并阅读；解析结果走取书那套分章与目录，因此导出 EPUB / PDF、定位文件对剪藏的文章同样可用，读完还能点回原链接看配图版式。公众号之外，**知乎 / 小红书 / X（推特）**也有各自的专门解析：X 的推文能直接取到正文，知乎和小红书要先对方放行——未登录时它们常常只回「安全验证」页，这时如实说拿不到，不会把验证页当成正文存进书架。
+- **RSS 订阅**：粘一个网址或订阅地址即可（只给站点首页也行，会自己从 `<link rel="alternate">` 里找订阅源）。订阅列表里能刷新、能逐条读，单条可一键入本地书架——全文够长的直接入库，只有摘要的才回源抓正文。同一条不重复入库。
+- **视频转笔记**：贴 B 站 / YouTube 链接，先用 yt-dlp 取音频、用本地 Whisper（mlx-whisper / faster-whisper）或云端接口转成文字，再交给 AI 归纳成笔记与思维导图，最后当成一本书落进本地书架，之后与取回的书一样读、一样记。多 P 视频只转你点的那一 P，界面上写清是哪一 P。音频只落在临时目录，转完即清。
 - **边读边记**：正文里选中一段就能高亮、加粗、划线、删除线或写批注；右栏笔记与正文互相跳转，读到哪条一点就回到原句。侧栏与目录都能收起，收起后只留正文。
 - **两类笔记分开**：随手划的高亮配一句话想法（轻量、成批）与独立笔记条目（可以很长、可以引用书里别处的句子）分开存放。划词即记：选中后在浮层里直接写想法，保存时自动带上原文与位置。
 - **高亮分色就是语义标签**：论点 / 疑问 / 可引用 / 待查 / 灵感各一色，颜色标的是「这句我打算怎么用它」。
@@ -43,7 +45,7 @@
 - **不打开微信读书即可查看数据**：书城搜索、书籍简介、作者与出版社、分类、阅读进度与最近阅读时间，都在本地显示。
 - **搜索即抓取**：搜索结果直接转为导出任务；全部划线建索引后可全文检索。
 - **划线回顾与 Anki 导出**：随机从全部划线中抽卡回顾；划线导出为 `.apkg`。
-- **MCP 接入**：20 个工具，取书为长任务、不阻塞调用；服务未启动时适配器自行拉起。
+- **MCP 接入**：32 个工具，取书为长任务、不阻塞调用；服务未启动时适配器自行拉起。
 - **划线迁移到 flomo**：多选划线批量转发，原文以「」包裹，附书名与标签。
 - **配套 Skills**：仓库内 [`skills/`](skills/) 可直接安装；界面提供「一键建立 MCP」，把接入提示词复制给 Agent。
 
@@ -51,13 +53,15 @@
 
 - Python 3.10+（使用打包好的 macOS 程序时为 3.9+）
 - Node（仅 MCP 适配器需要，`node -v` 能输出版本号即可）
-- 有效的微信读书账号，且对目标书有阅读权限（无限卡或已购买）
+- **微信读书账号（可选）**：只有取微信读书的书、看划线笔记与统计时才需要，且要对目标书有阅读权限（无限卡或已购买）。剪藏、RSS 订阅、视频转笔记这三条不依赖它。
+- **ffmpeg（仅视频转笔记需要）**：不必预先装好。界面上点「装 ffmpeg」会下载一份静态版放进归藏自己的数据目录，不动系统；系统里已有 ffmpeg 时直接复用。
+- **转写引擎（仅视频转笔记需要，本地与云端任选）**：本地用 mlx-whisper（Apple 芯片，最快）或 faster-whisper（其他平台通用），也可在设置里填一个兼容 OpenAI 的转写接口走云端。本地引擎不含在默认依赖里，点「视频转笔记」时若没装，界面会写清该装哪一个。
 
 ## 安装
 
 ### 方式一：下载 macOS 程序
 
-[**下载 归藏-0.9.8.dmg**](安装包/归藏-0.9.8.dmg)（约 2 MB，要求 macOS 13 以上，支持 Intel 与 Apple 芯片）
+[**下载 归藏-0.9.9.dmg**](安装包/归藏-0.9.9.dmg)（约 2 MB，要求 macOS 13 以上，支持 Intel 与 Apple 芯片）
 
 1. 双击 dmg，把 **归藏.app** 拖入「应用程序」。
 2. 首次打开：若提示 **「归藏」已损坏，无法打开。你应该将它移到废纸篓。**，这是 macOS 对未签名应用的默认拦截，并非文件损坏。执行：
@@ -82,8 +86,11 @@ cd weread-guizang
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium     # 约 368 MB
+.venv/bin/pip install mlx-whisper                  # 可选：视频转笔记的本地转写引擎，Apple 芯片用这个
 .venv/bin/python ui_server.py --port 8770
 ```
+
+其他平台把 `mlx-whisper` 换成 `faster-whisper`（mlx 只在 Apple 芯片上跑）。两者都不想装也行，在设置的 AI 助手一栏把转写接口填上即可走云端。ffmpeg 不用先装：界面上点「装 ffmpeg」会自己下一份静态版。
 
 也可双击 `启动归藏.command`：自动识别目录，缺虚拟环境则创建并安装依赖，服务已在运行时直接打开界面。
 
@@ -111,6 +118,7 @@ cd weread-guizang
 py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe -m playwright install chromium
+.venv\Scripts\python.exe -m pip install faster-whisper   :: 可选：视频转笔记的本地转写引擎
 .venv\Scripts\python.exe ui_server.py --port 8770
 ```
 
@@ -143,6 +151,20 @@ set EXPORT_DEBUG=1 && .venv\Scripts\python.exe export_precise.py <ID>
 
 登录与加书架也可单独运行：`login.py`（登录与登录态检测）、`shelf_add.py <书城 id>`。
 
+剪藏、订阅、视频这几条也各有可以直接跑的命令，用于排查而不必开界面（macOS / Linux 用 `.venv/bin/python`，Windows 换成 `.venv\Scripts\python.exe`）：
+
+```bash
+.venv/bin/python clip_article.py <文章链接>          # 看这一篇能解析出什么（公众号 / 知乎 / 小红书 / X 自动选路）
+.venv/bin/python web_parse.py <链接>                 # 看这条链接被归到哪个站，以及正文前 1200 字
+.venv/bin/python feed.py <站点或订阅地址>             # 从任意网址里找出订阅源
+.venv/bin/python feed.py --list                     # 现有订阅与各条目的抓取状态
+.venv/bin/python feed.py --refresh                  # 刷新全部订阅
+.venv/bin/python video_note.py <视频链接> [输出目录]   # 打印视频信息，再整条跑一遍转笔记
+.venv/bin/python video_note.py --task <链接>         # 界面用的那条路：选项走 GUIZANG_VIDEO_OPTS、结果打 ##GUIZANG## 一行
+.venv/bin/python ffmpeg_tool.py --status            # 看 ffmpeg 备好没有
+.venv/bin/python ffmpeg_tool.py --ensure            # 下一份静态 ffmpeg 放进数据目录
+```
+
 ## 接入 AI Agent（MCP）
 
 仓库自带零依赖的 Node 适配器（`mcp/guizang-mcp.mjs`，stdio + JSON-RPC 2.0）。在 MCP 配置中加入一项，路径替换为实际的归藏目录：
@@ -161,19 +183,23 @@ Qoder CN 写在设置文件的 `mcpServers`；ZCode 写在 `config.json` 的 `mc
 
 适配器按以下顺序查找项目目录：环境变量 `GUIZANG_REPO` → 依据「本文件位于项目 `mcp/` 下」推断 → 常见路径回退。解释器按平台选择（Windows 用 `.venv\Scripts\python.exe`，macOS / Linux 用 `.venv/bin/python`），均不存在时回退至系统 `python`。服务未启动时自行拉起。
 
-共 **20 个工具**，分为四类：
+共 **32 个工具**，分为七类：
 
 | 分类 | 工具 |
 | --- | --- |
 | 书架与状态 | `shelf_list`、`app_status`、`task_log`、`book_files`、`folder_create`、`book_move` |
 | 取书 | `book_fetch`、`task_stop`、`batch_fetch`、`account_connect` |
 | 书与笔记 | `book_detail`、`search_books`、`notes_index`、`notes_search`、`notes_random`、`book_mark`、`shelf_add` |
+| 剪藏 | `clip_url` |
+| 订阅 | `feed_list`、`feed_discover`、`feed_add`、`feed_entries`、`feed_entry`、`feed_refresh`、`feed_to_shelf`、`feed_remove` |
+| 视频 | `video_capability`、`video_plan`、`video_to_shelf` |
 | 导出 | `apkg_export`、`zip_export`、`cache_delete` |
 
-两条约束写入适配器的工具说明，Agent 可读取：
+三条约束写入适配器的工具说明，Agent 可读取：
 
-- 取书是分钟到小时级的长任务，`book_fetch` / `batch_fetch` 会立即返回，进度通过 `app_status` / `task_log` 轮询。不要等待其执行完毕，否则必然超时。
-- `shelf_add` 是唯一的写操作，会修改真实的微信读书书架；`cache_delete` 默认只列出，需带 `confirm=true` 才真正删除。
+- 取书与视频转笔记都是分钟到小时级的长任务（视频还要先下音频、再转写），`book_fetch` / `batch_fetch` / `video_to_shelf` 会立即返回，进度通过 `app_status` / `task_log` 轮询。不要等待其执行完毕，否则必然超时。
+- `shelf_add` 是唯一会改动**真实微信读书书架**的写操作；`cache_delete` 默认只列出，需带 `confirm=true` 才真正删除。`feed_add` / `feed_remove` / `feed_refresh` / `feed_to_shelf` 只动本机的订阅与本地书架。
+- 视频这条路要先具备工具链：`video_capability` 报现在还缺什么（yt-dlp / ffmpeg / 本地转写引擎），缺了就先补齐再发起，不要盲发。
 
 ## 配套 Skills
 
@@ -192,7 +218,15 @@ Qoder CN 写在设置文件的 `mcpServers`；ZCode 写在 `config.json` 的 `mc
 
 ## 产物结构
 
-书统一存放在 `~/Documents/归藏/` 下。微信读书取回的书以书籍 id 命名，自行导入的书以 `imp_<名字片段>_<随机串>` 命名，两者结构一致，因此阅读器、EPUB/PDF 导出、定位文件等功能对它们一视同仁。
+书统一存放在 `~/Documents/归藏/` 下，结构一致，因此阅读器、EPUB/PDF 导出、定位文件、笔记等功能对它们一视同仁。命名前缀标明来源：
+
+| 来源 | 目录名 | `meta.json` 的 `source` |
+| --- | --- | --- |
+| 微信读书取回 | `<书籍 id>` | 无（按书籍 id 命名） |
+| 自行导入 | `imp_<名字片段>_<随机串>` | `local` |
+| 剪藏文章 | `clip_<名字片段>_<随机串>` | `clip` |
+| RSS 订阅 | `feed_<名字片段>_<随机串>` | `feed` |
+| 视频转笔记 | `video_<名字片段>_<随机串>` | `video` |
 
 ```
 ~/Documents/归藏/
@@ -204,10 +238,15 @@ Qoder CN 写在设置文件的 `mcpServers`；ZCode 写在 `config.json` 的 `mc
 │   ├── _progress.json        # 抓取进度（界面进度条的数据源）
 │   └── meta.json             # 书名/作者/是否导完
 ├── imp_<名>_<串>/            # 自行导入的书（MD / TXT / EPUB / PDF），结构同上
-│   └── meta.json             # 多 source:"local" 与 format 字段
+├── clip_<名>_<串>/           # 剪藏的文章，meta 里多 url（一键回原文）
+├── feed_<名>_<串>/           # 订阅条目，meta 里多 feed_id / feed_title / date
+├── video_<名>_<串>/          # 视频转笔记，meta 里多 url / asr_engine / duration
+│   └── notes.json / notes.md / mindmap.svg   # 笔记与导图，随书同目录
 ├── 书名.md                   # 合并稿（图片为相对路径，单独拷走会断图）
 └── 书名.apkg                 # Anki 卡包（划线导出）
 ```
+
+除微信读书取回的书之外，其余四种的 `meta.json` 都带 `format` 字段（`local` / `clip` / `feed` / `video`），界面据此在书架里分组显示来源。
 
 合并稿中的图片是相对路径 `images/…`，单独拷走会导致断图；界面中的「完整包」ZIP 已将正文与图片平铺。
 
@@ -236,22 +275,33 @@ flowchart TB
   S[ui_server.py<br/>标准库后端 · 只监听 127.0.0.1]
   E[export_precise.py<br/>抓取引擎 · 子进程]
   SA[shelf_add.py<br/>加书架 · 子进程]
+  CL[clip_article.py + web_parse.py<br/>剪藏：公众号 · 知乎 · 小红书 · X]
+  FS[feed.py<br/>RSS 发现 · 抓取 · 入库]
+  VN[video_note.py<br/>视频转笔记 · 子进程]
+  FF[ffmpeg_tool.py<br/>静态 ffmpeg 按需下载]
+  YT[yt-dlp<br/>取音频 · 元信息]
   WG[微信读书官方 Agent Gateway<br/>wrk- Key · 16 个 api_name · 只读]
   WP[微信读书网页端 /mp/<br/>复用登录 cookie · 唯一的写路径]
   FL[flomo]
   PC[platform_compat.py<br/>解释器 / 建组 / 中止 / 结束进程树]
-  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 20 工具]
+  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 32 工具]
   AG[AI Agent]
 
   UI <-->|JSON| S
   S --> E
   S --> SA
+  S --> CL
+  S --> FS
+  S --> VN
   S -->|HTTPS| WG
   SA -->|HTTPS| WP
   S -->|HTTPS| FL
   S --- PC
   E --- PC
   SA --- PC
+  VN --- PC
+  VN --> YT
+  VN --> FF
   M <-->|HTTP| S
   AG <--> M
 ```
@@ -262,18 +312,24 @@ flowchart TB
 - **翻页只使用方向键，不点击正文中心**。点击会触发微信读书的「回到上次阅读位置」，而从目录跳到开头不会更新阅读记录，导致「点击 → 等待 → 跳回开头」无法收敛，表现为开头数章整片丢失。
 - **每轮翻页设硬超时**。Playwright 的 `page.evaluate` 默认无超时，渲染进程卡死时调用永久挂起；`asyncio.wait_for` 对不响应取消的调用无效，因此使用 `asyncio.wait` 取得超时后直接返回，再终止浏览器回收连接。
 - **图片下载强制 IPv4**。macOS 上 urllib 默认先尝试 IPv6，路由不通时每张图约卡 120 秒。
+- **订阅源判定只认「根元素就是 feed」**。博客页脚常夹一块创作共用的 `<rdf:RDF>` 授权声明（还裹在 HTML 注释里），见着 `<rdf` 就当 RSS，会把整页 HTML 认成订阅源，反而把页面里 `<link alternate>` 指着的真源挡在后面用不上。判据改为：feed 的根元素之前不先出现 `<!doctype` / `<html`。
+- **知乎 / 小红书 / X 各走各的取法，不进通用解析器**。X 的正文根本不在页面里（得问 syndication 那个公开接口），小红书把正文塞进 `<script>` 里的一坨 `window.__INITIAL_STATE__`，知乎对未登录读者时而给正文、时而给验证页。这些差异属于「同一个站一种取法」，塞进通用解析器会改坏所有站点的剪藏，因此独立成模块；哪一家改版失效，只动那一段，并在注释里写清现状，不留一个看着正常、其实永远抛错的空壳。
+- **视频只转用户点的那一 P**。多 P 视频整条转可能几小时，而用户要的多半只是其中一集；认链接时先把分 P 列出来，只把选中那一 P 交给 yt-dlp。音频只在临时目录里存在，转完即删——用户要的是那本书，不是那段音轨。
+- **转写引擎点名就点名**。用户指定 mlx 而机器上没装时直接说清原因，不偷偷降级成 faster——「我要用大模型」被静默换成小模型，比报错更让人火大。
 
 ## 仓库结构
 
 ```
 仓库根      运行期代码：后端 ui_server.py、界面 ui.html、引擎与各功能模块
+            （取书 export_precise.py、剪藏 clip_article.py / web_parse.py、
+              订阅 feed.py、视频 video_note.py / ffmpeg_tool.py）
             —— 这一层刻意不分包：任务子进程以数据目录为工作目录，靠
                dirname(__file__) 找同伴模块，移动即断
 tests/      验证门禁。一条命令跑全套：bash tests/run_all.sh（--fast 只跑静态检查）
 tools/      只在开发机上跑：出图标、打源码包、窗口截图
-docs/       三份文档：部署说明、架构与模块地图、开发规范
+docs/       四份文档：部署说明、架构与模块地图、开发规范、交接说明
 shell/      macOS 原生壳与打包脚本：Swift 外壳 → dist/归藏.app → 安装包/*.dmg
-mcp/        MCP stdio 适配器：把本地接口包成 20 个工具给 Agent 用
+mcp/        MCP stdio 适配器：把本地接口包成 32 个工具给 Agent 用
 skills/     给 Agent 看的说明书（不含可执行逻辑）
 vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不连 CDN
 安装包/     只保留最新那一个 dmg
@@ -284,8 +340,25 @@ vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不�
 | [部署说明.md](docs/部署说明.md) | 装、跑、排障、接 MCP |
 | [架构与模块地图.md](docs/架构与模块地图.md) | 动手改代码之前：谁调谁、数据落在哪、两套书籍 id、加一个功能的最短路径 |
 | [开发规范.md](docs/开发规范.md) | 提改动之前：目录与路径契约、哪些事实只准写一处、界面零 emoji、隐私红线、验证门禁与发版流程 |
+| [交接说明.md](docs/交接说明.md) | 接手这个项目时：0.9.9 这一轮加了什么、每个新模块的边界在哪、还差哪些没验过 |
 
 ## 更新记录
+
+**0.9.9**
+
+- 外部内容进同一个书架。这一轮打开三条取内容的通路，都落到 `~/Documents/归藏/` 下同一个书库，之后与取回的书一样读、一样记、一样导出：
+  - **剪藏扩到知乎 / 小红书 / X**。公众号照旧；知乎、小红书、X 各有专门解析（X 走 syndication 公开接口，小红书读页面里那坨 `window.__INITIAL_STATE__`，知乎按未登录能读到的范围取）。这三家未登录时常常只回「安全验证」页，认出来就如实说拿不到，不把验证页当正文存进书架。
+  - **RSS 订阅**。粘一个网址即可，只给站点首页也行——会自己从 `<link rel="alternate">` 里挑最好的那个源（RSS / Atom / JSON Feed 都认，GBK 编码的老站有兜底）。订阅列表可刷新、可逐条读，单条一键入本地书架：全文够长的直接入库，只有摘要的才回源抓正文；同一条不重复入库。
+  - **视频转笔记**。贴 B 站 / YouTube 链接 → yt-dlp 取音频 → 本地 Whisper（mlx-whisper / faster-whisper）或云端接口转成文字 → AI 归纳成笔记与思维导图 → 当成一本书落进本地书架。多 P 视频只转你点的那一 P，界面上写清是哪一 P。音频只落临时目录，转完即清。AI 那段没配 LLM 时书照常可用，只存转写全文，并在任务结果里写明这次 AI 缺席的原因。
+- 视频那条线的工具链按需补齐：ffmpeg 不必预装，点「装 ffmpeg」会下一份静态版放进归藏自己的数据目录（不动系统，系统里已有就复用）；yt-dlp 与 feedparser 进了默认依赖；转写引擎因为体积与平台差异（mlx 只在 Apple 芯片上跑）留在可选，缺件时界面写清该装哪一个。
+- MCP 适配器从 20 个工具扩到 32 个：新增剪藏 1 个（`clip_url`）、订阅 8 个（`feed_list` / `feed_discover` / `feed_add` / `feed_entries` / `feed_entry` / `feed_refresh` / `feed_to_shelf` / `feed_remove`）、视频 3 个（`video_capability` / `video_plan` / `video_to_shelf`）。工具说明里补了一条：视频转笔记与取书一样是长任务，`video_to_shelf` 立即返回，用 `app_status` / `task_log` 轮询。
+- 界面新增「订阅」与「视频转笔记」两个视图，以及对应设置项（转写引擎、语言、ffmpeg 状态）；剪藏输入框写明四家平台的差别，哪家免登录能取、哪家要对方放行，一眼看得出。
+- 修：订阅源判定误把整页 HTML 当 RSS。博客页脚常夹一块创作共用的 `<rdf:RDF>` 授权声明（还裹在 HTML 注释里），原来看见 `<rdf` 就认成 RSS，结果把页面本身当成订阅源，把 `<link alternate>` 指着的真源挡在后面用不上，刷新回来 0 条。判据改为「feed 的根元素之前不先出现 `<!doctype` / `<html`」，并补了回归用例。
+- 修：视频认链接时那条「有几个分 P」的提示从来不显示——模块给的是 `pages` / `count`，界面读的是 `parts`，字段名对不上就永远取到空。现在按 `count` 报总数，并用 plan 回来的地址对出「这次转的是哪一 P」。
+- 修：视频的「转写设置」按钮点开就关——那个按钮在弹层之外，被全局「点别处就收起弹层」的监听立刻关掉；补 `stopPropagation` 挡住，与齿轮按钮同一处理。
+- 修：视频书架的「一本都没有」空态从不显示——空列表的指纹是空串，而初值也是空串，等于永远认为没变化；指纹里带上条数，才铺得出那句说明。
+- 门禁：新增离线套件 `tests/check_web_parse.py`、`tests/check_feed.py`、`tests/check_ffmpeg_tool.py`、`tests/check_video_note.py`（后者的真跑链路要 `GUIZANG_VIDEO_LIVE=1` 另开）与浏览器套件 `tests/check_media_views.py`（订阅与视频两屏、元素溢出、分 P 卡片）。全仓 18 项门禁通过。
+- 这些新增都尽量借现成项目，不另起炉灶：RSS 解析用 feedparser，视频下载用 yt-dlp，转写用 MLX Whisper / faster-whisper，思维导图与笔记沿用本仓库原有的那一套（`book_notes.py` / `notes.json` / `mindmap.svg`）。
 
 **0.9.8**
 
@@ -362,7 +435,7 @@ vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不�
 
 ## 已知限制
 
-- 需要有效的微信读书账号，且对目标书有阅读权限（无限卡或已购买）。
+- 取微信读书的书需要有效账号，且对目标书有阅读权限（无限卡或已购买）；剪藏、RSS 订阅、视频转笔记三条不用登录微信读书。
 - 部分出版社限制网页端阅读（显示「去 App 阅读」），此类书无法导出。
 - 抓取不保证 100%：阅读器会复用已绘制的缓存，部分页确实不触发 `fillText`；章节归属在两次导出之间可能略有差异（绘制批次不同），但正文总量稳定。
 - 纯图廊章节图片密集时，图注与图的配对偶尔相差一位；正文章节中图片相对段落的位置准确。
@@ -371,6 +444,11 @@ vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不�
 - 官方 Gateway 不开放「书单」接口，面板中没有书单，最接近的是「推荐」。
 - flomo 请求格式官方未提供示例，此处按通行约定发送 JSON，失败时回退为表单编码；**真实发送未经过验证**。
 - 阅读划句翻译 / 查词 / 问助手依赖你自己填的兼容 OpenAI 接口；本地按常见的 `/chat/completions` 返回结构解析，**未对具体厂商逐一联调**，返回格式特殊时可能失败。
+- 知乎 / 小红书 / X 的解析依赖对方「现在」怎么发页面，随时可能失效。未登录时知乎与小红书多数情况只回验证页，这是平台限制，不是可以绕过的 bug——归藏选择如实报错，不做登录态绕过（也就没有你的 cookie 上传问题）。
+- RSS 只做「订阅 → 读 → 入书架」这条最小闭环：不做已读/未读同步、不做双向同步、不在后台定时轮询（要新内容时点一下刷新）。
+- 视频转笔记第一版只支持 B 站与 YouTube。转写用通用 Whisper 模型，专有名词、多人对话、强口音的准确度不保证；本地转写首次使用要下载模型（large-v3-turbo 约 1.5 GB），下过一次就常驻本机。
+- yt-dlp 属于「随平台改版天天要更新」的工具：视频取不到时先 `.venv/bin/pip install -U yt-dlp` 再试一次。
+- 视频的 AI 笔记与思维导图依赖你自己填的兼容 OpenAI 接口；没填时就只存转写全文——这是有意为之，不在你没配的情况下把音频或文字发给第三方。
 - 云同步按 WebDAV 与 Microsoft Graph 的公开接口实现；**未在真实网盘账号上端到端验证**，首次同步建议先用一本小书试通，确认无误再同步全部。
 - 跨平台：Windows 分支已在单元测试中以 mock 平台标志运行，但**未在真实 Windows 机器上端到端验证**。
 
@@ -386,4 +464,4 @@ vendor/     随包的三方前端库（markdown-it）及其 LICENSE，界面不�
 
 ## 免责声明
 
-仅供个人学习研究及备份**自己已购**的内容使用。请勿传播导出成果，勿用于商业用途，尊重著作权与平台服务条款。工具只监听本机回环地址，不会将账号、Key 或书籍内容发往任何第三方服务器。
+仅供个人学习研究及备份**自己已购**的内容使用。请勿传播导出成果，勿用于商业用途，尊重著作权与平台服务条款。工具只监听本机回环地址，不会把账号、Key 或书籍内容发往任何第三方服务器——**唯一的外发是你自己填的那些接口**：划句翻译 / 问助手会把你选中的那段发给你在设置里填的 AI 接口，视频转笔记在选了云端转写时会把音频发给你填的转写接口、在填了 AI 接口时会把转写文本交给它做总结。这些地址都由你自己填写，归藏不预置、不代传。

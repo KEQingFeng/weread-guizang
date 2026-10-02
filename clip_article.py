@@ -579,9 +579,14 @@ def _front_matter(art):
     return "%s\n> 原文：[%s](%s)\n" % (line, shown, url)
 
 
-def save_clip(out_dir, url, title="", author="", cover_dir=None):
-    """剪一篇 → 书库里的一本「文章」。返回 book_import 那套 info（含 id、章数、字数）。"""
-    art = extract(url)
+def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None):
+    """剪一篇 → 书库里的一本「文章」。返回 book_import 那套 info（含 id、章数、字数）。
+
+    extract_fn 让调用方换一套提取器：知乎 / 小红书 / X 那几条路在 web_parse 里，
+    它们返回的形状和 extract 一模一样，所以这里除了「谁来抓」之外一行都不用分岔。
+    不传就是默认的通用网页提取。
+    """
+    art = (extract_fn or extract)(url)
     body = "# %s\n\n%s\n%s\n" % (art["title"], _front_matter(art), art["markdown"])
     name = re.sub(r'[\\/:*?"<>|]', "", art["title"])[:60] or "clip"
 
@@ -617,7 +622,7 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None):
     return info
 
 
-def clip_many(out_dir, items, cover_dir=None):
+def clip_many(out_dir, items, cover_dir=None, extract_fn=None):
     """批量剪藏：items = [{url, title?, author?}]（也收裸链接），单条失败不影响其余。"""
     ok, fail = [], []
     for it in (items or []):
@@ -627,7 +632,7 @@ def clip_many(out_dir, items, cover_dir=None):
                 out_dir, url,
                 title=(it.get("title") or "") if isinstance(it, dict) else "",
                 author=(it.get("author") or "") if isinstance(it, dict) else "",
-                cover_dir=cover_dir))
+                cover_dir=cover_dir, extract_fn=extract_fn))
         except Exception as e:
             fail.append({"url": str(url)[:200], "msg": str(e)[:160] or "剪不动这一篇"})
     return {"ok": ok, "fail": fail, "done": len(ok), "failed": len(fail)}

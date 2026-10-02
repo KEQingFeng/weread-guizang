@@ -36,14 +36,18 @@ import book_export
 import book_import
 import book_notes
 import clip_article
+import feed as feed_mod
+import ffmpeg_tool
 import sync as cloudsync
+import video_note
+import web_parse
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.8"
+VERSION = "0.9.9"
 
 
 def py():
@@ -133,7 +137,11 @@ LOG = []
 LOG_BASE = 0
 MAX_LOG = 8000
 TASK = {"running": False, "kind": None, "book": None, "started_at": None,
-        "exit_code": None, "proc": None}
+        "exit_code": None, "proc": None, "result": None}
+
+# 子进程回传结构化结果的行前缀，见 _reader。真源在 video_note（产出方），这里引用它，
+# 免得协议字符串在两处各写一遍、改了一处另一处静默失效。
+RESULT_MARK = video_note.RESULT_MARK
 
 
 # ---------- helpers ----------
@@ -1093,6 +1101,30 @@ def set_agent_cfg(url, key, model):
     return True, "小 Agent 已连上 " + full
 
 
+ASR_ENGINES = ("auto", "mlx", "faster", "cloud")
+
+
+def set_media_cfg(engine, lang):
+    """存「视频转笔记」这两项偏好：转写引擎与语言。
+
+    为什么不放在 video_note 内部读盘：转写这条线本来就能脱离界面单独跑（命令行、
+    MCP 都走同一条路），配置由调用方通过 opts 传进去，它不越权回读应用配置。界面
+    这一侧把它存下来，起任务时随 opts 一起发过去 —— 两边各管一段，谁都不猜。
+    """
+    engine = (engine or "").strip().lower()
+    if engine not in ASR_ENGINES:
+        return False, "转写引擎只认 auto / mlx / faster / cloud 这几种"
+    cfg = load_cfg()
+    cfg["asr_engine"] = engine
+    lang = (lang or "").strip()[:8]
+    if lang:
+        cfg["asr_lang"] = lang
+    else:
+        cfg.pop("asr_lang", None)
+    save_cfg(cfg)
+    return True, "已保存（转写引擎：%s%s）" % (engine, "，语言：" + lang if lang else "")
+
+
 def local_context():
     """后端这一半的上下文：本机已取回的书 + 最近的一批划线。"""
     out = []
@@ -1734,6 +1766,15 @@ def _reader(proc):
             author = m.group(2).strip()
         if "全书导出完成" in line:
             done = True
+        # 子进程要交回结构化结果（比如视频那条线：书 id、字数、AI 缺席原因），
+        # 就走这一行约定：`##GUIZANG## {json}`。日志照旧原样记，前端也能看到。
+        # 之所以不用退出码带信息：退出码只能是 0-255 的一个数，装不下一个 json。
+        if line.startswith(RESULT_MARK):
+            try:
+                with _lock:
+                    TASK["result"] = json.loads(line[len(RESULT_MARK):])
+            except Exception:
+                pass
         log(line)
     proc.wait()
     with _lock:
@@ -1750,7 +1791,7 @@ def start_task(kind, argv, book=None, env_extra=None):
         if TASK["running"]:
             return False, "已有任务在运行"
         TASK.update({"running": True, "kind": kind, "book": book,
-                     "started_at": time.time(), "exit_code": None})
+                     "started_at": time.time(), "exit_code": None, "result": None})
     log(f"--- 启动 {kind}" + (f" · {book}" if book else "") + " ---")
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     # 引擎里 output/ 是相对路径，这里明确指到书库，保证「写进去的」和
@@ -1831,13 +1872,13 @@ def book_meta(book_id):
 
 
 def book_deep_link(book_id, meta):
-    """这本书「回得去的地方」：微信书是原书阅读器，剪藏文章是原文，导入的书没有。
+    """这本书「回得去的地方」：微信书是原书阅读器，剪藏/订阅/视频是原文，导入的书没有。
 
-    原来写死在列表里，判据只有一个 local；加剪藏之后一共有三种来路，
-    抽成一个函数比在字典字面量里套三元表达式好读。
+    原来写死在列表里，判据只有一个 local；加剪藏之后来路变多了（现在是四种：
+    weread / local / clip / feed / video），抽成一个函数比在字典字面量里套三元好读。
     """
     src = meta.get("source") or "weread"
-    if src == "clip":
+    if src in ("clip", "feed", "video"):
         return meta.get("url") or ""
     if src == "local":
         return ""
@@ -1893,6 +1934,226 @@ def notes_counts(book_dir):
         _NOTES_COUNTS.clear()
     _NOTES_COUNTS[book_dir] = (key, out)
     return out
+
+
+# ---------- 订阅 / 视频 / 平台剪藏（三条新来路）----------
+# 三个新功能全都在「书」这个已有结构上收口，和剪藏是一套道理：
+#   · 知乎 / 小红书 / X：只换一个提取器，其余和剪藏同一条路（clip_extract）
+#   · RSS 订阅：条目 → feed.to_shelf() → 一本 source=feed 的书
+#   · 视频转笔记：video_note.run() → 一本 source=video 的书
+# 所以详情页、阅读器、笔记、导出 EPUB/PDF、云同步这些现成能力一行都不用改。
+
+def clip_extract(url):
+    """链接 → 文章。知乎 / 小红书 / X 走专门的解析，其余走通用剪藏。
+
+    web_parse 是「尽量免登录」的路子：X 有公开接口能稳拿；知乎、小红书能拿就拿，
+    拿不到会抛一句人话（要验证 / 要登录），原样递出去。**不悄悄退回通用提取器** ——
+    那样只会把对方的验证页当成正文收进书架，用户以为剪到了，其实剪回来一张空壳。
+    """
+    if web_parse.platform_of(url):
+        return web_parse.extract(url)
+    return clip_article.extract(url)
+
+
+def cache_cover(book_id, url):
+    """把封面图落到 cache/covers/<id>.jpg —— 书架上一张真封面顶十行文字。
+
+    剪藏 / 订阅 / 视频这三条来路的封面都是远端的 og:image 或视频缩略图，而书架
+    只在本地有文件时才请求 /api/cover（免得满屏 404）。所以入库时顺手取一次，
+    失败了也不吭声：封面是锦上添花，不该把「这本书存下了」变成「这本没存下」。
+    """
+    u = (url or "").strip()
+    if not (book_id and re.match(r"^https?://", u)):
+        return False
+    p = cover_path(book_id)
+    if os.path.isfile(p) and os.path.getsize(p) > 800:
+        return True
+    try:
+        req = urllib.request.Request(u, headers={"User-Agent": clip_article.UA})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read(4 * 1024 * 1024)
+        if len(raw) > 800:
+            os.makedirs(COVER_DIR, exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(raw)
+            os.replace(tmp, p)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+_FEED_SUMMARY = {"k": None, "v": None}
+
+
+def feed_summary():
+    """书架上那句「订阅 N 源 · 未读 M 条」。
+
+    /api/state 是轮询的，按 (mtime, size) 缓一份：feed.json 里可能躺着几千条，
+    每两秒重解析一遍纯属白烧 CPU。
+    """
+    try:
+        st = os.stat(feed_mod.STORE)
+    except OSError:
+        return {"subs": 0, "unread": 0}
+    key = (int(st.st_mtime), st.st_size)
+    if _FEED_SUMMARY["k"] == key and _FEED_SUMMARY["v"] is not None:
+        return _FEED_SUMMARY["v"]
+    out = {"subs": 0, "unread": 0}
+    try:
+        rows = feed_mod.subs()
+        out = {"subs": len(rows),
+               "unread": sum(int(r.get("unread") or 0) for r in rows)}
+    except Exception:
+        pass
+    _FEED_SUMMARY.update({"k": key, "v": out})
+    return out
+
+
+_VIDEO_AVAIL = {"at": 0.0, "v": None}
+
+
+def video_avail():
+    """视频这条线现在能走到哪一步（下载器 / ffmpeg / 本地或云 ASR / LLM）。
+
+    available() 要试 import 几个大包（mlx_whisper 那类），一次几十毫秒；状态栏是
+    轮询的，所以缓存 30 秒 —— 用户刚装完组件时最迟半分钟就能看到绿灯。
+    """
+    now = time.time()
+    if _VIDEO_AVAIL["v"] is not None and now - _VIDEO_AVAIL["at"] < 30:
+        return _VIDEO_AVAIL["v"]
+    try:
+        v = video_note.available()
+    except Exception:
+        v = {"ytdlp": False, "ffmpeg": False, "asr": {"local": False, "cloud": True},
+             "llm": False, "engines": []}
+    _VIDEO_AVAIL.update({"at": now, "v": v})
+    return v
+
+
+def feed_view(q):
+    """GET /api/feed?mode=… —— 只读，自己不抛（抛了前端就是「点了没反应」）。"""
+    mode = (q.get("mode", ["list"])[0] or "list").strip()
+    try:
+        if mode == "entry":
+            return {"ok": True, "entry": feed_mod.entry(q.get("id", [""])[0])}
+        if mode == "entries":
+            return {"ok": True, "entries": feed_mod.entries(
+                feed_id=(q.get("feed", [""])[0] or None),
+                unread_only=q.get("unread", ["0"])[0] in ("1", "true"),
+                limit=int(q.get("limit", ["200"])[0] or 200),
+                q=q.get("q", [""])[0])}
+        return {"ok": True, "subs": feed_mod.subs(), "summary": feed_summary()}
+    except Exception as e:
+        return {"ok": False, "msg": "读订阅出错：%s" % str(e)[:140]}
+
+
+def feed_do(body):
+    """POST /api/feed —— 加 / 删 / 改 / 刷 / 标已读 / 收进书架。"""
+    act = str((body or {}).get("act") or "").strip()
+    try:
+        if act == "discover":
+            return {"ok": True, "cands": feed_mod.discover(str(body.get("url") or ""))}
+        if act == "add":
+            f = feed_mod.add(str(body.get("url") or ""),
+                             folder=str(body.get("folder") or "")[:40])
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "feed": f, "subs": feed_mod.subs(),
+                    "msg": "已订阅《%s》" % (f.get("title") or f.get("url"))}
+        if act == "remove":
+            ok = feed_mod.remove(str(body.get("id") or ""))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": ok, "subs": feed_mod.subs(),
+                    "msg": "已退订" if ok else "没找到这个订阅源"}
+        if act == "mark":
+            fid = str(body.get("id") or "")
+            if body.get("drop"):
+                feed_mod.remove(fid)
+                title = None
+            else:
+                title = body.get("title")
+            if body.get("folder") is not None or title is not None:
+                feed_mod.mark(fid, title=(str(title).strip()[:80] if title is not None else None),
+                              folder=(str(body.get("folder"))[:40]
+                                      if body.get("folder") is not None else None))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "subs": feed_mod.subs(), "msg": "已更新"}
+        if act == "refresh":
+            r = feed_mod.refresh(feed_id=(str(body.get("id") or "") or None),
+                                 force=bool(body.get("force")))
+            _FEED_SUMMARY["k"] = None
+            msg = "刷新了 %d 个源" % r.get("feeds", 0)
+            if r.get("new"):
+                msg += "，新增 %d 条" % r["new"]
+            errs = r.get("errors") or []
+            if errs:
+                msg += "；%d 个源没抓成（%s）" % (len(errs), errs[0])
+            return {"ok": True, "msg": msg, "new": r.get("new", 0),
+                    "errors": errs, "subs": feed_mod.subs()}
+        if act == "read":
+            ids = body.get("ids") or ([body["id"]] if body.get("id") else [])
+            n = feed_mod.mark_read(ids, read=bool(body.get("read", True)))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": n, "msg": "已标记"}
+        if act == "shelf":
+            eid = str(body.get("id") or "")
+            info = feed_mod.to_shelf(eid, OUT_DIR)
+            cache_cover(info["id"], (book_meta(info["id"]) or {}).get("cover") or "")
+            log(f"订阅入库：{info['title']}（{info.get('site') or ''}，"
+                f"{info.get('chars') or 0} 字）")
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "book": info,
+                    "msg": "已收进书架：《%s》" % info["title"]}
+        return {"ok": False, "msg": "订阅这块没说要干什么"}
+    except Exception as e:
+        msg = str(e)[:180] or "订阅操作没做成"
+        log(f"--- 订阅失败（{act}）：{msg} ---")
+        return {"ok": False, "msg": msg}
+
+
+def video_view(q):
+    """GET /api/video?mode=plan|status —— 认链接、报可用性。"""
+    mode = (q.get("mode", ["status"])[0] or "status").strip()
+    if mode == "plan":
+        try:
+            return {"ok": True, "plan": video_note.plan(q.get("url", [""])[0])}
+        except Exception as e:
+            return {"ok": False, "msg": str(e)[:180]}
+    return {"ok": True, "available": video_avail()}
+
+
+def video_do(body):
+    """POST /api/video —— 起一条转笔记任务 / 下 ffmpeg / 查进度。"""
+    act = str((body or {}).get("act") or "start").strip()
+    try:
+        if act == "ffmpeg":
+            notes = []
+            env_extra = pc.proxy_env(note=notes)
+            for n in notes:
+                log(f"      · {n}")
+            ok, msg = start_task("ffmpeg", [py(), script("ffmpeg_tool.py"), "--ensure"],
+                                 env_extra=env_extra)
+            return {"ok": ok, "msg": msg}
+        if act == "stop":
+            ok, msg = stop_task()
+            return {"ok": ok, "msg": msg}
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return {"ok": False, "msg": "先把视频链接粘进来"}
+        prog = video_avail()
+        if not prog.get("ytdlp"):
+            return {"ok": False, "msg": "还没装下载器（yt-dlp）：在设置里点一下「补齐组件」"}
+        asr = body.get("asr") if isinstance(body.get("asr"), dict) else {}
+        opts = {"asr": {k: v for k, v in asr.items() if v not in (None, "")},
+                "language": str(body.get("language") or "").strip()[:8]}
+        ok, msg = start_task(
+            "video", [py(), script("video_note.py"), "--task", url],
+            env_extra={"GUIZANG_VIDEO_OPTS": json.dumps(opts, ensure_ascii=False)})
+        return {"ok": ok, "msg": msg}
+    except Exception as e:
+        log(f"--- 视频任务失败（{act}）：{type(e).__name__}: {e} ---")
+        return {"ok": False, "msg": "这个操作没做成：%s" % str(e)[:140]}
 
 
 # ---------- http ----------
@@ -1990,7 +2251,18 @@ class Handler(BaseHTTPRequestHandler):
                 "export": {"dir": export_dir()},
                 "agent": agent_state(),
                 "sync": sync_state(),
+                # 订阅与视频这两条线的「有没有 / 能不能」——书目在 books 里已经有了
+                "feed": feed_summary(),
+                "video": {"available": video_avail(),
+                          "asr": (load_cfg().get("asr_engine") or "auto"),
+                          "lang": (load_cfg().get("asr_lang") or "")},
             })
+
+        if path == "/api/feed":
+            return self._json(feed_view(q))
+
+        if path == "/api/video":
+            return self._json(video_view(q))
 
         if path == "/api/readstat":
             return self._json(readstat_summary())
@@ -2521,10 +2793,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "msg": "先粘贴至少一个文章链接"})
             if mode == "batch":
                 try:
-                    res = clip_article.clip_many(OUT_DIR, urls, cover_dir=COVER_DIR)
+                    res = clip_article.clip_many(OUT_DIR, urls, cover_dir=COVER_DIR,
+                                                 extract_fn=clip_extract)
                 except Exception as e:
                     return self._json({"ok": False, "msg": "剪不动：%s" % str(e)[:160]})
                 for info in res["ok"]:
+                    cache_cover(info["id"], book_meta(info["id"]).get("cover") or "")
                     log(f"剪藏入库：{info['title']}（{info.get('site') or ''}，"
                         f"{info.get('words') or info['chars']} 字）")
                 return self._json({
@@ -2541,9 +2815,10 @@ class Handler(BaseHTTPRequestHandler):
                         OUT_DIR, url,
                         title=str((body or {}).get("title") or "").strip(),
                         author=str((body or {}).get("author") or "").strip(),
-                        cover_dir=COVER_DIR)
+                        cover_dir=COVER_DIR, extract_fn=clip_extract)
+                    cache_cover(info["id"], book_meta(info["id"]).get("cover") or "")
                 else:
-                    art = clip_article.extract(url)
+                    art = clip_extract(url)
                     return self._json({"ok": True, "preview": {
                         "title": art["title"], "author": art["author"],
                         "site": art["site"], "date": art["date"], "cover": art["cover"],
@@ -2558,6 +2833,12 @@ class Handler(BaseHTTPRequestHandler):
             log(f"剪藏入库：{info['title']}（{info.get('site') or ''}，{info['chars']} 字）")
             return self._json({"ok": True, "book": info,
                                "msg": f"已剪进书架：《{info['title']}》{info['chars']} 字"})
+
+        if u.path == "/api/feed":
+            return self._json(feed_do(body))
+
+        if u.path == "/api/video":
+            return self._json(video_do(body))
 
         if u.path == "/api/mynotes":
             # 存这本书的笔记。落盘后把「服务端认得的版本」回给前端 —— id 和时间戳
@@ -2664,6 +2945,12 @@ class Handler(BaseHTTPRequestHandler):
         if action == "agent.test":
             ok, msg, _ms = agent_test()
             return self._json({"ok": ok, "msg": msg})
+
+        if action == "media.save":
+            ok, msg = set_media_cfg(body.get("engine"), body.get("lang"))
+            return self._json({"ok": ok, "msg": msg,
+                               "asr": (load_cfg().get("asr_engine") or "auto"),
+                               "lang": (load_cfg().get("asr_lang") or "")})
 
         if action == "install":
             # 只有这一步需要把系统代理翻成环境变量：playwright 的下载器是 Node，
