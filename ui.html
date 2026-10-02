@@ -25,6 +25,14 @@
     --glass:rgba(var(--glass-rgb), var(--frost));
     --glass-2:rgba(var(--glass-rgb), calc(var(--frost) * .66));
     --solid:#fff;
+    /* 写字的那张纸：永远不透明。借 VitePress 的分工（它的内容底 --vp-c-bg 是一整块实色，
+       只有周边 chrome 才用半透明）——玻璃感留给外壳，笔底下一透出后面的字就没法读了。
+       --paper 是纸面，--paper-2 是纸上的浅槽（工具条 / 预览栏 / 导图台），
+       --paper-inset 再淡一档（标签片、行内小钮）。三档都跟着主题走，
+       而且不参与「磨砂浓度」滑杆：调透明度调的是玻璃，不该把纸也调薄。 */
+    --paper:#fff;
+    --paper-2:#f7f8fc;
+    --paper-inset:rgba(20,24,32,.05);
     /* 字段底色：输入框、下拉、统计格共用的一层极淡的凹面。
        之前代码里一直在引用 --surface-2，但这个变量从没定义过 ——
        引用未定义的变量会整条声明失效，那些框其实是透明地裸在玻璃上。 */
@@ -52,6 +60,9 @@
       --glass-rgb:28,31,38;
       --frost:.62;
       --solid:#1e2128;
+      --paper:#1e2229;
+      --paper-2:#242935;
+      --paper-inset:rgba(255,255,255,.075);
       --surface-2:rgba(255,255,255,.055);
       --accent:#5fa4f7;
       --accent-soft:rgba(95,164,247,.15);
@@ -72,6 +83,9 @@
     --glass-rgb:28,31,38;
     --frost:.62;
     --solid:#1e2128;
+    --paper:#1e2229;
+    --paper-2:#242935;
+    --paper-inset:rgba(255,255,255,.075);
     --surface-2:rgba(255,255,255,.055);
     --accent:#5fa4f7;
     --accent-soft:rgba(95,164,247,.15);
@@ -184,20 +198,24 @@
   .popmask{
     position:fixed; inset:0; z-index:54; background:rgba(14,19,28,.36);
     -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
-    opacity:0; pointer-events:none; transition:opacity .22s ease;
+    opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .22s ease, visibility 0s linear .22s;
   }
-  .popmask.open{opacity:1; pointer-events:auto}
+  .popmask.open{opacity:1; visibility:visible; pointer-events:auto;
+    transition:opacity .22s ease, visibility 0s linear}
   .pop{
     position:fixed; z-index:55; top:50%; left:50%;
     width:min(94vw, 700px); height:min(78vh, 540px);
     display:grid; grid-template-columns:168px minmax(0,1fr);
     padding:0; border-radius:16px; overflow:hidden;
     transform:translate(-50%,-50%) scale(.96);
-    opacity:0; pointer-events:none;
+    /* 同 .veil：关着的设置弹窗是一块 700×540 的玻璃，光靠 opacity:0 它还在合成 */
+    opacity:0; visibility:hidden; pointer-events:none;
     box-shadow:0 40px 90px -34px rgba(10,15,24,.6), var(--sheen);
-    transition:opacity .2s ease, transform .3s cubic-bezier(.2,.9,.28,1);
+    transition:opacity .2s ease, transform .3s cubic-bezier(.2,.9,.28,1), visibility 0s linear .2s;
   }
-  .pop.open{opacity:1; transform:translate(-50%,-50%); pointer-events:auto}
+  .pop.open{opacity:1; visibility:visible; transform:translate(-50%,-50%); pointer-events:auto;
+    transition:opacity .2s ease, transform .3s cubic-bezier(.2,.9,.28,1), visibility 0s linear}
   .popnav{
     display:flex; flex-direction:column; gap:2px; padding:12px 10px;
     border-right:1px solid var(--line);
@@ -455,13 +473,14 @@
     position:fixed; left:50%; bottom:32px; z-index:50;
     transform:translateX(-50%) translateY(7px);
     padding:9px 18px; border-radius:999px; font-size:12.5px;
-    background:rgba(28,37,54,.92); color:#fff; opacity:0; pointer-events:none;
+    background:rgba(28,37,54,.92); color:#fff; opacity:0; visibility:hidden; pointer-events:none;
     max-width:min(74vw, 560px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
     box-shadow:0 16px 34px -16px rgba(28,37,54,.75);
-    transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1);
+    transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1), visibility 0s linear .24s;
   }
-  .whisper.up{opacity:1; transform:translateX(-50%) translateY(0)}
+  .whisper.up{opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);
+    transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1), visibility 0s linear}
   @media (prefers-color-scheme:dark){
     :root:not([data-theme="light"]) .whisper{background:rgba(233,237,244,.94); color:#12151b}
   }
@@ -471,9 +490,14 @@
   .veil{
     position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:24px;
     background:rgba(20,26,38,.42); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
-    opacity:0; pointer-events:none; transition:opacity .22s ease;
+    /* 关着的整屏遮罩不能只靠 opacity:0 —— 透明度为零的 backdrop-filter 照样占一个
+       合成层，而且是全屏那么大。visibility 才是「这一层今天不在场」的开关，
+       退场时延后到淡出结束再翻，进场时立刻翻，动画不受影响。 */
+    opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .22s ease, visibility 0s linear .22s;
   }
-  .veil.open{opacity:1; pointer-events:auto}
+  .veil.open{opacity:1; visibility:visible; pointer-events:auto;
+    transition:opacity .22s ease, visibility 0s linear}
   .sheet{
     width:min(580px,100%); max-height:80vh; overflow:auto; border-radius:var(--r); padding:22px;
     transform:translateY(10px) scale(.985); transition:transform .26s cubic-bezier(.2,.9,.28,1);
@@ -650,6 +674,12 @@
   .strip button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
   .strip button:active{transform:scale(.95)}
   .strip .close{margin-top:auto; color:var(--ink-3)}
+  /* 一屏十几张卡 = 十几层抽屉 + 几十颗玻璃按钮，每层都挂着 backdrop-filter；
+     而这条抽屉平时整条被卡片的 overflow:hidden 裁在外面，没人看得见，
+     浏览器却还在替它算背景模糊。收起时不合成，展开（.open）再开：
+     观感一样，省下来的是每帧几十次合成 —— 这是「点一下就卡一下」的大头。 */
+  .wcard:not(.open) .strip,
+  .wcard:not(.open) .strip button{-webkit-backdrop-filter:none; backdrop-filter:none}
 
   /* ── 右下角任务记录 ───────────────────── */
   .dock{
@@ -1031,18 +1061,21 @@
     --rd-ink:var(--ink);
     --rd-ink2:var(--ink-2);
     --rd-rule:var(--line);
+    /* 顶/底那两条与右栏笔记：读的时候正文在它们旁边滚，必须是实色纸 */
+    --rd-barbg:var(--paper);
+    --rd-note:var(--paper-2);
   }
   /* 阅读底色：默认跟界面走（透明），另给「羊皮纸」「深夜」两种安静的底色。
-     底色一变，正文里的分隔线/引用线也得跟着换色，不然浅底上会有脏线。 */
+     底色一变，正文里的分隔线/引用线也得跟着换色，不然浅底上会有脏线。
+     --rd-barbg / --rd-note 是顶底两条与右栏笔记的那两块：正文从它们底下滚过去时，
+     半透明会把字压在下面糊成一片，所以这两种底色在每一档主题里都必须是实色
+     （默认值写在上面那个 .rdwrap 里）。 */
   .rdwrap[data-rdtheme="paper"]{--rd-bg:#f6efe0; --rd-ink:#3a3226; --rd-ink2:#6d5f48;
-    --rd-rule:rgba(120,95,55,.2)}
+    --rd-rule:rgba(120,95,55,.2); --rd-barbg:#f6efe0; --rd-note:#f2ebdc;
+    --paper-inset:rgba(120,95,55,.10)}
   .rdwrap[data-rdtheme="night"]{--rd-bg:#14161c; --rd-ink:#c9cfdc; --rd-ink2:#8d95a6;
-    --rd-rule:rgba(200,212,236,.14)}
-  /* 底色换深/换暖后，阅读条与翻页条那层浅白会突然刺眼，跟着调淡。 */
-  .rdwrap[data-rdtheme="night"] .rdbar,
-  .rdwrap[data-rdtheme="night"] .rdfoot{background:rgba(255,255,255,.035)}
-  .rdwrap[data-rdtheme="paper"] .rdbar,
-  .rdwrap[data-rdtheme="paper"] .rdfoot{background:rgba(246,239,224,.45)}
+    --rd-rule:rgba(200,212,236,.14); --rd-barbg:#14161c; --rd-note:#1a1d25;
+    --paper-inset:rgba(255,255,255,.08)}
   /* 阅读器要「一屏刚好」：正文自己滚，整页不许跟着滚，否则翻章会看到整页在动。
      body.reading 由 paneEl 在切到阅读器时挂上。
      #view 是 <section>，会吃到全局 section{margin-bottom:22px}——阅读时清掉它，
@@ -1118,7 +1151,7 @@
      把「划线 / 条目」那两颗盖住 —— 看着像页签坏了。 */
   .rdbar{position:relative; display:flex; align-items:center; gap:9px;
     padding:6px 12px 6px 16px; flex:none; min-width:0; flex-wrap:wrap;
-    border-bottom:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.3);
+    border-bottom:1px solid var(--rd-rule, var(--line)); background:var(--rd-barbg, var(--paper));
     transition:background-color .34s ease, box-shadow .22s ease}
   .rdcrumb{font-size:12px; font-weight:550; color:var(--rd-ink2, var(--ink-2));
     min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
@@ -1142,8 +1175,29 @@
     background:var(--glass); -webkit-backdrop-filter:blur(20px) saturate(180%);
     backdrop-filter:blur(20px) saturate(180%); box-shadow:var(--shadow);
     transform-origin:top right; transform:scale(.94); opacity:0; pointer-events:none;
-    transition:opacity .18s ease, transform .18s var(--pop)}
-  .rdpop.show{opacity:1; transform:none; pointer-events:auto}
+    visibility:hidden;
+    transition:opacity .18s ease, transform .18s var(--pop), visibility 0s linear .18s}
+  .rdpop.show{opacity:1; transform:none; pointer-events:auto; visibility:visible;
+    transition:opacity .18s ease, transform .18s var(--pop), visibility 0s linear}
+  /* 本章大纲：长章节里找小节不该靠滚。层级用左缩进错开，读到哪一节就亮着哪一节。
+     宽度跟着设置面板那 252px 走，两枚浮窗对齐成一套。 */
+  .rdol{max-height:min(54vh, 400px); overflow:auto; padding:7px 7px; scrollbar-width:thin;
+    display:flex; flex-direction:column; gap:1px}
+  #rdOlPop{padding:6px 6px}
+  .rdol::-webkit-scrollbar{width:7px}
+  .rdol::-webkit-scrollbar-thumb{background:rgba(120,133,155,.24);
+    border-radius:99px; border:2px solid transparent; background-clip:content-box}
+  .rdol button{display:block; width:100%; text-align:left; border:0; background:transparent;
+    font:inherit; font-size:12px; line-height:1.4; color:var(--ink-2); cursor:pointer;
+    padding:6px 8px; border-radius:8px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; transition:background .14s ease, color .14s ease}
+  .rdol button:hover{background:var(--surface-2); color:var(--ink)}
+  .rdol button.l2{padding-left:19px}
+  .rdol button.l3{padding-left:30px; font-size:11.5px; opacity:.82}
+  .rdol button.on{background:var(--accent-soft); color:var(--accent); opacity:1}
+  .rdol .none{padding:8px 9px; font-size:11.5px; color:var(--ink-3)}
+  /* 大纲跳过去时别把标题顶到边缘上；正文里的 h1~h3 都留一点上边距。 */
+  .md h1,.md h2,.md h3{scroll-margin-top:18px}
   .rdrow{display:flex; align-items:center; gap:10px; margin-top:11px}
   .rdrow:first-child{margin-top:0}
   .rdlab{flex:none; width:40px; font-size:11.5px; color:var(--ink-3)}
@@ -1169,11 +1223,9 @@
      收起来时轨宽变 0，栏里的东西靠 overflow 裁掉，不是一下消失。 */
   .rdnotes{display:flex; flex-direction:column; min-height:0; min-width:0;
     overflow:hidden; border-left:1px solid var(--line);
-    background:rgba(255,255,255,.22); transition:opacity .24s ease .06s,
+    background:var(--rd-note, var(--paper-2)); transition:opacity .24s ease .06s,
     background-color .34s ease}
   .rdwrap:not(.notes) .rdnotes{opacity:0; pointer-events:none; transition:opacity .18s ease}
-  .rdwrap[data-rdtheme="night"] .rdnotes{background:rgba(255,255,255,.035)}
-  .rdwrap[data-rdtheme="paper"] .rdnotes{background:rgba(246,239,224,.5)}
   /* 顶部：两个页签 + 收起。页签上的数字就是「这本书我记了多少」，不用点进去数。 */
   .nttabs{display:flex; align-items:center; gap:4px; flex:none;
     padding:8px 9px 7px; border-bottom:1px solid var(--line)}
@@ -1190,7 +1242,7 @@
   /* 标签筛选：一支笔一行片，点了就只看这一类。最后那颗「只在本章」是范围开关。 */
   .ntchips{display:flex; flex-wrap:wrap; gap:4px; flex:none; padding:8px 9px 6px}
   .ntchip{display:inline-flex; align-items:center; gap:5px; height:23px; padding:0 8px;
-    border:1px solid var(--line-2); border-radius:99px; background:rgba(255,255,255,.5);
+    border:1px solid var(--line-2); border-radius:99px; background:var(--paper-inset);
     cursor:pointer; font:inherit; font-size:11.5px; color:var(--ink-2); white-space:nowrap;
     transition:border-color .16s ease, background .16s ease, color .16s ease}
   .ntchip:hover{border-color:var(--line-2); background:var(--surface-2); color:var(--ink)}
@@ -1228,7 +1280,7 @@
   .ntrow .nacts{display:flex; gap:3px; margin-top:6px; opacity:0; max-height:0;
     overflow:hidden; transition:opacity .16s ease, max-height .18s var(--spring)}
   .ntrow:hover .nacts, .ntrow:focus-within .nacts, .ntrow.on .nacts{opacity:1; max-height:30px}
-  .ntrow .nacts button{border:1px solid var(--line-2); border-radius:7px; background:rgba(255,255,255,.6);
+  .ntrow .nacts button{border:1px solid var(--line-2); border-radius:7px; background:var(--paper-inset);
     cursor:pointer; font:inherit; font-size:11px; color:var(--ink-2); height:22px; padding:0 8px;
     transition:background .14s ease, color .14s ease, border-color .14s ease}
   .ntrow .nacts button:hover{background:var(--surface-2); color:var(--ink)}
@@ -1245,14 +1297,20 @@
      所以各开一层浮窗，写完了再把结果落回这本书的文件夹里。 */
   .ntlay{position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:24px;
     background:rgba(20,26,38,.40); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px);
-    opacity:0; pointer-events:none; transition:opacity .22s ease}
-  .ntlay.open{opacity:1; pointer-events:auto}
+    opacity:0; visibility:hidden; pointer-events:none;
+    /* visibility 跟着淡出走：opacity:0 并不停止合成，关着的浮层照样占一整屏的模糊开销；
+       延后 0.22s 收起，淡出这一路才看得见，收完合成层就彻底还给页面了。 */
+    transition:opacity .22s ease, visibility 0s linear .22s}
+  .ntlay.open{opacity:1; visibility:visible; pointer-events:auto;
+    transition:opacity .22s ease, visibility 0s linear}
   .ntlay>section{display:flex; flex-direction:column; width:min(1040px,100%);
     max-height:min(760px,100%); border-radius:var(--r); overflow:hidden;
-    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
-    backdrop-filter:blur(var(--blur)) saturate(180%); border:1px solid var(--line);
+    /* 写作层是一块实色纸，不是玻璃：不写 backdrop-filter，也不半透明。
+       后面书架上的字透上来会跟正在写的字叠成一片 —— 用户报的正是这个。
+       磨砂感留在浮层外面那层暗纱上（.ntlay 自己），纸面里彻底干净。 */
+    background:var(--paper); border:1px solid var(--line);
     box-shadow:var(--shadow), var(--sheen); transform:translateY(12px) scale(.986);
-    transition:transform .28s var(--spring)}
+    transition:transform .28s var(--spring), opacity .2s ease}
   .ntlay.open>section{transform:none}
   .ntlay.narrow>section{width:min(680px,100%)}
   /* 条目编辑器是写长文的地方：给个稳当高度，不然两行字就缩成一张小卡，
@@ -1275,7 +1333,7 @@
   /* 工具条：一排小方块，按「结构 → 字面 → 插入 → 这套书的活儿」分组。
      组与组之间一道细竖线，眼睛找得到边界，不必把十八颗钮数一遍。 */
   .edtools{display:flex; align-items:center; gap:3px; flex:none; flex-wrap:wrap;
-    padding:6px 12px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.24)}
+    padding:6px 12px; border-bottom:1px solid var(--line); background:var(--paper-2)}
   .edtools button{border:1px solid transparent; border-radius:7px; background:transparent;
     cursor:pointer; font:inherit; font-size:11.5px; color:var(--ink-2); height:26px;
     min-width:27px; padding:0 7px; display:inline-flex; align-items:center; gap:4px;
@@ -1311,11 +1369,11 @@
   .edbody.split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .edbody.view{grid-template-columns:0 minmax(0,1fr)}
   .edta{min-width:0; border:0; resize:none; outline:none; padding:18px 20px 40px;
-    background:transparent; color:var(--ink); font:13px/1.85 ui-monospace,"SF Mono",Menlo,monospace;
+    background:var(--paper); color:var(--ink); font:13px/1.85 ui-monospace,"SF Mono",Menlo,monospace;
     overflow:auto; scrollbar-width:thin}
   .edta::placeholder{color:var(--ink-3)}
   .edpv{min-width:0; overflow:auto; border-left:1px solid var(--line);
-    padding:16px 20px 40px; scrollbar-width:thin; background:rgba(255,255,255,.2)}
+    padding:16px 20px 40px; scrollbar-width:thin; background:var(--paper-2)}
   .edbody.split .edpv, .edbody.view .edpv{border-left:1px solid var(--line)}
   .edbody.view .edta{overflow:hidden}
   /* 条目底下的引用区：一句原文 + 出处，点一下就翻回那一章那一句。 */
@@ -1324,7 +1382,7 @@
   .edrefs:empty{display:none}
   .edref{display:inline-flex; align-items:center; gap:6px; max-width:100%; height:25px;
     padding:0 4px 0 8px; border:1px solid var(--line-2); border-radius:99px;
-    background:rgba(255,255,255,.5); cursor:pointer; font:inherit; font-size:11px;
+    background:var(--paper-inset); cursor:pointer; font:inherit; font-size:11px;
     color:var(--ink-2); transition:border-color .14s ease, background .14s ease}
   .edref:hover{border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
   .edref em{font-style:normal; max-width:230px; overflow:hidden; text-overflow:ellipsis;
@@ -1338,7 +1396,7 @@
      弹窗问话会垫在底下看不见）。 */
   .tplform{padding:4px 13px 12px; display:flex; flex-direction:column; gap:8px}
   .tplform input,.tplform textarea{width:100%; border:1px solid var(--line-2); border-radius:9px;
-    background:rgba(255,255,255,.55); color:var(--ink); font:inherit; font-size:12.5px;
+    background:var(--paper-2); color:var(--ink); font:inherit; font-size:12.5px;
     padding:8px 10px; outline:none; transition:border-color .16s ease, box-shadow .16s ease}
   .tplform textarea{min-height:170px; resize:vertical; font:12px/1.75 ui-monospace,"SF Mono",Menlo,monospace}
   .tplform input:focus,.tplform textarea:focus{border-color:var(--accent);
@@ -1379,7 +1437,7 @@
     border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-2)}
   .mapbar .grow{flex:1}
   .mapstage{flex:1; min-height:0; overflow:auto; display:grid; place-items:center;
-    padding:16px; background:rgba(255,255,255,.28); scrollbar-width:thin}
+    padding:16px; background:var(--paper-2); scrollbar-width:thin}
   .mapstage img{max-width:none; border-radius:10px; background:transparent;
     transition:transform .2s var(--spring)}
   .mapstage.busy::after{content:'正在画…'; color:var(--ink-3); font-size:12.5px}
@@ -1399,7 +1457,7 @@
   .ntrow .pvs table{font-size:10.5px}
   .ntrow .refs{display:flex; flex-wrap:wrap; gap:4px; margin-top:6px}
   .ntrow .rf{display:inline-flex; align-items:center; gap:5px; max-width:100%; height:21px;
-    padding:0 7px; border-radius:99px; border:1px solid var(--line-2); background:rgba(255,255,255,.5);
+    padding:0 7px; border-radius:99px; border:1px solid var(--line-2); background:var(--paper-inset);
     cursor:pointer; font:inherit; font-size:10.5px; color:var(--ink-2);
     transition:border-color .14s ease, background .14s ease}
   .ntrow .rf:hover{border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
@@ -1441,7 +1499,7 @@
   .rdin{max-width:var(--rd-w); margin:0 auto; padding:30px 34px 64px;
     transition:max-width .24s var(--spring), color .34s ease}
   .rdfoot{display:flex; align-items:center; gap:10px; padding:9px 16px;
-    border-top:1px solid var(--rd-rule, var(--line)); background:rgba(255,255,255,.32);
+    border-top:1px solid var(--rd-rule, var(--line)); background:var(--rd-barbg, var(--paper));
     font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums;
     transition:background-color .34s ease, box-shadow .22s ease}
   .rdfoot .grow{flex:1}
@@ -1552,9 +1610,7 @@
   .md .twrap::-webkit-scrollbar-thumb{background:rgba(120,133,155,.22);
     border-radius:99px; border:2px solid transparent; background-clip:content-box}
   .md .twrap:hover::-webkit-scrollbar-thumb{background:rgba(120,133,155,.4); background-clip:content-box}
-  /* 章节之间换页时的轻微淡入：让「切章」像翻页，而不是闪一下。 */
-  .rdin.fade{animation:rdfade .32s ease both}
-  @keyframes rdfade{from{opacity:0; transform:translate3d(0,6px,0)} to{opacity:1; transform:none}}
+  /* 章节之间换页时的轻微淡入在 rdPaint 里用 WAAPI 播，不占样式表。 */
 
   /* 划词小条：选中正文里的一段就贴出来 —— 复制 / 译成中文 / 问小助手；
      单击英文单词则直接弹一张释义卡。挂在 body 上，换章重铺正文也不会被冲掉。 */
@@ -1696,6 +1752,20 @@
   .skline{height:11px; border-radius:6px; margin:9px 18px;
     background:linear-gradient(100deg, rgba(127,140,160,.10) 32%, rgba(127,140,160,.21) 50%, rgba(127,140,160,.10) 68%);
     background-size:220% 100%; animation:shimmer 1.6s linear infinite}
+  /* 行内那一小截（列表右侧的计数、行里的标题）：跟 .skline 同一套微光，
+     只是 inline-block，能塞进 flex 行里不撑破对齐 */
+  .skbar{display:inline-block; height:10px; border-radius:6px; vertical-align:middle;
+    background:linear-gradient(100deg, rgba(127,140,160,.10) 32%, rgba(127,140,160,.21) 50%, rgba(127,140,160,.10) 68%);
+    background-size:220% 100%; animation:shimmer 1.6s linear infinite}
+  /* 卡片骨架的外壳：照 .wcard 的圆角/描边/底色摆，里面的封面和文字行再各自微光 */
+  .skcard{border-radius:10px; overflow:hidden; background:var(--glass-2); border:1px solid var(--line)}
+  .skcard .skel{border-radius:0}
+  /* 内容换到骨架位上那一下：淡着浮上来，不是「啪」地出现。只动 opacity，
+     这是合成层里的事，不会连累重排。（同类做法见 Element Plus 的 skeleton、
+     VitePress 的 doc-content 过渡。） */
+  @keyframes contentIn{from{opacity:0}to{opacity:1}}
+  .vin{animation:contentIn .24s var(--spring) both}
+  @media (prefers-reduced-motion:reduce){ .vin{animation:none} }
 
   /* 设置弹窗的进出交给上面那组规则（居中缩放），这里不再从齿轮位置长出来 */
 
@@ -1752,6 +1822,15 @@
     --glass-rgb:24,26,32;
     --frost:.46;
     --solid:rgba(26,28,34,.66);
+    /* 壁纸压暗了玻璃，纸不能跟着变透 —— 写字的地方永远给一块实色 */
+    --paper:#171a20;
+    --paper-2:#1e222a;
+    --paper-inset:rgba(255,255,255,.085);
+    /* 壁纸偏暗时玻璃被压得更透，但纸不能跟着透：写作面另给一对实色，
+       否则「加了壁纸 → 编辑器的字和后面的书架字叠在一起」。 */
+    --paper:#161a21;
+    --paper-2:#1d222b;
+    --paper-inset:rgba(255,255,255,.08);
     --accent:#8ec2ff;
     --accent-soft:rgba(142,194,255,.2);
     --mint:#7fe0c6;
@@ -1769,6 +1848,9 @@
     --glass-rgb:255,255,255;
     --frost:.6;
     --solid:rgba(255,255,255,.8);
+    --paper:#fff;
+    --paper-2:#f6f7fb;
+    --paper-inset:rgba(20,24,32,.05);
     --shadow:0 2px 8px rgba(20,24,32,.06), 0 24px 54px -26px rgba(20,24,32,.28);
     --sheen:inset 0 .5px 0 rgba(255,255,255,.9);
   }
@@ -1889,13 +1971,14 @@
   .batchbar{
     position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(14px);
     z-index:45; display:flex; align-items:center; gap:9px; padding:10px 14px;
-    border-radius:16px; opacity:0; pointer-events:none;
+    border-radius:16px; opacity:0; visibility:hidden; pointer-events:none;
     background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
     backdrop-filter:blur(var(--blur)) saturate(190%);
     border:1px solid var(--line); box-shadow:var(--shadow), var(--sheen);
-    transition:opacity .22s ease, transform .26s cubic-bezier(.2,.9,.28,1);
+    transition:opacity .22s ease, transform .26s cubic-bezier(.2,.9,.28,1), visibility 0s linear .22s;
   }
-  body.batch .batchbar{opacity:1; pointer-events:auto; transform:translateX(-50%)}
+  body.batch .batchbar{opacity:1; visibility:visible; pointer-events:auto; transform:translateX(-50%);
+    transition:opacity .22s ease, transform .26s cubic-bezier(.2,.9,.28,1), visibility 0s linear}
   .batchbar .n{font-size:12.5px; color:var(--ink-2); margin-right:2px; white-space:nowrap}
 
   /* 卡片回顾 / 随机漫步 */
@@ -2084,7 +2167,7 @@
                style="flex:1;min-width:0;accent-color:var(--accent)">
         <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
       </div>
-      <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。</div>
+      <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。写作台、笔记纸、正文纸面是固定的实心纸，不受这条影响 —— 调的是玻璃，不该把纸也调薄。</div>
       <div class="row">
         <span class="k">模糊强度</span>
         <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
@@ -3904,13 +3987,14 @@ function navBtns() {
 
 /** 侧边栏悬停预判：指针停在哪一项上，就把那一屏的数据先拉起来。
  *  点下去时 renderView() 会发现数据已经在手边 —— 从「点了才开始等」
- *  变成「点的时候已经到了」。只给前三屏布线：随机漫步与搜索是本地动作/要打字，
- *  没有「预判」可言。 */
+ *  变成「点的时候已经到了」。只给要联网的那几项布线：随机漫步与搜索是
+ *  本地动作/要打字，没有「预判」可言。 */
 function wireNavAhead() {
   const jobs = {
     shelf: () => { if (keySet) loadShelf(); },
     notes: () => { if (keySet) preNotebooks(); },
     stats: () => { if (keySet) preStats(); },
+    pick: () => { if (keySet) prePick(); },
   };
   navBtns().forEach(b => {
     const fn = jobs[b.dataset.v];
@@ -4126,6 +4210,87 @@ function shelfSkeleton(n) {
     box.append(s);
   }
   return box;
+}
+
+/* ── 骨架屏 ───────────────────────────────
+   原来每屏冷启动只有一行「读取中…」，慢网实测这一行要挂 0.8~1.6 秒 ——
+   用户看到的「切换没加载出来」就是这段空白。换成和真内容同形状的微光：
+   高度先占住，数据换上来时不但不闪，也不会把下面的东西顶一下。
+   （做法参照 Element Plus 的 el-skeleton 与 VitePress 的骨架占位。） */
+
+/** 几行不同宽度的条：给统计、回顾这类「一段文字 + 图表」的屏用 */
+function skelLines(n) {
+  const w = [58, 88, 42, 76, 34, 68, 50, 82];
+  let s = '<div style="padding:24px 22px">';
+  for (let i = 0; i < (n || 4); i++) {
+    s += `<div class="skline" style="margin:${i ? 13 : 0}px 0 0; width:${w[i % w.length]}%"></div>`;
+  }
+  return s + '</div>';
+}
+
+/** 一摞行：给「划线笔记」那种一行一本的列表用（形状照 .wrrow 摆） */
+function skelRows(n) {
+  const w = [46, 62, 38, 70, 52, 58, 44, 66];
+  let s = '';
+  for (let i = 0; i < (n || 6); i++) {
+    s += `<div class="wrrow"><span class="nm"><span class="skbar" style="width:${w[i % w.length]}%"></span></span>`
+      + `<span class="ct"><span class="skbar" style="width:84px"></span></span></div>`;
+  }
+  return s;
+}
+
+/** 一屏卡片：给书城搜索、为我推荐用（封面 2:3 + 两行文字，和 .scard 对齐） */
+function skelCards(n, cls) {
+  let s = `<div class="${cls || 'sgrid'}">`;
+  for (let i = 0; i < (n || 8); i++) {
+    s += '<div class="skcard"><div class="skel"></div><div style="padding:9px 11px 11px">'
+      + '<div class="skline" style="margin:0; width:76%"></div>'
+      + '<div class="skline" style="margin:7px 0 0; width:44%; height:9px"></div></div></div>';
+  }
+  return s + '</div>';
+}
+
+/** 统计那一屏：四格数字 + 几行榜单，形状照 .statgrid / .wrrow 摆 */
+function skelStats() {
+  const cell = '<div class="statbox"><div class="k"><span class="skbar" style="width:38px"></span></div>'
+    + '<div class="v"><span class="skbar" style="width:64px; height:17px"></span></div></div>';
+  return `<div class="statgrid">${cell.repeat(4)}</div>` + skelRows(3);
+}
+
+/** 骨架换成真内容那一下：淡着浮上来。void offsetWidth 是逼一次重排，
+ *  让连着两次进来（比如反复搜同一个词）也能重播，不会只剩第一次有动画。 */
+function fadeIn(el) {
+  if (!el || prefersReduced()) return;
+  el.classList.remove('vin');
+  void el.offsetWidth;
+  el.classList.add('vin');
+}
+
+/** 统计那一屏的数字从 0 滚到位（只做冷启动那一次）。
+ *  为什么只给冷启动：再进来时缓存里的账直接摆着就对了，让它们反复滚一遍
+ *  像在骗人 —— 数没变。系统开了「减弱动效」就不滚，直接落终值。
+ *  只认纯数字的文本节点，所以「+12%」这种带符号的对比值不会被动到。 */
+function rollNums(root, ms) {
+  if (!root || prefersReduced()) return;
+  const nodes = [];
+  root.querySelectorAll('.statbox .v').forEach(v => {
+    v.childNodes.forEach(n => {
+      if (n.nodeType === 3 && /^\d+(\.\d+)?$/.test(n.nodeValue.trim())) nodes.push(n);
+    });
+  });
+  if (!nodes.length) return;
+  const to = nodes.map(n => parseFloat(n.nodeValue));
+  nodes.forEach(n => { n.nodeValue = '0'; });
+  const t0 = performance.now(), dur = ms || 620;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);            // ease-out cubic：起步快、收尾不拖
+    nodes.forEach((n, i) => {
+      n.nodeValue = String(Math.round(to[i] * e));
+    });
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 let shellKeyAt = null;   // 书架那一屏的结构是在「有没有接口 Key」的哪种前提下铺的
@@ -5217,8 +5382,10 @@ let nbBooks = [], nbItems = [], nbSel = new Set(), nbOpen = null, nbTitle = '';
 async function renderNotebooks() {
   const {p, body} = viewPane('notes', viewHeader('划线笔记'));
   if (!keySet) { body.innerHTML = notReady(); return; }
-  // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白
-  if (!nbBooks.length) setHtml(body, '<div class="emptyline">读取中…</div>');
+  // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白。
+  // 空手进来时铺的是同形状骨架（7 行 ≈ 一屏），数据到位再淡着换上去。
+  const cold = !nbBooks.length;
+  if (cold) setHtml(body, skelRows(7));
   try {
     // 侧边栏悬停时预取的那份就在手边（见 wireNavAhead）：已经落地的直接用，
     // 还在飞的搭上它那一趟，只有压根没预判过才自己发。
@@ -5249,6 +5416,7 @@ async function renderNotebooks() {
       row.onclick = () => openNotebook(b);
       return row;
     }));
+    if (cold) fadeIn(body);
   } catch (e) {
     body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
   }
@@ -5490,9 +5658,10 @@ async function renderStatsView() {
   });
   paintTabs();
   const mode = window.__mode || 'monthly';
-  // 上次这一档的数据直接摆上来，不给「读取中…」占位闪一下
+  // 上次这一档的数据直接摆上来；这一档压根没读过才铺骨架
+  const cold = !statsCache[mode];
   if (statsCache[mode]) setHtml(body, statsCache[mode]);
-  else body.innerHTML = '<div class="emptyline">读取中…</div>';
+  else body.innerHTML = skelStats();
 
   // 本机那份账谁也拦不住，先抓；微信读书那份要连上账号才有。
   // 两趟并着走，谁先回来都不影响另一趟。
@@ -5549,7 +5718,10 @@ async function renderStatsView() {
         <span class="nm" style="color:var(--ink-3);font-size:11.5px">微信读书读得最多的</span></div>${top}` : '')
     + localSection(local, mode);
   statsCache[mode] = html;
-  if ((window.__mode || 'monthly') === mode) { setHtml(body, html); wireRsClear(body); }
+  if ((window.__mode || 'monthly') === mode) {
+    setHtml(body, html); wireRsClear(body);
+    if (cold) { fadeIn(body); rollNums(body); }
+  }
 }
 
 /* ── 为我推荐（一次 6 本，随容器缩放） ── */
@@ -5569,11 +5741,11 @@ function paintPick(body) {
   fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
 }
 
-async function renderPickView() {
-  const {body} = viewPane('pick', viewHeader('为我推荐'));
-  if (!keySet) { setHtml(body, notReady()); return; }
-  if (pickList.length) paintPick(body);
-  else body.innerHTML = '<div class="emptyline">读取中…</div>';
+/** 推荐这一路的数据：官方 /book/recommend 常常只回两三本，得再借一本种子
+ *  去 /book/similar 补齐到 6 本。原来这两趟是串着的 —— 慢网实测这一屏 1.6 秒，
+ *  其中将近一半是在等第二趟。两趟互不依赖（种子用书架第一本，本地就有），
+ *  所以并着发；只有书架空到拿不出种子时，才退回「先拿到推荐再补」。 */
+function fetchPicks() {
   const key = x => (x.bookId || x.id || x.title || '');
   const dedupe = (arr, seen) => arr.filter(x => {
     const k = key(x);
@@ -5581,21 +5753,41 @@ async function renderPickView() {
     seen.add(k);
     return true;
   });
-  try {
+  // 两路的返回都可能是 {book:{…}} 包一层，也可能是裸的 bookInfo：先展平再去重，
+  // 否则整批都会被 key() 判成空而悄悄丢掉（这一屏曾经就是这么只剩半屏的）。
+  const flat = arr => (arr || []).map(x => x.book || x.bookInfo || x);
+  const seed = (shelfBooks[0] || {}).bookId;
+  const rec = wcall('/book/recommend', {count: 6});
+  const sim = seed ? wcall('/book/similar', {bookId: seed, count: 12, maxIdx: 0}).catch(() => null) : null;
+  return rec.then(d => {
     const seen = new Set();
-    let list = dedupe(((await wcall('/book/recommend', {count: 6})).books) || [], seen);
-    if (list.length < 6) {
-      const seed = (shelfBooks[0] || list[0] || {}).bookId;
-      if (seed) {
-        try {
-          const sim = await wcall('/book/similar', {bookId: seed, count: 12, maxIdx: 0});
-          const own = sim.booksimilar || sim;
-          list = list.concat(dedupe((own.books || []).map(x => x.book || x), seen));
-        } catch (e) { /* 补不齐不强求 */ }
-      }
-    }
-    pickList = list.slice(0, 6);
+    const list = dedupe(flat((d || {}).books), seen);
+    const fill = s => {
+      const own = (s || {}).booksimilar || s || {};
+      list.push(...dedupe(flat(own.books), seen));
+      return list.slice(0, 6);
+    };
+    if (list.length >= 6) return list;               // 一次就够了，第二趟没发过
+    if (seed) return sim.then(fill);                 // 种子本地就有，第二趟已在飞
+    const first = list[0] || {};
+    if (!first.bookId) return list;                  // 连种子都拿不出，不硬补
+    return wcall('/book/similar', {bookId: first.bookId, count: 12, maxIdx: 0})
+      .catch(() => null).then(fill);
+  });
+}
+function prePick() { prefetch('pick', fetchPicks); }
+
+async function renderPickView() {
+  const {body} = viewPane('pick', viewHeader('为我推荐'));
+  if (!keySet) { setHtml(body, notReady()); return; }
+  const cold = !pickList.length;
+  if (pickList.length) paintPick(body);
+  else body.innerHTML = skelCards(6);
+  try {
+    const hot = await preAwait('pick');
+    pickList = hot != null ? hot : await fetchPicks();
     paintPick(body);
+    if (cold) fadeIn(body);
   } catch (e) {
     body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>
       <div style="text-align:center;padding-bottom:18px">
@@ -5649,13 +5841,8 @@ function renderSearchView() {
     fillGrid(g, items);
   };
 
-  async function runSearch() {
+  async function searchFlow(sc) {
     const kw = q();
-    const sc = scope();
-    if (sc === 'store' && !kw) { find('#wrq').focus(); return; }
-    if (sc === 'store' && !keySet) { web(kw); return; }
-    body.innerHTML = '<div class="emptyline">搜索中…</div>';
-
     if (sc === 'notes') {
       const st = await loadIdxState();
       if (!st.count) {
@@ -5714,6 +5901,18 @@ function renderSearchView() {
     } catch (e) {
       body.innerHTML = `<div class="emptyline"><b>搜索失败</b>${esc(e.message)}</div>`;
     }
+  }
+
+  /** 搜索没法预判（词还没打出来），所以这一段更得把空白先占住：书城铺卡片骨架，
+   *  划线铺引文条骨架。不论从哪个分支收口（结果 / 没搜到 / 失败 / 要先建索引），
+   *  都是「骨架 → 真内容」那一下，淡入统一在包装里补一次，不必每个分支各写一行。 */
+  async function runSearch() {
+    const kw = q();
+    const sc = scope();
+    if (sc === 'store' && !kw) { find('#wrq').focus(); return; }
+    if (sc === 'store' && !keySet) { web(kw); return; }
+    body.innerHTML = sc === 'store' ? skelCards(8) : skelLines(5);
+    try { await searchFlow(sc); } finally { fadeIn(body); }
   }
 
   if (fresh) {
@@ -5896,7 +6095,8 @@ async function renderDetailView(storeId, readerId, title) {
    一本书一个常驻 'read' pane：换书只换数据、不重建骨架，所以点另一本书是「原地换」
    而不是「先拆再建」。右侧正文按需拉；每本书记住上次读到第几章。 */
 
-const RD = {book: '', title: '', chapters: [], at: -1, back: 'shelf'};
+const RD = {book: '', title: '', chapters: [], at: -1, back: 'shelf',
+  ol: null, olAt: -1, olReady: false, resumeCh: -1, resumeY: 0};
 let mdIt = null;
 let mdItTried = false;
 
@@ -5988,9 +6188,11 @@ function readerSkeleton() {
         <span class="grow"></span>
         <button class="rdtool" id="rdNavT" title="目录栏（D）" aria-label="目录栏">目录</button>
         <button class="rdtool" id="rdNoteT" title="笔记栏（N）" aria-label="笔记栏">笔记</button>
+        <button class="rdtool" id="rdOlT" title="本章大纲（O）" aria-label="本章大纲" hidden>大纲</button>
         <button class="rdtool" id="rdAsk" title="问小助手（选中一段更准）" aria-label="问小助手">${ask}</button>
         <button class="rdtool" id="rdFocus" title="专注模式（F）" aria-label="专注模式">${icon}</button>
         <button class="rdtool" id="rdSet" title="阅读设置" aria-label="阅读设置">Aa</button>
+        <div class="rdpop" id="rdOlPop"><div class="rdol" id="rdOl"></div></div>
         <div class="rdpop" id="rdPop">
           <div class="rdrow"><span class="rdlab">字号</span><div class="rdseg" data-rd="size">
             <button data-v="14">小</button><button data-v="15">标准</button>
@@ -6071,6 +6273,9 @@ function wireReader(p) {
     if (t.id === 'rdAsk') { rdAsk(); return; }
     if (t.id === 'rdFocus') { rdSetFocus(!document.body.classList.contains('focus')); return; }
     if (t.id === 'rdSet') { rdPopToggle(); return; }
+    if (t.id === 'rdOlT') { rdOlToggle(); return; }
+    // 大纲浮窗里的一条：跳过去，浮窗跟着收起 —— 跳完是要读正文，不是继续挑。
+    if (t.dataset.i !== undefined && t.closest && t.closest('#rdOl')) { rdOlJump(+t.dataset.i); return; }
     if (t.id === 'rdNavT') { rdSetPane('nav', !rdPane.nav); return; }
     if (t.id === 'rdNoteT' || t.id === 'ntClose') { rdSetPane('notes', t.id === 'ntClose' ? false : !rdPane.notes); return; }
     // 笔记栏顶上的三颗大钮：写条目 / 导图 / 导出。三层浮窗都开在页面最上面（.ntlay，
@@ -6178,10 +6383,15 @@ async function openReader(bookId, title, backPane) {
   let at = 0;
   try { const s = localStorage.getItem(rdStoreKey(bookId)); if (s !== null) at = parseInt(s, 10) || 0; }
   catch (e) { /* 无痕模式等，忽略 */ }
+  at = Math.max(0, Math.min(RD.chapters.length - 1, at));
+  // 页内偏移只有正好落回那一章时才用，否则会把人扔进另一章的半腰。
+  const where = rdReadPos(bookId);
+  RD.resumeCh = at;
+  RD.resumeY = where && where.c === at ? (where.y || 0) : 0;
   // 笔记栏多半比目录先到（它只问一次 /api/mynotes）：那会儿还没有章节表，行上只能
   // 写个文件名。目录一到位就重铺一次，把「0001」换回「第 1 章 …」。
   if (NT.book === bookId) ntPaint();
-  rdGo(Math.max(0, Math.min(RD.chapters.length - 1, at)));
+  rdGo(at);
 }
 
 function rdHint(msg) {
@@ -6217,6 +6427,8 @@ function rdProgress() {
   // 顶/底两条的浮影只在正文真的离开顶上时出现，滚回顶部就收掉。
   const main = sc.closest('.rdmain');
   if (main) main.classList.toggle('scrolled', sc.scrollTop > 2);
+  rdSavePosSoon();                    // 记「读到哪」：停手才写，不每帧碰 localStorage
+  rdOlActive(sc.scrollTop);           // 大纲浮窗开着就跟着亮
 }
 
 /** 滚动事件一秒可能上百发，每发都算一遍进度会把主线程喂饱；这里一帧最多算一次。 */
@@ -6225,6 +6437,145 @@ function rdProgressSoon() {
   if (rdProgTick) return;
   rdProgTick = true;
   requestAnimationFrame(() => { rdProgTick = false; rdProgress(); });
+}
+
+/* ── 续读位置：章 + 页内偏移 ─────────────────
+   原来只记「读到第几章」，重开一本书回到的是那一章的顶上 —— 长章读到一半的位置没了。
+   这一份把滚动位置也带上，写在停手 800ms 之后：滚动一秒上百发，每发都同步写
+   localStorage 是把主线程按在磁盘上；一顿操作只落一笔，够轻，也丢不了多少。 */
+function rdPosKey(book) { return 'guizang-readpos-' + book; }
+
+let rdPosTimer = 0;
+function rdSavePosSoon() {
+  clearTimeout(rdPosTimer);
+  rdPosTimer = setTimeout(rdSavePos, 800);
+}
+
+function rdSavePos() {
+  const p = PANES.read;
+  if (!p || !RD.book || RD.at < 0) return;
+  const sc = p.querySelector('#rdScroll');
+  if (!sc) return;
+  try {
+    localStorage.setItem(rdPosKey(RD.book),
+      JSON.stringify({c: RD.at, y: Math.round(sc.scrollTop)}));
+  } catch (e) { /* 满了或被关了：大不了回到章首，不值得为它打断阅读 */ }
+}
+
+function rdReadPos(book) {
+  try {
+    const raw = localStorage.getItem(rdPosKey(book));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    return o && typeof o.c === 'number' ? o : null;
+  } catch (e) { return null; }
+}
+
+/* ── 本章大纲 ────────────────────────────────
+   左栏目录只到「章」，讲义里一节能有三四千行，找一个小节只能干滚。
+   这里把这一章的 h1~h3 列成一条浮窗，点一条就平滑滚过去，滚到哪一节亮哪一节。
+   （做法参照 VS Code 的 Outline 面板与 markdown-it-anchor 的标题锚点。） */
+
+/** 铺好一章正文后调用：给标题编号、填大纲、这一章没有标题就把「大纲」钮收起来。 */
+function rdOutline(bg) {
+  const p = PANES.read; if (!p) return;
+  const btn = p.querySelector('#rdOlT');
+  const list = p.querySelector('#rdOl');
+  if (!btn || !list) return;
+  const hs = [...bg.querySelectorAll('h1,h2,h3')].slice(0, 60);
+  RD.ol = null;
+  if (!hs.length) { btn.hidden = true; list.innerHTML = ''; return; }
+  btn.hidden = false;
+  hs.forEach((h, i) => { h.id = 'rdh-' + i; });
+  RD.ol = hs.map((h, i) => ({id: h.id, lvl: +h.tagName[1],
+    text: (h.textContent || '').trim().slice(0, 60)}));
+  RD.olReady = false;                 // 偏移还没量，先别假装知道读到哪一节
+  list.innerHTML = RD.ol.map((o, i) =>
+    `<button data-i="${i}" class="l${o.lvl}" title="${esc(o.text)}">${esc(o.text)}</button>`)
+    .join('');
+  RD.olAt = -1;                       // 换章：上一次的「在读」标记别留下来
+  rdSyncOl(list);
+  const pop = p.querySelector('#rdOlPop');
+  if (pop && pop.classList.contains('show')) rdOlMeasure();   // 窗开着换章：跟着重量一遍
+}
+
+/** 量一遍各节的页内偏移，顺手把「在读」定位到当前这一节。
+ *  每次打开都重量：正文里的图是异步加载的，铺好那一刻量到的位置待会儿就偏了。
+ *  量完存起来，之后滚动只比数字，不再碰布局。 */
+function rdOlMeasure() {
+  const p = PANES.read;
+  const sc = p && p.querySelector('#rdScroll');
+  if (!sc || !RD.ol) return;
+  const top = sc.getBoundingClientRect().top;
+  RD.ol.forEach(o => {
+    const h = document.getElementById(o.id);
+    o.y = h ? Math.max(0, Math.round(h.getBoundingClientRect().top - top + sc.scrollTop)) : 0;
+  });
+  RD.olReady = true;
+  RD.olAt = -1;
+  rdOlActive(sc.scrollTop);           // 浮窗已先亮起来，高亮能当场写对
+}
+
+/** 大纲浮窗的开关：和设置浮窗互斥，两枚都钉在右上角，同时开会叠在一起。 */
+function rdOlToggle(on) {
+  const p = PANES.read; if (!p) return;
+  const pop = p.querySelector('#rdOlPop');
+  const btn = p.querySelector('#rdOlT');
+  const list = p.querySelector('#rdOl');
+  if (!pop || !btn || !list) return;
+  if (!RD.ol || !RD.ol.length) { if (on !== false) whisper('这一章没有小标题'); return; }
+  const open = on === undefined ? !pop.classList.contains('show') : !!on;
+  // 先亮窗再量位置：量完那一下要顺手把「在读」写到正确的节上，
+  // 而 rdOlActive 只肯在窗开着时动 DOM（窗没开时高亮没人看，还白碰布局）。
+  pop.classList.toggle('show', open);
+  btn.classList.toggle('on', open);
+  btn.title = open ? '收起本章大纲（O）' : '本章大纲（O）';
+  if (!open) return;
+  const rs = p.querySelector('#rdPop');
+  if (rs && rs.classList.contains('show')) rdPopToggle(false);
+  rdOlMeasure();
+}
+
+function rdSyncOl(list) {
+  [...list.querySelectorAll('button')].forEach(b => {
+    b.classList.toggle('on', +b.dataset.i === RD.olAt);
+  });
+}
+
+/** 滚动时把「在读」挪到当前那一节；只比缓存的数字，一帧一次，不额外读布局。 */
+function rdOlActive(y) {
+  const p = PANES.read;
+  const pop = p && p.querySelector('#rdOlPop');
+  // 只在浮窗开着时动 DOM：没开时高亮没人看，白碰一次布局。
+  // olReady 是「这一章的偏移量过了」——没量过就比数字会得出错的「在读」。
+  if (!pop || !pop.classList.contains('show') || !RD.ol || !RD.olReady) return;
+  const list = p.querySelector('#rdOl');
+  if (!list) return;
+  let at = 0;
+  for (let i = 0; i < RD.ol.length; i++) {
+    if ((RD.ol[i].y || 0) <= y + 24) at = i; else break;
+  }
+  if (at === RD.olAt) return;
+  RD.olAt = at;
+  rdSyncOl(list);
+  const cur = list.children[at];
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({block: 'nearest'});
+}
+
+/** 大纲里点一条：平滑滚到那一节，浮窗随即收起 —— 跳完是要读正文，不是继续挑。 */
+function rdOlJump(i) {
+  const o = RD.ol && RD.ol[i];
+  if (!o) return;
+  const h = document.getElementById(o.id);
+  if (h && h.scrollIntoView) {
+    h.scrollIntoView({behavior: prefersReduced() ? 'auto' : 'smooth', block: 'start'});
+  }
+  // 收起之前先把「在读」挪到跳去的这一节：窗一关，rdOlActive 就不再动 DOM 了，
+  // 不补这一下，下次打开还亮着跳之前那一节。
+  RD.olAt = i;
+  const list = PANES.read && PANES.read.querySelector('#rdOl');
+  if (list) rdSyncOl(list);
+  rdOlToggle(false);
 }
 
 /** 专注模式：收起左栏目录，正文独占一栏到底；按钮状态与 body 上的类保持一致。 */
@@ -6239,10 +6590,16 @@ function rdSetFocus(on) {
   rdApplyPanes();                     // 栏按钮的亮灭要跟着「现在真看得见吗」走
 }
 
-function rdPopToggle() {
+function rdPopToggle(on) {
   const p = PANES.read; if (!p) return;
   const pop = p.querySelector('#rdPop'); if (!pop) return;
-  const open = !pop.classList.contains('show');
+  const open = on === undefined ? !pop.classList.contains('show') : !!on;
+  if (open) {                                   // 两枚浮窗都钉在右上角，同时开会叠住
+    const ol = p.querySelector('#rdOlPop');
+    const ob = p.querySelector('#rdOlT');
+    if (ol) ol.classList.remove('show');
+    if (ob) { ob.classList.remove('on'); ob.title = '本章大纲（O）'; }
+  }
   pop.classList.toggle('show', open);
   const btn = p.querySelector('#rdSet');
   if (btn) btn.classList.toggle('on', open);
@@ -7416,6 +7773,10 @@ async function ntTplUse(t) {
 /** 把编辑器里这篇存成自己的模板：正文里的花括号占位符会照原样留着。 */
 function ntTplSaveAs() {
   const box = document.getElementById('ntTplList');
+  // 表单画在抽屉里，就得保证抽屉是亮着的：套完模板抽屉会自动收，收着的抽屉
+  // 现在是 visibility:hidden（不再只是透明），不重新打开就是一份「在 DOM 里
+  // 却看不见」的表单。
+  ntTplLayer().classList.add('open');
   box.innerHTML = '<div class="tplhd">新模板</div><div class="tplform">'
     + '<input id="tplName" placeholder="名字，比如「错题回炉」" autocomplete="off">'
     + '<input id="tplDesc" placeholder="一句话说明，列表里看得懂就行">'
@@ -7609,6 +7970,7 @@ async function rdGo(i) {
   i = Math.max(0, Math.min(RD.chapters.length - 1, i));
   if (i === RD.at) return;
   const ch = RD.chapters[i];
+  const dir = RD.at < 0 ? 0 : (i > RD.at ? 1 : -1);   // 翻页方向：淡入从哪边来
   RD.at = i;
   rdMark(i);
   rdCrumb(i);
@@ -7626,7 +7988,7 @@ async function rdGo(i) {
   // 命中缓存：直接铺，连骨架都不闪一下 —— 翻过的章再翻就是瞬时。
   const cached = rdCache.get(rdCacheKey(RD.book, ch.file));
   if (cached !== undefined) {
-    rdPaint(bg, cached);
+    rdPaint(bg, cached, dir);
     rdPreload(i);
     return;
   }
@@ -7646,7 +8008,7 @@ async function rdGo(i) {
   if (!d.ok) { rdHint(d.msg || '这一章没能读出来'); return; }
 
   rdCachePut(RD.book, ch.file, d.md || '');
-  rdPaint(bg, d.md || '');
+  rdPaint(bg, d.md || '', dir);
   rdPreload(i);
 }
 
@@ -7660,15 +8022,32 @@ function rdSkelHTML() {
     + '</div>';
 }
 
-/** 把一章正文铺进正文区：淡化淡入 + 修图/链接 + 回到顶部 + 进度归位 + 贴回划线。 */
-function rdPaint(bg, md) {
+/** 把一章正文铺进正文区：重铺内容 + 修图/链接 + 回到该回的位置 + 大纲重列 +
+ *  进度归位 + 贴回划线。
+ *  dir 是翻章的方向（1 往后翻 / -1 往回翻 / 0 跳章）：淡入顺着它走，往后翻从右边
+ *  回来、往回翻从左边回来，这才像翻页，而不是同一下闪。 */
+function rdPaint(bg, md, dir) {
   if (!bg) return;
   bg.innerHTML = mdRender(md);
   rdFixMedia(bg);
   const p = PANES.read;
   const sc = p && p.querySelector('#rdScroll');
-  if (sc) sc.scrollTop = 0;
-  bg.classList.remove('fade'); void bg.offsetWidth; bg.classList.add('fade');
+  // 续读：开书落回的那一章回到上次停下的行；其余情况一律回章首。那一笔偏移只用
+  // 一次，用完就清 —— 不然来回翻同一章时会被旧位置拽着，翻不动。
+  let y = 0;
+  if (sc) {
+    y = (RD.resumeY && RD.at === RD.resumeCh) ? RD.resumeY : 0;
+    RD.resumeY = 0;
+    sc.scrollTop = y;
+  }
+  rdOutline(bg);                                // 这一章的小标题列进「大纲」
+  // 换章那一下淡入用 WAAPI 直接播：原来「摘 class → 读 offsetWidth 逼一次重排
+  // → 再加 class」每次切章都多一趟同步布局，正文长了就是肉眼可见的一下顿。
+  if (!prefersReduced() && bg.animate) {
+    const from = dir ? `translate3d(${dir > 0 ? 16 : -16}px,0,0)` : 'translate3d(0,6px,0)';
+    bg.animate([{opacity: 0, transform: from}, {opacity: 1, transform: 'none'}],
+      {duration: 320, easing: 'ease', fill: 'both'});
+  }
   rdProgress();
   ntApply();                                   // 这一章的划线贴回原文上
 }
@@ -7769,7 +8148,8 @@ async function rdDownload(kind) {
 }
 
 /* 读书时的键盘：←/→ 或 [ ] 翻章，空格/Shift+空格翻屏，PageUp/PageDown 同样翻屏，
-   Home/End 到顶/底，F 专注，N 开合笔记栏，D 开合目录栏，Esc 先关设置面板、没有面板才退回。
+   Home/End 到顶/底，F 专注，N 开合笔记栏，D 开合目录栏，O 开合本章大纲，
+   Esc 按「划词小条 → 大纲 → 设置面板」一层层收，都没有才退回上一屏。
    只在阅读态生效；焦点在输入框/下拉里时放行，别抢输入；带修饰键的组合键
    （Cmd+← 之类是系统/浏览器的）一律不碰。 */
 document.addEventListener('keydown', e => {
@@ -7787,6 +8167,7 @@ document.addEventListener('keydown', e => {
   }
   else if (e.key === 'n' || e.key === 'N') { rdSetPane('notes', !rdPane.notes); e.preventDefault(); }
   else if (e.key === 'd' || e.key === 'D') { rdSetPane('nav', !rdPane.nav); e.preventDefault(); }
+  else if (e.key === 'o' || e.key === 'O') { rdOlToggle(); e.preventDefault(); }
   else if (e.key === ' ' || e.key === 'Spacebar'
       || e.key === 'PageDown' || e.key === 'PageUp') {
     if (t && t.tagName === 'BUTTON') return;          // 按钮自己要响应空格，别抢
@@ -7803,19 +8184,22 @@ document.addEventListener('keydown', e => {
   }
   else if (e.key === 'Escape') {
     if (selPop && selPop.classList.contains('show')) { selPopHide(); return; }   // 先收小条
+    const ol = p && p.querySelector('#rdOlPop');
+    if (ol && ol.classList.contains('show')) { rdOlToggle(false); return; }  // 再收大纲
     const pop = p && p.querySelector('#rdPop');
     if (pop && pop.classList.contains('show')) { rdPopToggle(); return; }   // 再关面板
     backTo(RD.back);
   }
 });
 
-/* 设置面板点外面收起：点面板内或「Aa」钮本身不算外面。 */
+/* 两枚浮窗（设置 / 大纲）点外面收起：点浮窗内或它自己那颗钮不算外面。 */
 document.addEventListener('click', e => {
   const p = PANES.read; if (!p) return;
+  const hit = sel => e.target.closest && e.target.closest(sel);
   const pop = p.querySelector('#rdPop');
-  if (!pop || !pop.classList.contains('show')) return;
-  if (e.target.closest && (e.target.closest('#rdPop') || e.target.closest('#rdSet'))) return;
-  rdPopToggle();
+  if (pop && pop.classList.contains('show') && !hit('#rdPop') && !hit('#rdSet')) rdPopToggle();
+  const ol = p.querySelector('#rdOlPop');
+  if (ol && ol.classList.contains('show') && !hit('#rdOlPop') && !hit('#rdOlT')) rdOlToggle(false);
 });
 
 rdLoadCfg();     // 开界面时就把本机阅读偏好读进来
@@ -8331,7 +8715,7 @@ async function renderReview(bookId, title, kind) {
   p.dataset.backTo = kind === 'random' ? 'random'
     : (PANES.detail && PANES.detail.dataset.key === String(bookId || '') ? 'detail' : 'shelf');
   const box = p.querySelector('.review');
-  box.innerHTML = '<div class="emptyline">读取中…</div>';
+  box.innerHTML = skelLines(3);
   const items = bookId ? await notesOf(bookId) : [];
   if (!items.length) {
     box.innerHTML = '<div class="emptyline"><b>这本还没有可回顾的卡片</b>'
@@ -8340,6 +8724,7 @@ async function renderReview(bookId, title, kind) {
   }
   rv = {items, i: 0, right: 0, show: false};
   paintReview();
+  fadeIn(box);
 }
 
 function paintReview() {

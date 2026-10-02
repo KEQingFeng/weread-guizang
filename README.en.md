@@ -26,7 +26,7 @@ All three capabilities run locally. The server binds to `127.0.0.1` and never co
 ## Features
 
 - **Whole-book export to Markdown**: text and illustrations interleaved in reading order, images downloaded with 8 concurrent threads, written chapter by chapter, resumable.
-- **Local multi-format reader**: read exported books in the UI with left/right panes, a table of contents that highlights on scroll, and keyboard chapter navigation; imported EPUB / TXT / PDF files use the same interface.
+- **Local multi-format reader**: read exported books in the UI with left/right panes, a table of contents that highlights on scroll, and keyboard chapter navigation; an in-chapter outline (press O) lists the headings of the current chapter and jumps to the one you pick; reopening a book returns to the exact line you stopped at, not just the chapter; imported EPUB / TXT / PDF files use the same interface.
 - **Ask the AI from a selection while reading**: select a passage in the text and a small bar pops up with "copy / translate to Chinese / ask the assistant", so you can hand that sentence straight to the in-reader agent. Requires your own AI model API key, set in the settings.
 - **Foreign-language reading support**: long-select any passage to translate it to Chinese or copy the original; single-click an English word to get a pop-up with its meaning and usage (click-to-look-up is English-only; other languages use long-select).
 - **Dual-source reading time**: WeChat Reading time and local (Guizang) time are tracked separately and merged into a single unified total, shown side by side so you can see how the parts combine.
@@ -301,6 +301,15 @@ vendor/    Bundled third-party frontend library (markdown-it) and its license �
 - Detail page slimmed down: the complete package plus the Text / EPUB / PDF / Contents buttons are gone — those actions now live in the reader.
 - Fixed: stopping a fetch still reported the book as already exported and blocked a retry. The completion flag is now set only when every chapter file is actually on disk. Afterwards the card offers Resume, and the detail page and the task log offer Re-fetch from scratch, which deletes the partial files and the leftover browser temporary files first.
 - Details: the reader footer degrades in three tiers by column width, the minimum window size is raised to 480x620, and the stacked-card fan narrows to the stage width so no card sits outside the window while the hint tells you to click it.
+- Views no longer flash an empty frame. A pane visited for the first time paints a skeleton shaped like its real content (stat boxes, cards, rows of underlines) and the data slots into it in place instead of repainting the whole view. Measured over a 600ms gateway round trip: the stats blank gap goes 714ms → 3ms, "recommend for me" 1637ms → 1ms (the two requests that used to queue are now fired together, so content lands in 1640ms → 708ms), notes 20ms → 1ms, search 7ms → 2ms; revisited panes land in 0-2ms.
+- Hovering counts as intent: resting the pointer on a nav item or card for 90ms prefetches that view's data, with a 10s window before it asks again, so the click usually reads from cache instead of waiting.
+- Opaque paper for writing: the Markdown editor and note surfaces sit on solid paper (`#fff` / `#f7f8fc` light, `#1e2229` / `#242935` dark) so body text can no longer bleed through the page you are typing on. That layer deliberately ignores the frost slider.
+- Fewer glass layers: a closed floating panel is now hidden by `visibility`, not only by opacity, because every `backdrop-filter` layer holds its own offscreen buffer. Under the same probe, nodes carrying a filter drop 103 → 37, the ones actually composited drop 56 → 8, and painted area per frame 2.84 → 2.18 megapixels.
+- Chapter turns are cheaper: the fade-in plays through the Web Animations API instead of "remove class, read offsetWidth to force a reflow, add it back". Over a loop of eight turns, layouts drop 39 → 32, script time 56ms → 50ms and main-thread task time 748ms → 685ms. The added cost is stated plainly: roughly 3ms per chapter, spent on saving the reading position and building that chapter's outline.
+- The reader resumes on the exact line you stopped at, not just the chapter. A new in-chapter outline (`O`) marks the section you are in as you scroll; jump to one and it stays marked next time.
+- Stat numbers roll up into place on a cold visit (ease-out, computed once) and honour the system "reduce motion" setting. The roll starts only after the values arrive and never changes again afterwards.
+- Added gate `tests/check_reader_flow.py` (24 checks over resume position, in-chapter outline and the number roll); the full suite is 13 gates, all passing.
+- Borrowed from mature projects: opaque content tokens follow VitePress, the skeleton shimmer follows Element Plus, and in-chapter heading targeting follows the VS Code Outline panel and markdown-it-anchor.
 
 **0.9.7**
 
