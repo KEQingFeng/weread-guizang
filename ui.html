@@ -4108,15 +4108,26 @@ const reduceMq = window.matchMedia && window.matchMedia('(prefers-reduced-motion
 function prefersReduced() { return !!(reduceMq && reduceMq.matches); }
 
 /** 交接动画走 Web Animations API：不必像原来那样「摘 class → 读 offsetWidth 逼一次
- *  重排 → 再加 class」，少一次同步布局就少一次掉帧。 */
+ *  重排 → 再加 class」，少一次同步布局就少一次掉帧。
+ *
+ *  同一块 pane 上只留一条：连点侧边栏时，原来每点一下都会新起一条，而每条都从
+ *  opacity:0 起手 —— 几条叠在一起就是用户看到的「点快了闪好几下」；点得再密一点，
+ *  pane 会被反复拽回半透明，整屏看着像「书没加载出来」。已经在跑的那条让它跑完，
+ *  不再重开（重开才会闪）。 */
+const slideAnim = new WeakMap();
 function slideView(dir, name) {
   const p = PANES[name || v];
   if (!p || !p.animate || prefersReduced()) return;
+  const prev = slideAnim.get(p);
+  if (prev && prev.playState === 'running') return;   // 正在进场：续着跑，别重淡
   const dy = dir === 'pd' ? 18 : -18;
-  p.animate(
+  const a = p.animate(
     [{opacity: 0, transform: `translate3d(0,${dy}px,0) scale(.992)`},
      {opacity: 1, transform: 'none'}],
     {duration: 420, easing: SPRING});
+  slideAnim.set(p, a);
+  const done = () => { if (slideAnim.get(p) === a) slideAnim.delete(p); };
+  a.finished.then(done, done);
 }
 
 /** 覆盖视图（详情、卡片回顾、某本的划线）不走侧边栏，交接由 paneEl 统一播。 */
@@ -4198,7 +4209,16 @@ function notReady() {
     先连账号才能看自己的书架与笔记；统计、推荐与站内搜索还需要在左上角设置里填官方接口 Key。</div>`;
 }
 
+/** 拉书架失败 ≠ 书架是空的。以前两种情况共用同一句「书架是空的」，
+ *  网络抖一下（或登录态过期）就报成「你没书」，用户以为书丢了 —— 报实话并给一颗重试。 */
+function notLoaded() {
+  return `<div class="emptyline"><b>书架这次没拉下来</b>
+    连微信读书那趟没成功（多半是网络或登录态的事），不是你的书架空了。
+    <br><button class="deed" id="shelfRetry" style="margin-top:12px;height:30px">再试一次</button></div>`;
+}
+
 let shelfLoading = null;
+let shelfErr = false;      // 上一趟拉书架是不是失败了（区别于「书架真的空」）
 
 async function loadShelf(force) {
   if (!keySet) return false;
@@ -4491,7 +4511,8 @@ function renderShelfView() {
  *  force=false 时走 loadShelf 的 5 分钟缓存，重复点侧边栏不会反复打接口。 */
 function refreshShelf(force) {
   if (!keySet) { renderShelfGrid(); return; }
-  loadShelf(!!force).catch(() => {}).then(() => {
+  shelfErr = false;
+  loadShelf(!!force).catch(() => { shelfErr = true; }).then(() => {
     if (shelfShown === 0) shelfShown = SHELF_BATCH;
     renderShelfGrid();
   });
@@ -4546,6 +4567,9 @@ refreshBtn.onclick = e => { e.stopPropagation(); refreshAll(); };
  *  再配一条同步兜底：画完立刻量一遍眼前这屏（后台标签页里 IntersectionObserver
  *  根本不回调，只靠观察器的话切回来会看见一屏空白）。 */
 let revealIO = null, restIO = null;
+// 「加载更多」那一条自己也会挂观察器。每次重画都换一颗新的按钮节点，旧观察器
+// 还盯着已经摘出文档的那颗 —— 不主动收掉就会一次重画攒一个（筛选时每敲一下都重画）。
+let moreIO = null;
 let revealGrid = null;
 
 /** 摊开这一张。已经在摊/已摊开着就别再动它（重设 animation-delay 会把动画顶回去）。 */
@@ -4780,12 +4804,19 @@ function renderShelfGrid() {
 
   const oldMore = wrap.querySelector('.more');
   if (oldMore) oldMore.remove();
+  if (moreIO) { moreIO.disconnect(); moreIO = null; }   // 目标节点这就要被换掉了
 
   if (!all.length) {
     revealGrid = null;
-    wrap.innerHTML = (window.__sfilter || '').trim()
-      ? '<div class="emptyline">没有匹配的书</div>'
-      : (keySet ? '<div class="emptyline">书架是空的</div>' : notReady());
+    const q = (window.__sfilter || '').trim();
+    // 「空的」有三种成因，别再混成一句话：筛没了 / 还没连上 / 这一趟没拉到（可重试）。
+    // 拉的那一帧还悬着就先摆骨架 —— 原来会先闪一句「书架是空的」再被卡片顶掉。
+    wrap.innerHTML = q ? '<div class="emptyline">没有匹配的书</div>'
+      : (!keySet ? notReady() : shelfErr ? notLoaded()
+        : shelfLoading ? '' : '<div class="emptyline">书架是空的</div>');
+    if (keySet && !q && shelfLoading) wrap.append(shelfSkeleton(12));
+    const rb = wrap.querySelector('#shelfRetry');
+    if (rb) rb.onclick = () => refreshShelf(true);
     return;
   }
 
@@ -4821,14 +4852,14 @@ function renderShelfGrid() {
     wrap.append(more);
     // 滚到底自动加载，省得一直点
     if ('IntersectionObserver' in window) {
-      const io = new IntersectionObserver(es => {
+      moreIO = new IntersectionObserver(es => {
         if (es.some(x => x.isIntersecting)) {
-          io.disconnect();
+          if (moreIO) { moreIO.disconnect(); moreIO = null; }
           shelfShown += SHELF_BATCH * 2;
           renderShelfGrid();
         }
       }, {rootMargin: '320px'});
-      io.observe(more);
+      moreIO.observe(more);
     }
   }
   paintProgress();
@@ -7853,7 +7884,12 @@ function ntRowAct(btn, row) {
     const m = ntMarkById(mk);
     if (!m) return;
     const r = row.getBoundingClientRect();
-    selPopNote(r.left + r.width / 2, r.top, {mark: m, text: m.text});
+    // 这里不能同步开小条：这一次 click 还会继续冒泡到 document 上那条
+    // 「点别处就把小条收掉」的监听，同一个事件里刚 show 出来就被自己收走了
+    // —— 表现就是点「写想法」毫无反应（0.9.9 之前就是这样，真机复现过）。
+    // 划词那条路是 setTimeout 错开一帧的，这儿照做：视觉上没有区别，事件却已经跑完。
+    const x = r.left + r.width / 2, y = r.top;
+    setTimeout(() => selPopNote(x, y, {mark: m, text: m.text}), 0);
     return;
   }
   if (act === 'edit') {

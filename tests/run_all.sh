@@ -46,6 +46,9 @@ run "内联 JS 语法" "$PY" tests/check_inline_js.py
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
+# 取书续传锚点是纯逻辑（目录 + 已落盘章节），不用起浏览器也验得了：
+# 它守的是「卡住之后再点取书必须能接着往前读」这条 —— 卡死一次就别再来第二次。
+run "取书续传锚点" "$PY" tests/check_resume.py
 # 三条新线（订阅 / 视频 / 平台解析）都是离线自测：夹具跑在本机临时 http.server 上，
 # 数据目录全指进各自沙盒，不联网、不碰用户真实书库。
 run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.py
