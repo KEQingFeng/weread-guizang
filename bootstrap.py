@@ -4,8 +4,11 @@
 界面中间那个「我思故我在」按下去，跑的就是这个脚本。三件事，按顺序来：
 
   1. 建虚拟环境（.venv）—— 不动系统里的 Python，装的东西全在项目目录内
-  2. 装 Python 依赖（playwright、genanki）
+  2. 装 Python 依赖（playwright、genanki、pypdf、feedparser、yt-dlp）
   3. 装 Chromium（Playwright 的浏览器，约 368MB）—— 取正文靠它
+
+转写引擎（mlx-whisper / faster-whisper）不在这份清单里：它们是可选的大件，
+且分平台（mlx 只在 Apple 芯片上跑）。要本地转写时按界面提示单独装。
 
 只补缺的那一步，已经有就跳过，所以第二次点它是一秒过。这个脚本自己**只用标准库**
 （外加同样只用标准库的 platform_compat），因为第一次跑的时候项目里什么都还没有，
@@ -121,10 +124,10 @@ def main():
             return 1
 
     # ── 2. Python 依赖 ────────────────────────────────────────────
-    if python_works(exe, "import playwright, genanki"):
+    if python_works(exe, "import playwright, genanki, pypdf, feedparser, yt_dlp"):
         say("[2/3] Python 依赖：已装齐，跳过")
     else:
-        say("[2/3] Python 依赖：正在安装（playwright、genanki）")
+        say("[2/3] Python 依赖：正在安装（playwright、genanki、feedparser、yt-dlp）")
         run([exe, "-m", "pip", "install", "--upgrade", "pip"], quiet=True)
         if run([exe, "-m", "pip", "install", "-r", "requirements.txt"]) != 0:
             say()

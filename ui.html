@@ -898,6 +898,66 @@
     .cliprow .st.done{color:#7fd3a0}
   }
 
+  /* ── 订阅 / 视频转笔记 ───────────────────
+     行结构与剪藏那张表是同一个形状（左边说清是什么，右边说清到哪一步），但换了一套
+     类名 —— 剪藏那套只服务于剪藏，借名复用会让以后改一处牵动三处。 */
+  .frow{display:flex; align-items:flex-start; gap:12px; padding:12px 15px; border-top:1px solid var(--line)}
+  .frow:first-child{border-top:0}
+  .frow .dot{flex:none; width:7px; height:7px; margin-top:6px; border-radius:50%; background:var(--accent)}
+  .frow .dot.off{background:rgba(127,140,160,.28)}
+  .frow .bd{flex:1; min-width:0}
+  .frow .nm{
+    font-size:12.5px; color:var(--ink); line-height:1.5;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .frow .nm.unread{font-weight:600}
+  .frow .nm.pending{color:var(--ink-3); font-weight:400}
+  .frow .sub{margin-top:3px; font-size:11px; color:var(--ink-3); line-height:1.55}
+  .frow .sub.bad{color:var(--err)}
+  .frow .st{
+    flex:none; margin-top:1px; padding:2px 8px; border-radius:7px; font-size:10.5px;
+    background:rgba(127,140,160,.14); color:var(--ink-3);
+  }
+  .frow .st.doing{background:var(--accent-soft); color:var(--accent)}
+  .frow .st.done{background:rgba(60,150,95,.15); color:#2f7d4f}
+  .frow .st.bad{background:rgba(200,85,74,.13); color:var(--err)}
+  .frow .acts{flex:none; display:flex; gap:6px; align-items:center}
+  .frow .acts button{
+    height:26px; padding:0 11px; border-radius:8px; cursor:pointer; font:inherit; font-size:11.5px;
+    border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease;
+  }
+  .frow .acts button:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .frow .acts button:active{transform:scale(.95)}
+  .frow .acts button:disabled{opacity:.4; cursor:default; background:transparent; color:var(--ink-3)}
+  .frow .acts button:disabled:hover{background:transparent; color:var(--ink-3); border-color:var(--line-2)}
+  .frow .acts button.on{background:var(--accent); color:#fff; border-color:var(--accent)}
+  /* 可用性那一行：一项一个小灯。缺什么、能不能跑，进来一眼就看见，不用点一圈才知道 */
+  .vcap{display:flex; align-items:center; gap:11px; flex-wrap:wrap; padding:12px 15px;
+    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-3)}
+  .vcap .it{display:inline-flex; align-items:center; gap:5px}
+  .vcap .it i{width:7px; height:7px; border-radius:50%; background:var(--ink-3); opacity:.45}
+  .vcap .it.ok i{background:#2f9d5f; opacity:1}
+  .vcap .it.no i{background:#c8554a; opacity:1}
+  .vcap .it.no{color:var(--err)}
+  .vcap .grow{flex:1}
+  /* 识别结果与进度：视频转笔记是分钟级长任务，得有一处能看着它往前走 */
+  .vbox{padding:13px 15px; border-bottom:1px solid var(--line); display:none}
+  .vbox.on{display:block}
+  .vbox .t{font-size:13px; color:var(--ink); line-height:1.5}
+  .vbox .s{margin-top:4px; font-size:11.5px; color:var(--ink-3); line-height:1.6}
+  .vbox .bar{margin-top:9px; height:5px; border-radius:999px; background:rgba(127,140,160,.18); overflow:hidden}
+  .vbox .bar i{display:block; height:100%; width:0; border-radius:999px; background:var(--accent);
+    transition:width .45s cubic-bezier(.32,.72,0,1)}
+  .vbox .bar i.unk{width:32%; transition:none; animation:vslide 1.15s ease-in-out infinite}
+  .vbox .hd{display:flex; align-items:baseline; gap:8px; font-size:12.5px; color:var(--ink)}
+  .vbox .hd .p{margin-left:auto; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  @keyframes vslide{0%{margin-left:0}50%{margin-left:68%}100%{margin-left:0}}
+  @media (prefers-reduced-motion:reduce){ .vbox .bar i.unk{animation:none; width:100%; opacity:.5} }
+  @media (prefers-color-scheme:dark){
+    .frow .st.done{color:#7fd3a0}
+  }
+
   /* ── 划线笔记：多选与导入 ─────────────── */
   .ntools{display:flex; align-items:center; gap:9px; padding:11px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
   .ntools .cnt{font-size:11.5px; color:var(--ink-3)}
@@ -2112,6 +2172,7 @@
     <button class="pcat" data-cat="out">导出</button>
     <button class="pcat" data-cat="notes">笔记</button>
     <button class="pcat" data-cat="agent">小 Agent</button>
+    <button class="pcat" data-cat="media">视频转写</button>
     <button class="pcat" data-cat="sync">云同步</button>
     <button class="pcat" data-cat="about">关于</button>
   </aside>
@@ -2230,6 +2291,38 @@
       </div>
       <div class="hint" id="agenthint">填一个兼容 OpenAI 的接口（/chat/completions 那一套），右下角那颗气泡就能说话了。地址写到 /v1 为止，Key 只存在本机、不会进界面。</div>
       <div class="hint">它会看到：你的书架与读到哪里、下载到本机的书的划线笔记、以及阅读统计的汇总。这些都是你本机的东西 —— 问了才会发给上面那个接口，介意的话就别问。</div>
+    </section>
+
+    <section class="popcat" data-cat="media">
+      <div class="sechd">语音转文字（「视频转笔记」用）</div>
+      <div class="row">
+        <span class="k">引擎</span>
+        <select class="deed" id="asrEngine" style="flex:1;min-width:0;padding:0 6px">
+          <option value="auto">自动挑（推荐）</option>
+          <option value="mlx">mlx-whisper · Apple 芯片最快</option>
+          <option value="faster">faster-whisper · CPU 通用</option>
+          <option value="cloud">云端转写 · 要自己填接口</option>
+        </select>
+      </div>
+      <div class="row">
+        <span class="k">语言</span>
+        <input id="asrLang" type="text" spellcheck="false" autocomplete="off" placeholder="留空＝自动判断（zh / en / ja…）"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">状态</span>
+        <span class="v" id="v-asr">—</span>
+        <span class="grow"></span>
+        <button class="deed" id="asrSave">保存</button>
+      </div>
+      <div class="hint" id="asrhint">「自动」的挑法：Apple 芯片上先用 mlx-whisper（最快，也不依赖 ffmpeg），否则用 faster-whisper，两个都没有才落到云端。点名的引擎没装会直接说清原因，不会偷偷换一个。</div>
+      <div class="row">
+        <span class="k">组件</span>
+        <span class="v" id="v-vtool">—</span>
+        <span class="grow"></span>
+        <button class="deed" id="vfFix">装 ffmpeg</button>
+      </div>
+      <div class="hint">「装 ffmpeg」按需下一份静态 ffmpeg 放进归藏自己的数据目录，不动系统。yt-dlp 与转写引擎是 Python 包（<code>pip install yt-dlp feedparser</code>，转写再加 <code>mlx-whisper</code> 或 <code>faster-whisper</code>）；云端转写要在「小 Agent」那一栏把接口地址和模型配好。</div>
     </section>
 
     <section class="popcat" data-cat="sync">
@@ -2395,6 +2488,21 @@
             <path d="M6.2 14.9h.01M9.9 16.4h.01"/>
           </svg>
           剪藏文章<span class="badge" id="bgClip"></span>
+        </button>
+        <button data-v="feed">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M4.6 15.4h.01"/>
+            <path d="M4.6 10.6a4.8 4.8 0 0 1 4.8 4.8"/>
+            <path d="M4.6 5.6a9.8 9.8 0 0 1 9.8 9.8"/>
+          </svg>
+          订阅<span class="badge" id="bgFeed"></span>
+        </button>
+        <button data-v="video">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.2" y="5" width="9.6" height="10" rx="2.4"/>
+            <path d="M12.8 10.1l3.6-2.2a.5.5 0 0 1 .8.4v3.4a.5.5 0 0 1-.8.4l-3.6-2.2z"/>
+          </svg>
+          视频转笔记
         </button>
         <button data-v="notes">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -2567,7 +2675,9 @@
 <script>
 const $ = s => document.querySelector(s);
 
-let running = false, runningBook = '', lastStarted = null, tick = null, busyLog = false;
+let running = false, runningBook = '', runningKind = '', lastStarted = null, tick = null, busyLog = false;
+// 订阅/视频这两屏的「上一次长什么样」：轮询里拿来比对，变了才重铺，不然每 2.6 秒白刷一遍
+let feedStamp = '';
 let local = {};            // 已导出的书：bookId → 统计（含 total，用来算百分比）
 let stateMap = {};         // 阅读状态标签：id → 想读/在读/读完（没抓取的书也能标）
 let tasks = [];            // 右下角任务记录（localStorage 持久化）
@@ -2575,7 +2685,8 @@ let keySet = false;
 let v = 'shelf';           // 侧边栏当前视图
 let shelfBooks = [], shelfAlbums = [], shelfAt = 0;
 
-const MOOD = {export: '收取中', login: '等待确认', install: '正在准备', images: '正在归档'};
+const MOOD = {export: '收取中', login: '等待确认', install: '正在准备', images: '正在归档',
+  clip: '剪藏中', video: '转笔记中', ffmpeg: '下组件中', bootstrap: '补环境中'};
 const STRIP = /[✅❌⚠️📱📖📄📦🖼🔍🎧🧠]|\uFE0F/gu;
 const SOFTEN = [
   [/等待扫码超时（5 分钟）/g, '等待确认已超时'],
@@ -3258,6 +3369,9 @@ function paintProgress() {
     const html = barHtml(el.dataset.id);
     if (bar.innerHTML !== html) bar.innerHTML = html;
   });
+  // 视频那条线的进度条：长任务没有卡片可挂，就从「进展」日志里读最后一行
+  // [阶段 45%] 说明。它自己会判「当前不在视频那屏」然后立刻返回。
+  vidTick();
 }
 
 /* ── 状态 ─────────────────────────────── */
@@ -3279,6 +3393,7 @@ async function drawState(force) {
   // 真源：原来用的是右下角那条 localStorage 记录，一旦那条记录卡在 running（收尾时
   // 正好关了页面），卡片就永远显示「正在取」且再也点不动 —— 用户说的「终止后不能再取」。
   runningBook = running ? String(t.book || '') : '';
+  runningKind = running ? String(t.kind || '') : '';
   loggedIn = !!(s.login && s.login.logged_in);
   keySet = !!(s.weread && s.weread.key_set);
   flomoSet = !!(s.flomo && s.flomo.url_set);
@@ -3345,6 +3460,7 @@ async function drawState(force) {
   if (ve) { ve.textContent = exDir || '默认'; ve.title = exDir || '系统「下载」文件夹'; }
   paintAgent(s.agent || {});
   paintSync(s.sync || {});
+  paintVideoCfg(s.video || {});
 
   // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
   const ki = $('#keyinput'), fi = $('#flomoinput');
@@ -3388,6 +3504,21 @@ async function drawState(force) {
     .filter(b => (b.source || '') === 'clip').length;
   const bgc = $('#bgClip');
   if (bgc) bgc.textContent = clipTotal ? clipTotal : '';
+  // 订阅徽章＝未读条数（不是订阅数）：侧边栏那颗数字是「有多少条还没看」，
+  // 用户扫一眼就知道要不要点进去。
+  const feedUnread = ((s.feed || {}).unread) || 0;
+  const bgf = $('#bgFeed');
+  if (bgf) bgf.textContent = feedUnread ? feedUnread : '';
+
+  // 视频那条线的收尾：任务从「在跑」翻面成「停了」、而且带回了结构化结果，才用结果说话。
+  // 认「翻面」而不是「有结果就播」，是为了刷新页面时不把上一回的结果又弹一遍。
+  const vidRunning = running && runningKind === 'video';
+  if (vidWasRunning && !vidRunning) {
+    vidWasRunning = false;
+    if (t.kind === 'video' && t.result) vidFinish(t.result);
+  }
+  if (vidRunning) vidWasRunning = true;
+
   if (v === 'shelf') {
     // 接口 Key 是启动以后才读到的那一次：书架结构要重铺（之前铺的是空壳）并补拉书架
     if (keySet !== shellKeyAt && shownPane === 'shelf') renderShelfView();
@@ -3401,6 +3532,16 @@ async function drawState(force) {
     // 剪藏：只重铺「最近剪的」那一面网格；正在抓的那几行由各自的回执驱动，别被整屏刷掉。
     if (force || stamp !== localStamp) { localStamp = stamp; clipGridSig = ''; }
     renderClipShelf();
+  } else if (v === 'feed') {
+    // 订阅：只有「未读 / 源数量」变了才重拉（拉一次是两趟请求），不然每 2.6 秒白跑。
+    const fs = JSON.stringify(s.feed || {});
+    if (force || fs !== feedStamp) { feedStamp = fs; feedReload(); }
+  } else if (v === 'video') {
+    // 视频：转出来的书落进书目就会变 stamp，重铺那一面网格即可；进度条由 1.2 秒那趟自己走。
+    if (force || stamp !== localStamp) { localStamp = stamp; vidShelfSig = ''; }
+    paintVideoCap(s.video || {});    // 那四盏灯跟着状态走，不必再发一趟 /api/video
+    renderVideoShelf();
+    vidTools();
   } else if (force) renderView();
   // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
 }
@@ -4193,6 +4334,8 @@ function renderView() {
   if (v === 'shelf') { renderShelfView(); return; }
   if (v === 'local') { renderLocalView(); return; }
   if (v === 'clip') { renderClipView(); return; }
+  if (v === 'feed') { renderFeedView(); return; }
+  if (v === 'video') { renderVideoView(); return; }
   if (v === 'notes') { renderNotebooks(); return; }
   if (v === 'random') { renderRandomView(); return; }
   if (v === 'stats') { renderStatsView(); return; }
@@ -4735,7 +4878,9 @@ function localBooks() {
 /** 格式小签：取回的与剪藏的都是分章 Markdown，导入的按原始格式标。 */
 function localFmt(b) {
   const src = b.source || 'weread';
-  if (src === 'clip') return '文章';
+  // 剪藏来的、订阅收进来的，落到书库都是一篇文章；视频转出来是一支视频的笔记
+  if (src === 'clip' || src === 'feed') return '文章';
+  if (src === 'video') return '视频';
   if (src !== 'local') return 'MD';
   return (b.format || '').toUpperCase() || 'TXT';
 }
@@ -4747,7 +4892,8 @@ function localMeta(b) {
   bits.push(`${b.chapters || 0}${b.total && b.total !== b.chapters ? ' / ' + b.total : ''} 章`);
   const c = b.chars || 0;
   if (c) bits.push(c >= 10000 ? Math.round(c / 10000) + ' 万字' : c + ' 字');
-  bits.push({local: '我导入的', clip: '剪藏的'}[b.source || 'weread'] || '取回的');
+  bits.push({local: '我导入的', clip: '剪藏的', feed: '订阅的',
+    video: '视频笔记'}[b.source || 'weread'] || '取回的');
   return bits.join(' · ');
 }
 
@@ -5357,7 +5503,7 @@ function renderClipView() {
   if (fresh) {
     body.innerHTML = `<div class="clipin">
         <textarea class="clipta" id="cTa" spellcheck="false"
-          placeholder="粘贴文章链接，一行一个。微信公众号推文认得最准，其它有正文的站点也能剪。&#10;例：https://mp.weixin.qq.com/s/…"></textarea>
+          placeholder="粘贴文章链接，一行一个。微信公众号认得最准；知乎、小红书、X（推特）有专门解析 —— X 的推文能直接取到，知乎和小红书要对方先放行（没登录时常常只回验证页，那就拿不到）。&#10;例：https://mp.weixin.qq.com/s/…"></textarea>
         <div class="stools">
           <span class="cnt" id="cCnt"></span>
           <span class="grow"></span>
@@ -5373,6 +5519,809 @@ function renderClipView() {
   }
   renderClipRows();
   renderClipShelf();
+}
+
+/* ── 订阅（RSS / Atom / JSON Feed） ───────
+   贴一个站点首页或订阅地址 → 认出它背后有几条源 → 订上；之后这一屏就是「哪些源有新
+   文章、哪几条还没读」。一条点「收进书架」就变成书库里的一本（和剪藏走同一条入库路），
+   读、划线、导出、云同步都在现成那套里，不为订阅另开一条命。
+   正文在 feed.py 里就抓好了：源给了全文就直接用，只有摘要碎片时才回原站补一次。 */
+let feedSubs = [], feedEntries = [], feedCands = [];
+let feedBusy = false, feedUnreadOnly = false, feedFilterId = '';
+const FEED = {ta: null, subs: null, list: null, cnt: null, cands: null,
+              subsHead: null, listHead: null, add: null, refresh: null};
+const FEED_MAX_ENTRIES = 120;   // 一屏先铺这么多条，再多也只是把整列拉长
+
+async function feedGet(qs) {
+  try { return await (await fetch('/api/feed?' + qs)).json(); }
+  catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+}
+
+async function feedPost(body) {
+  try {
+    return await (await fetch('/api/feed', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {}),
+    })).json();
+  } catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+}
+
+/** 条目里那个发布时间是各家自己给的字符串（有的就只有年月日），取不出就原样截一段。 */
+function feedWhen(p) {
+  const s = String(p || '').trim();
+  if (!s) return '';
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  return m ? `${+m[2]}月${+m[3]}日` : s.slice(0, 16);
+}
+
+/** 一行：左边一枚「读没读」的圆点，中间说清是什么，右边一枚状态加几个动作。
+ *  和剪藏那张表同形状，只是换了一套语义类名（见 CSS）。 */
+function frowEl(o) {
+  const row = document.createElement('div');
+  row.className = 'frow';
+  if (o.dot !== null) {
+    const d = document.createElement('span');
+    d.className = 'dot' + (o.dot ? '' : ' off');
+    row.append(d);
+  }
+  const bd = document.createElement('div');
+  bd.className = 'bd';
+  const nm = document.createElement('div');
+  nm.className = 'nm' + (o.unread ? ' unread' : '') + (o.pending ? ' pending' : '');
+  nm.textContent = o.title;
+  nm.title = o.titleHint || o.title;
+  bd.append(nm);
+  if (o.sub) {
+    const s = document.createElement('div');
+    s.className = 'sub' + (o.subBad ? ' bad' : '');
+    s.textContent = o.sub;
+    bd.append(s);
+  }
+  row.append(bd);
+  if (o.st) {
+    const st = document.createElement('span');
+    st.className = 'st' + (o.stCls ? ' ' + o.stCls : '');
+    st.textContent = o.st;
+    row.append(st);
+  }
+  if (o.acts && o.acts.length) {
+    const box = document.createElement('div');
+    box.className = 'acts';
+    for (const a of o.acts) {
+      const b = document.createElement('button');
+      b.textContent = a.label;
+      b.disabled = !!a.disabled;
+      if (a.on) b.classList.add('on');
+      b.onclick = () => { if (typeof a.run === 'function') a.run(); };
+      box.append(b);
+    }
+    row.append(box);
+  }
+  return row;
+}
+
+function feedCandRow(c) {
+  return frowEl({
+    dot: null,
+    title: c.title || c.url,
+    titleHint: c.url,
+    sub: String(c.type || 'rss').toUpperCase() + ' · ' + c.url,
+    st: '候选',
+    acts: [{label: '订上', disabled: feedBusy, run: () => feedSubscribe(c.url)}],
+  });
+}
+
+function feedSubRow(s) {
+  const bits = [s.site || '', String(s.kind || '').toUpperCase()].filter(Boolean);
+  const un = s.unread || 0;
+  const sub = (bits.join(' · ') || s.url)
+    + (s.error ? ' · 上次没抓成：' + s.error
+      : (s.last_fetched ? ' · 上次同步 ' + when(s.last_fetched) : ''));
+  const on = feedFilterId === s.id;
+  return frowEl({
+    dot: null,
+    title: s.title || s.url,
+    titleHint: s.url,
+    sub,
+    subBad: !!s.error,
+    st: un ? un + ' 未读' : '已同步',
+    stCls: un ? 'doing' : 'done',
+    acts: [
+      {label: on ? '看全部' : '看这个', on,
+       run: () => { feedFilterId = on ? '' : s.id; feedReload(); }},
+      {label: '刷新', disabled: feedBusy, run: () => feedRefresh(s.id)},
+      {label: '退订', disabled: feedBusy, run: () => feedConfirmDrop(s)},
+    ],
+  });
+}
+
+function feedEntryRow(e) {
+  const meta = [e.feed_title, e.author, feedWhen(e.published)].filter(Boolean).join(' · ');
+  const preview = String(e.summary || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+  const acts = [];
+  if (e.pushed) {
+    acts.push({label: '阅读', run: () => openReader(e.pushed, e.title || '订阅条目', 'feed')});
+  } else {
+    acts.push({label: '预览', run: () => feedPreview(e)});
+    acts.push({label: '收进书架', disabled: feedBusy, run: () => feedToShelf(e)});
+  }
+  if (e.link) acts.push({label: '原文', run: () => window.open(e.link, '_blank', 'noopener')});
+  acts.push({label: e.read ? '标未读' : '标已读', run: () => feedMark(e, !e.read)});
+  return frowEl({
+    dot: !e.read && !e.pushed,
+    title: e.title || e.link || '（这条没有标题）',
+    titleHint: e.link || e.title,
+    unread: !e.read && !e.pushed,
+    sub: [meta, preview].filter(Boolean).join('　·　'),
+    st: e.pushed ? '已入库' : (e.read ? '已读' : '未读'),
+    stCls: e.pushed ? 'done' : '',
+    acts,
+  });
+}
+
+/* 三块列表各自独立重铺：标的是一行，不动其它行，省得整屏跳一下 */
+function renderFeedCands() {
+  if (!FEED.cands) return;
+  if (!feedCands.length) { FEED.cands.replaceChildren(); return; }
+  const head = document.createElement('div');
+  head.className = 'ch2';
+  head.textContent = `这个地址背后有 ${feedCands.length} 条源，挑一条订上`;
+  FEED.cands.replaceChildren(head, ...feedCands.map(feedCandRow));
+}
+
+function renderFeedSubs() {
+  if (!FEED.subs) return;
+  if (FEED.subsHead) {
+    FEED.subsHead.textContent = feedSubs.length ? `订阅源 · ${feedSubs.length} 个` : '';
+  }
+  if (!feedSubs.length) {
+    const d = document.createElement('div');
+    d.className = 'emptyline';
+    d.innerHTML = '<b>还没有订阅任何源</b>把博客、专栏、播客这些站点的地址贴进上面那个框，'
+      + '点「识别并订阅」。它自己会去找背后的 RSS / Atom / JSON Feed。';
+    FEED.subs.replaceChildren(d);
+    return;
+  }
+  FEED.subs.replaceChildren(...feedSubs.map(feedSubRow));
+}
+
+function renderFeedEntries() {
+  if (!FEED.list) return;
+  if (FEED.listHead) {
+    FEED.listHead.replaceChildren();
+    const t = document.createElement('span');
+    t.textContent = feedEntries.length
+      ? `文章 · ${feedEntries.length} 条${feedFilterId ? '（只看选中的源）' : ''}`
+      : '';
+    const g = document.createElement('span');
+    g.style.flex = '1';
+    const tg = document.createElement('button');
+    tg.className = 'deed' + (feedUnreadOnly ? ' sure' : '');
+    tg.style.height = '24px';
+    tg.textContent = feedUnreadOnly ? '只看未读' : '全部';
+    tg.title = feedUnreadOnly ? '点一下看全部' : '点一下只看未读';
+    tg.onclick = () => { feedUnreadOnly = !feedUnreadOnly; feedReload(); };
+    FEED.listHead.append(t, g, tg);
+  }
+  if (!feedEntries.length) {
+    const d = document.createElement('div');
+    d.className = 'emptyline';
+    d.textContent = feedSubs.length
+      ? (feedUnreadOnly ? '没有未读文章' : '这个源还没抓到文章，点「刷新」再试一次')
+      : '订上一个源之后，这里会出现它的文章';
+    FEED.list.replaceChildren(d);
+    return;
+  }
+  FEED.list.replaceChildren(...feedEntries.map(feedEntryRow));
+}
+
+function renderFeedTools() {
+  if (FEED.add) FEED.add.disabled = feedBusy;
+  if (FEED.refresh) FEED.refresh.disabled = feedBusy;
+  if (FEED.cnt) {
+    const un = feedSubs.reduce((n, s) => n + (s.unread || 0), 0);
+    FEED.cnt.textContent = feedSubs.length
+      ? `${feedSubs.length} 个源 · ${un} 条未读`
+      : '贴一个站点或订阅地址';
+  }
+}
+
+async function feedLoad() {
+  const d = await feedGet('mode=list');
+  if (!d.ok) return d;
+  feedSubs = d.subs || [];
+  // 选中的源被退掉了就落回「全部」，否则筛出来永远是空的
+  if (feedFilterId && !feedSubs.some(s => s.id === feedFilterId)) feedFilterId = '';
+  const qs = new URLSearchParams({mode: 'entries', limit: String(FEED_MAX_ENTRIES)});
+  if (feedFilterId) qs.set('feed', feedFilterId);
+  if (feedUnreadOnly) qs.set('unread', '1');
+  const e = await feedGet(qs.toString());
+  feedEntries = e.ok ? (e.entries || []) : [];
+  return d;
+}
+
+/** 取数据 → 铺三块。进来、刷新、退订之后都走它。 */
+async function feedReload() {
+  if (!FEED.list) return;              // 视图还没铺过（后台轮询跑在前头时会这样）
+  setNote('feed', '读取中…');
+  const d = await feedLoad();
+  setNote('feed', '');
+  if (!d.ok) {
+    const e = document.createElement('div');
+    e.className = 'emptyline';
+    e.innerHTML = '<b>没能读取</b>' + esc(d.msg || '订阅这块出了点问题');
+    FEED.list.replaceChildren(e);
+    return;
+  }
+  renderFeedCands();
+  renderFeedSubs();
+  renderFeedEntries();
+  renderFeedTools();
+}
+
+/** 「识别并订阅」：先认一下这个地址背后有几条源 —— 一条就直接订上，多条才让用户挑。
+ *  常见的「博客首页」因此是一次点击就完事，只有多语种 / 多栏目那种站才需要选。 */
+async function feedAdd() {
+  if (feedBusy) return;
+  const url = (FEED.ta ? FEED.ta.value : '').trim();
+  if (!url) { whisper('先把站点或订阅地址贴进来'); return; }
+  feedBusy = true; feedCands = []; renderFeedCands(); renderFeedTools();
+  setNote('feed', '识别中…');
+  const d = await feedPost({act: 'discover', url});
+  feedBusy = false;
+  setNote('feed', '');
+  if (!d.ok) { whisper(d.msg || '没认出这个地址'); renderFeedTools(); return; }
+  feedCands = d.cands || [];
+  if (!feedCands.length) {
+    whisper('这个地址背后没找到可订阅的源');
+    renderFeedTools();
+    return;
+  }
+  if (feedCands.length === 1) { await feedSubscribe(feedCands[0].url); return; }
+  renderFeedCands();
+  renderFeedTools();
+  whisper(`认出 ${feedCands.length} 条源，挑一条订上`);
+}
+
+async function feedSubscribe(url) {
+  feedBusy = true; renderFeedTools();
+  setNote('feed', '订阅中…');
+  const r = await feedPost({act: 'add', url});
+  feedBusy = false;
+  if (!r.ok) {
+    whisper(r.msg || '没能订上这个源');
+    renderFeedTools();
+    return;
+  }
+  if (FEED.ta) FEED.ta.value = '';
+  feedCands = [];
+  if (r.subs) feedSubs = r.subs;
+  whisper(r.msg || '已订阅');
+  await feedReload();
+  drawState(true);
+}
+
+async function feedRefresh(feedId) {
+  if (feedBusy) return;
+  feedBusy = true; renderFeedTools();
+  setNote('feed', '刷新中…');
+  const r = await feedPost({act: 'refresh', id: feedId || ''});
+  feedBusy = false;
+  setNote('feed', '');
+  whisper(r.msg || (r.ok ? '已刷新' : '刷新没成'));
+  await feedReload();
+  drawState(true);
+}
+
+async function feedMark(e, read) {
+  const r = await feedPost({act: 'read', id: e.id, read});
+  if (!r.ok) { whisper(r.msg || '没标上'); return; }
+  e.read = read;
+  // 本地先改再重铺：等 2.6 秒一次的状态轮询，用户会以为按钮没反应
+  if (feedUnreadOnly && read) feedEntries = feedEntries.filter(x => x.id !== e.id);
+  if (!feedUnreadOnly && !read && e.pushed) e.pushed = '';
+  renderFeedEntries();
+  drawState(true);
+}
+
+async function feedToShelf(e) {
+  if (feedBusy) return;
+  feedBusy = true; renderFeedTools();
+  setNote('feed', '收进书架…');
+  const r = await feedPost({act: 'shelf', id: e.id});
+  feedBusy = false;
+  setNote('feed', '');
+  if (!r.ok) {
+    whisper(r.msg || '这一篇没能收进来');
+    renderFeedTools();
+    return;
+  }
+  const b = r.book || {};
+  e.pushed = b.id || '1';
+  e.read = true;
+  whisper(r.msg || `已收进书架：《${b.title || e.title}》`);
+  await drawState(true);
+  await feedReload();
+}
+
+async function feedPreview(e) {
+  const d = await feedGet('mode=entry&id=' + encodeURIComponent(e.id));
+  if (!d.ok || !d.entry) { whisper(d.msg || '这条读不出来'); return; }
+  const it = d.entry;
+  const txt = String(it.content_text || '').trim();
+  const body = txt
+    ? (txt.length > 6000
+      ? txt.slice(0, 6000) + '\n\n……（正文较长，全文在收进书架之后的那本书里）'
+      : txt)
+    : String(it.summary || '这条源只给了摘要，收进书架时会回原站抓一次全文。');
+  sheet({
+    title: it.title || e.title || '订阅条目',
+    text: [it.feed_title, it.author, feedWhen(it.published),
+      txt ? txt.length + ' 字' : '只有摘要'].filter(Boolean).join(' · '),
+    body,
+    actions: [
+      {label: '收进书架', lead: true, run: () => feedToShelf(e)},
+      it.link ? {label: '看原文', run: () => window.open(it.link, '_blank', 'noopener')} : null,
+      {label: '先不存'},
+    ].filter(Boolean),
+  });
+}
+
+/** 退订只影响「以后还抓不抓」，已经收进书库的文章照旧留在书架上 —— 这句得说清，
+ *  不然用户会以为退订等于删书。 */
+function feedConfirmDrop(s) {
+  sheet({
+    title: '退订这个源',
+    text: `以后不再抓《${s.title || s.url}》。已经收进书库的文章不受影响，还在书架上。`,
+    actions: [
+      {label: '确认退订', lead: true, run: async () => {
+        const r = await feedPost({act: 'remove', id: s.id});
+        if (r.ok && r.subs) feedSubs = r.subs;
+        if (feedFilterId === s.id) feedFilterId = '';
+        whisper(r.msg || '已退订');
+        feedCands = [];
+        renderFeedCands();
+        await feedReload();
+        drawState(true);
+      }},
+      {label: '先不退'},
+    ],
+  });
+}
+
+function wireFeed(p) {
+  FEED.ta = p.querySelector('#fTa');
+  FEED.subs = p.querySelector('#fSubs');
+  FEED.list = p.querySelector('#fList');
+  FEED.cnt = p.querySelector('#fCnt');
+  FEED.cands = p.querySelector('#fCands');
+  FEED.subsHead = p.querySelector('#fSubsHead');
+  FEED.listHead = p.querySelector('#fListHead');
+  FEED.add = p.querySelector('#fAdd');
+  FEED.refresh = p.querySelector('#fRefresh');
+
+  const open = p.querySelector('#fOpen');
+  if (open) open.onclick = () => post('openbooks').catch(() => {});
+  FEED.add.onclick = feedAdd;
+  FEED.refresh.onclick = () => feedRefresh('');
+  // 贴完直接 Cmd/Ctrl+Enter 开订，不必再把鼠标移到按钮上
+  FEED.ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (!feedBusy) feedAdd();
+    }
+  });
+}
+
+function renderFeedView() {
+  const {p, body, fresh} = viewPane('feed', viewHeader('订阅',
+    `<button class="deed" id="fOpen" style="height:30px">打开书库文件夹</button>`));
+  if (fresh) {
+    body.innerHTML = `<div class="clipin">
+        <textarea class="clipta" id="fTa" spellcheck="false"
+          placeholder="粘贴站点首页或订阅地址。博客、专栏、播客、Telegram 频道都能试 —— 它会自己去找背后的 RSS / Atom / JSON Feed。&#10;例：https://www.ruanyifeng.com/blog/"></textarea>
+        <div class="stools">
+          <span class="cnt" id="fCnt"></span>
+          <span class="grow"></span>
+          <button class="deed" id="fRefresh" style="height:30px">刷新全部</button>
+          <button class="deed sure" id="fAdd" style="height:30px">识别并订阅</button>
+        </div>
+      </div>
+      <div id="fCands"></div>
+      <div class="ch2" id="fSubsHead"></div>
+      <div id="fSubs"></div>
+      <div class="ch2" id="fListHead" style="display:flex;align-items:center;gap:8px"></div>
+      <div id="fList"></div>`;
+    wireFeed(p);
+  }
+  feedReload();
+}
+
+/* ── 视频转笔记 ─────────────────────────────
+   粘一个视频链接 → 认一下是哪支视频 → 下载音频、语音转文字、（配了大模型时）整理摘要 /
+   知识笔记 / 思维导图 → 落成书库里的一本，之后阅读、划词笔记、导出 EPUB/PDF 全走现成那套。
+   这条线是分钟级长任务：进度从「进展」日志里读那一行 [阶段 45%] 说明，收尾用##GUIZANG##那行
+   的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
+let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
+let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
+const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHead: null,
+               cnt: null, plan: null, start: null, stop: null};
+const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
+  summary: '整理摘要', note: '写知识笔记', mindmap: '画思维导图',
+  save: '落成一本书', done: '完成'};
+const VID_ENGINES = [['auto', '自动挑引擎'], ['mlx', 'mlx-whisper（Apple 芯片最快）'],
+  ['faster', 'faster-whisper（CPU）'], ['cloud', '云端转写']];
+
+async function videoGet(qs) {
+  try { return await (await fetch('/api/video?' + qs)).json(); }
+  catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+}
+
+async function videoPost(body) {
+  try {
+    return await (await fetch('/api/video', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {}),
+    })).json();
+  } catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+}
+
+function vidHrs(sec) {
+  const s = Math.round(Number(sec) || 0);
+  if (!s) return '';
+  if (s < 60) return s + ' 秒';
+  const m = Math.floor(s / 60), r = s % 60;
+  if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`;
+  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+}
+
+/** 「能不能跑」那一行：一项一个小灯。缺什么、要不要点「补齐组件」，进来一眼就知道。 */
+function paintVideoCap(v) {
+  if (!VIDEO.cap) return;
+  const a = (v || {}).available || {};
+  const asr = a.asr || {};
+  const loc = !!asr.local, cloud = !!asr.cloud;
+  const items = [
+    {ok: !!a.ytdlp, txt: a.ytdlp ? '下载器就绪' : '缺下载器 yt-dlp'},
+    {ok: !!a.ffmpeg, txt: a.ffmpeg ? 'ffmpeg 就绪' : '缺 ffmpeg'},
+    {ok: loc || cloud, txt: loc ? '本地语音识别就绪' : (cloud ? '只能走云端语音识别' : '没有语音识别')},
+    {ok: !!a.llm, txt: a.llm ? '大模型已配置' : '大模型未配置（可只转写）'},
+  ];
+  VIDEO.cap.replaceChildren(...items.map(it => {
+    const s = document.createElement('span');
+    s.className = 'it ' + (it.ok ? 'ok' : 'no');
+    const i = document.createElement('i');
+    s.append(i, document.createTextNode(it.txt));
+    return s;
+  }));
+  const g = document.createElement('span');
+  g.className = 'grow';
+  const b = document.createElement('button');
+  b.className = 'deed';
+  b.style.height = '26px';
+  b.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
+  b.title = 'ffmpeg 是转写的必需件。归藏按需下一份静态的放在自己的数据目录里，不动系统。';
+  b.onclick = () => vidEnsure(b);
+  const nb = document.createElement('button');
+  nb.className = 'deed';
+  nb.style.height = '26px';
+  nb.textContent = '转写设置';
+  // 弹层外的手一松，全局那个「点别处就收掉弹层」的监听会立刻把它关掉 —— 齿轮按钮靠 stopPropagation
+  // 躲过这一下，这里照办，否则点「转写设置」等于什么都没发生
+  nb.onclick = e => { e.stopPropagation(); setPop(true); setCat('media'); };
+  VIDEO.cap.append(g, nb, b);
+}
+
+async function vidEnsure(btn) {
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在下…';
+  const r = await videoPost({act: 'ffmpeg'});
+  whisper(r.msg || (r.ok ? '已开始下载组件' : '没能开始下载'));
+  setTimeout(() => { btn.disabled = false; btn.textContent = keep; }, 4000);
+}
+
+function vidRenderPlan() {
+  const box = VIDEO.box;
+  if (!box) return;
+  if (!vidPlan) { box.classList.remove('on'); return; }
+  // plan() 给的是 pages / count（一条 = 一 P）。分 P 视频只转用户点的那一 P，
+  // 所以既要报总共有几 P，也要写清这次取的是哪一 P —— 不然用户以为整部都转了。
+  // 认哪一 P 用 plan 回来的 url 去对（多 P 时 target 已经被换成选中的那一 P）。
+  const pages = vidPlan.pages || [];
+  const n = Number(vidPlan.count) || pages.length || 1;
+  const cur = pages.find(pg => (pg.url || '') === (vidPlan.url || '')) || pages[0] || {};
+  const bits = [vidPlan.platform, vidPlan.uploader, vidHrs(vidPlan.duration),
+    n > 1 ? `${n} 个分 P，这次转「${cur.title || '第 1 P'}」` : ''].filter(Boolean);
+  box.className = 'vbox on';
+  box.replaceChildren();
+  const hd = document.createElement('div');
+  hd.className = 'hd';
+  const t = document.createElement('span');
+  t.textContent = vidPlan.title || '（没读到标题）';
+  hd.append(t);
+  const s = document.createElement('div');
+  s.className = 's';
+  s.textContent = bits.join(' · ')
+    + '。确认是这支再点「开始转笔记」—— 音频只落在临时目录里，转完就清掉。';
+  box.append(hd, s);
+}
+
+async function vidDoPlan() {
+  if (vidBusy) return;
+  const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
+  if (!url) { whisper('先把视频链接贴进来'); return; }
+  vidBusy = true; vidTools();
+  setNote('video', '认链接…');
+  const d = await videoGet('mode=plan&url=' + encodeURIComponent(url));
+  vidBusy = false;
+  setNote('video', '');
+  if (!d.ok) { whisper(d.msg || '没认出这个链接'); vidTools(); return; }
+  vidPlan = d.plan || null;
+  vidRenderPlan();
+  vidTools();
+  if (vidPlan && vidPlan.title) whisper('认出来了：' + vidPlan.title);
+}
+
+async function vidStart() {
+  if (vidBusy) return;
+  const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
+  if (!url) { whisper('先把视频链接贴进来'); return; }
+  if (!vidPlan) { await vidDoPlan(); if (!vidPlan) return; }
+  vidBusy = true; vidTools();
+  vidProgSig = '';
+  const body = {act: 'start', url};
+  // 转写偏好就在设置那一格上摆着 —— 直接读它，「看到什么就用什么」，不再存一份会走神的副本
+  const engEl = $('#asrEngine'), langEl = $('#asrLang');
+  const eng = engEl ? String(engEl.value || '') : '';
+  const lang = langEl ? String(langEl.value || '').trim() : '';
+  if (eng && eng !== 'auto') body.asr = {engine: eng};
+  if (lang) body.language = lang;
+  const r = await videoPost(body);
+  vidBusy = false;
+  if (!r.ok) {
+    whisper(r.msg || '没能起这个任务');
+    vidTools();
+    return;
+  }
+  vidShowProg(5, '正在起任务');
+  whisper('已经开始，转完自动进书架');
+  vidTools();
+  drawState(true);
+}
+
+async function vidStop() {
+  const r = await videoPost({act: 'stop'});
+  whisper(r.msg || '已请求停止');
+}
+
+/** 进度条：从日志里读最后一行 [阶段 45%] 说明。阶段拿不到就报「正在准备」。 */
+function vidShowProg(pct, note, stage) {
+  const box = VIDEO.prog;
+  if (!box) return;
+  box.classList.add('on');
+  let hd = box.querySelector('.hd');
+  if (!hd) {
+    box.replaceChildren();
+    hd = document.createElement('div');
+    hd.className = 'hd';
+    const t = document.createElement('span');
+    t.className = 't';
+    const p = document.createElement('span');
+    p.className = 'p';
+    hd.append(t, p);
+    const s = document.createElement('div');
+    s.className = 's';
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.append(document.createElement('i'));
+    box.append(hd, s, bar);
+  }
+  const fill = box.querySelector('.bar i');
+  const unk = pct == null || pct < 0;
+  fill.className = unk ? 'unk' : '';
+  if (!unk) fill.style.width = Math.max(2, Math.min(100, pct)) + '%';
+  box.querySelector('.hd .t').textContent = stage ? (VID_STAGES[stage] || stage) : '正在准备';
+  box.querySelector('.hd .p').textContent = unk ? '' : pct + '%';
+  box.querySelector('.s').textContent = note || '';
+}
+
+async function vidTick() {
+  if (!VIDEO.prog || shownPane !== 'video') return;
+  let lines = [];
+  try { lines = ((await (await fetch('/api/log?tail=60')).json()).lines) || []; }
+  catch (e) { return; }
+  let hit = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\[(\S+)\s+(\d*)%\]\s*(.*)$/.exec(lines[i]);
+    if (m) { hit = {stage: m[1], pct: m[2] === '' ? -1 : +m[2], note: m[3]}; break; }
+  }
+  const sig = hit ? `${hit.stage}|${hit.pct}|${hit.note}` : '';
+  if (sig === vidProgSig) return;
+  vidProgSig = sig;
+  if (hit) vidShowProg(hit.pct, hit.note, hit.stage);
+}
+
+/** 完成：进度条换成结果，能直接开读；书架那面网格也一起接手。 */
+function vidFinish(r) {
+  const box = VIDEO.prog;
+  if (!box) return;
+  box.classList.add('on');
+  box.replaceChildren();
+  const hd = document.createElement('div');
+  hd.className = 'hd';
+  const t = document.createElement('span');
+  t.textContent = r.ok ? '转好了' : '这次没转成';
+  hd.append(t);
+  const s = document.createElement('div');
+  s.className = 's';
+  s.textContent = r.ok
+    ? `《${r.title || ''}》已经进书架：${r.words || 0} 字 · ${r.chapters || 0} 节`
+      + (r.asr_engine ? ` · 转写 ${r.asr_engine}` : '')
+      + (r.mindmap ? ' · 带思维导图' : '')
+      + (r.ai_error ? `。大模型那段没成（${r.ai_error}），转写正文在。` : '')
+    : (r.msg || '这条视频没能转成笔记。日志里有详细原因。');
+  box.append(hd, s);
+  if (r.ok && r.book_id) {
+    const g = document.createElement('div');
+    g.className = 's';
+    const b = document.createElement('button');
+    b.className = 'deed sure';
+    b.style.height = '28px';
+    b.textContent = '开始阅读';
+    b.onclick = () => openReader(r.book_id, r.title || '', 'video');
+    g.append(b);
+    box.append(g);
+  }
+  vidShelfSig = '';
+  renderVideoShelf();
+}
+
+async function vidReloadCap() {
+  const d = await videoGet('mode=status');
+  if (d.ok) paintVideoCap({available: d.available});
+}
+
+function videoBooks() {
+  return Object.values(local)
+    .filter(b => (b.source || '') === 'video')
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+}
+
+function renderVideoShelf() {
+  if (!VIDEO.shelf) return;
+  const all = videoBooks();
+  if (VIDEO.shelfHead) {
+    VIDEO.shelfHead.textContent = all.length
+      ? `转出来的书 · ${all.length} 本（全部在「本地书库」里）` : '';
+  }
+  // 指纹带上条数：一本没有时信号是空串，而初值也是空串 —— 不带上就永远铺不出空态那句说明
+  const sig = all.length + '|' + all.slice(0, 12).map(b => b.id + ':' + (b.updated_at || 0)).join(',');
+  if (sig === vidShelfSig) return;
+  vidShelfSig = sig;
+  if (!all.length) {
+    const d = document.createElement('div');
+    d.className = 'emptyline';
+    d.innerHTML = '<b>还没有转出来的书</b>把视频链接贴进上面那个框，转完之后这里会多一本'
+      + '可以读、可以做笔记、可以导出 EPUB / PDF 的书。';
+    VIDEO.shelf.replaceChildren(d);
+    return;
+  }
+  let grid = VIDEO.shelf.querySelector('.sgrid');
+  if (!grid) {
+    grid = document.createElement('div');
+    grid.className = 'sgrid';
+  }
+  grid.replaceChildren(...all.slice(0, 12).map(b => localCard(b, 'video')));
+  if (grid.parentNode !== VIDEO.shelf) VIDEO.shelf.replaceChildren(grid);
+}
+
+/** 起没起得来、能不能点，全看后端那一句 running。运行中按钮换成「停止」。
+ *  后端一次只跑一个任务，所以「有别的任务在跑」时也把这两个按钮按住 —— 点了
+ *  也只会回「已有任务在运行」，不如当场说明白。 */
+function vidTools() {
+  const busy = !!(running && runningKind === 'video');
+  const other = !!(running && runningKind !== 'video');
+  if (VIDEO.start) VIDEO.start.disabled = vidBusy || running;
+  if (VIDEO.plan) VIDEO.plan.disabled = vidBusy || running;
+  if (VIDEO.stop) VIDEO.stop.hidden = !busy;
+  if (VIDEO.cnt) {
+    const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
+    VIDEO.cnt.textContent = other ? '有别的任务在跑，等它完了再转视频'
+      : busy ? '正在转，进度在下面'
+      : url ? (vidPlan ? '已认出这支，可以开跑' : '点「识别」先认一下是哪支视频')
+      : '把视频链接贴进来';
+  }
+}
+
+function wireVideo(p) {
+  VIDEO.ta = p.querySelector('#vTa');
+  VIDEO.cap = p.querySelector('#vCap');
+  VIDEO.box = p.querySelector('#vPlanBox');
+  VIDEO.prog = p.querySelector('#vProg');
+  VIDEO.shelf = p.querySelector('#vShelf');
+  VIDEO.shelfHead = p.querySelector('#vShelfHead');
+  VIDEO.cnt = p.querySelector('#vCnt');
+  VIDEO.plan = p.querySelector('#vPlan');
+  VIDEO.start = p.querySelector('#vStart');
+  VIDEO.stop = p.querySelector('#vStop');
+
+  const open = p.querySelector('#vOpen');
+  if (open) open.onclick = () => post('openbooks').catch(() => {});
+  if (VIDEO.plan) VIDEO.plan.onclick = vidDoPlan;
+  if (VIDEO.start) VIDEO.start.onclick = vidStart;
+  if (VIDEO.stop) VIDEO.stop.onclick = vidStop;
+  if (VIDEO.ta) {
+    // 贴完直接 Cmd/Ctrl+Enter 认链接，和订阅那一屏一个手感
+    VIDEO.ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (!vidBusy) vidDoPlan();
+      }
+    });
+    // 换了链接，上一支的「认出来的是」就作废 —— 留着会让人以为认的是新那条
+    VIDEO.ta.addEventListener('input', () => {
+      if (vidPlan) { vidPlan = null; vidRenderPlan(); }
+      vidTools();
+    });
+  }
+}
+
+function renderVideoView() {
+  const {p, body, fresh} = viewPane('video', viewHeader('视频转笔记',
+    `<button class="deed" id="vOpen" style="height:30px">打开书库文件夹</button>`));
+  if (fresh) {
+    body.innerHTML = `<div class="vcap" id="vCap"></div>
+      <div class="clipin">
+        <textarea class="clipta" id="vTa" spellcheck="false"
+          placeholder="粘贴视频链接。B 站（BV 号或整段分享文案）、YouTube 都认。&#10;例：https://www.bilibili.com/video/BV1xx411c7mD"></textarea>
+        <div class="stools">
+          <span class="cnt" id="vCnt"></span>
+          <span class="grow"></span>
+          <button class="deed" id="vPlan" style="height:30px">识别</button>
+          <button class="deed" id="vStop" style="height:30px" hidden>停止</button>
+          <button class="deed sure" id="vStart" style="height:30px">开始转笔记</button>
+        </div>
+      </div>
+      <div class="vbox" id="vPlanBox"></div>
+      <div class="vbox" id="vProg"></div>
+      <div class="ch2" id="vShelfHead"></div>
+      <div id="vShelf"></div>`;
+    wireVideo(p);
+  }
+  vidRenderPlan();
+  vidReloadCap();
+  renderVideoShelf();
+  vidTools();
+}
+
+/** 转写偏好在设置里改，这一屏只负责「显示现在用的是哪一档」并顺手把值读进来。
+ *  写回输入框时避开正被编辑/聚焦的那一格，免得用户正在打字被覆盖。 */
+function paintVideoCfg(v) {
+  v = v || {};
+  const es = $('#asrEngine'), ls = $('#asrLang');
+  // 用户改过还没保存时，轮询不去覆盖他手上的选择（不然选了 2 秒后自己跳回去）
+  if (!asrDirty) {
+    if (es) es.value = String(v.asr || 'auto');
+    if (ls) ls.value = String(v.lang || '');
+  }
+  const a = v.available;
+  if (!a) return;               // 保存回执只带 {asr, lang}，没有可用性快照就别硬编一盏灯
+  const st = $('#v-asr');
+  if (st) {
+    const loc = !!((a.asr || {}).local);
+    st.textContent = (loc ? '本机可转写' : '需要云端转写')
+      + (a.llm ? ' · 大模型已配' : ' · 大模型未配（只转文字）');
+  }
+  const vt = $('#v-vtool');
+  if (vt) {
+    const miss = [];
+    if (!a.ytdlp) miss.push('yt-dlp');
+    if (!a.ffmpeg) miss.push('ffmpeg');
+    vt.textContent = miss.length ? '缺 ' + miss.join(' / ') : 'yt-dlp 与 ffmpeg 都就绪';
+  }
+  const vf = $('#vfFix');
+  if (vf && !vf.disabled) vf.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
@@ -9212,6 +10161,16 @@ $('#agenttest').onclick = async () => {
     btn.textContent = keep;
   }
 };
+
+/* 设置里的「视频转写」：两项偏好存后端，ffmpeg 按需下（和视频那屏同一个动作） */
+$('#asrEngine').addEventListener('change', () => { asrDirty = true; });
+$('#asrLang').addEventListener('input', () => { asrDirty = true; });
+$('#asrSave').onclick = async () => {
+  const r = await post('media.save', {engine: $('#asrEngine').value, lang: $('#asrLang').value.trim()});
+  whisper(r.msg || (r.ok ? '已保存' : '没存上'));
+  if (r.ok) asrDirty = false;      // 存住了就交还给轮询，之后按后端的值显示
+};
+$('#vfFix').onclick = () => vidEnsure($('#vfFix'));
 
 /* ── 云同步（设置里那一块） ─────────────
    通道与协议都在后端 sync.py，这边只管把状态画出来、把几个动作发出去。

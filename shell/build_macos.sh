@@ -44,6 +44,10 @@ APP_FILES=(
   book_import.py
   book_notes.py
   clip_article.py
+  web_parse.py
+  feed.py
+  video_note.py
+  ffmpeg_tool.py
   sync.py
   requirements.txt
 )
@@ -71,6 +75,19 @@ for f in "${APP_FILES[@]}"; do
 done
 for d in "${APP_DIRS[@]}"; do
   [ -d "$ROOT/$d" ] || die "缺目录 $d/"
+done
+
+# 根目录的每个 .py 都是运行期模块，一律必须进包。这条不能靠自觉：漏一个的表现是
+# 「源码直接跑一切正常、装成 app 一点就哑」，而那正是本仓库唯一没法在开发机复现的
+# 路径。0.9.9 就漏过 feed.py / web_parse.py / video_note.py / ffmpeg_tool.py 四个
+# —— 所以这里反过来查：根目录冒出新 .py 而没进清单，打包直接 die。
+for p in "$ROOT"/*.py; do
+  b="$(basename "$p")"
+  listed=0
+  for f in "${APP_FILES[@]}"; do
+    [ "$f" = "$b" ] && listed=1 && break
+  done
+  [ "$listed" = 1 ] || die "根目录的 $b 没进 APP_FILES（运行期模块必须进包）"
 done
 
 SDK=""
