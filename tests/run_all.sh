@@ -98,6 +98,7 @@ fresh_shelf; run "重新取书取证" "$PY" tests/check_refetch.py "$BASE"
 fresh_shelf; run "视口回归" "$PY" tests/check_viewports.py "$BASE"
 fresh_shelf; run "书架交互" "$PY" tests/check_shelf.py "$BASE"
 fresh_shelf; run "笔记编辑器" "$PY" tests/check_notes_editor.py "$BASE"
+fresh_shelf; run "阅读器续读与大纲" "$PY" tests/check_reader_flow.py "$BASE"
 run "首启页" "$PY" tests/check_onboarding.py
 fresh_shelf; run "异常兜底" "$PY" tests/test_server_fallback.py
 
