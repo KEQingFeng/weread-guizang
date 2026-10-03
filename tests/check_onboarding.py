@@ -34,7 +34,7 @@ async def shape(pg):
     """页面上该量的东西。"""
     return await pg.evaluate(r"""() => {
         const q = s => document.querySelector(s);
-        const steps = [0,1,2].map(i => {
+        const steps = [0,1,2,3].map(i => {
             const el = q('#s'+i);
             return { s: el.dataset.s, note: q('#n'+i).textContent };
         });
@@ -109,23 +109,23 @@ async def main():
                 bad.append(f"{label}: console 报错 {errs}")
             if "probe" not in a["sent"]:
                 bad.append(f"{label}: 没等到页面自检（漏发 probe）")
-            if a["steps"] != [{"s": "idle", "note": "待检视"}] * 3:
+            if a["steps"] != [{"s": "idle", "note": "待检视"}] * 4:
                 bad.append(f"{label}: 未配置时步骤状态不对 {a['steps']}")
 
             # 壳回一手状态：全部缺失
-            await pg.evaluate("window.gz.init({env:false,browser:false,account:false})")
+            await pg.evaluate("window.gz.init({env:false,browser:false,account:false,media:false})")
             await pg.wait_for_timeout(200)
             b = await shape(pg)
-            if [s["s"] for s in b["steps"]] != ["idle"] * 3:
+            if [s["s"] for s in b["steps"]] != ["idle"] * 4:
                 bad.append(f"{label}: init(全假) 应保持 idle，得到 {b['steps']}")
 
-            # 壳回一手状态：环境与浏览器已好 —— 这两行应直接变 ok
-            await pg.evaluate("window.gz.init({env:true,browser:true,account:false})")
+            # 壳回一手状态：环境、浏览器与转写引擎已好 —— 这几行应直接变 ok
+            await pg.evaluate("window.gz.init({env:true,browser:true,account:false,media:true})")
             await pg.wait_for_timeout(200)
             c = await shape(pg)
-            print("  已装好的两项：", json.dumps(c["steps"], ensure_ascii=False))
-            if [s["s"] for s in c["steps"]] != ["ok", "ok", "idle"]:
-                bad.append(f"{label}: init(env/browser 真) 应得 ok/ok/idle，得到 {c['steps']}")
+            print("  已装好的几项：", json.dumps(c["steps"], ensure_ascii=False))
+            if [s["s"] for s in c["steps"]] != ["ok", "ok", "idle", "ok"]:
+                bad.append(f"{label}: init(env/browser/引擎 真) 应得 ok/ok/idle/ok，得到 {c['steps']}")
 
             # 点「我思故我在」
             await pg.click("#go")
@@ -143,20 +143,22 @@ async def main():
             # 壳回灌日志 + 逐步推进（照 main.swift 的真实顺序）
             await pg.evaluate("""() => {
                 window.gz.log('—— 用 /usr/bin/python3 开始配置 ——');
-                window.gz.log('[1/3] 虚拟环境：新建');
-                window.gz.log('[2/3] 正在安装依赖');
+                window.gz.log('[1/5] 虚拟环境：新建');
+                window.gz.log('[2/5] 正在安装依赖');
                 window.gz.step(0,'ok','依赖已装齐');
                 window.gz.step(1,'ok','Chromium 已就绪');
                 window.gz.step(2,'run','等你在弹出的窗口里扫码');
                 window.gz.log('—— 即将弹出一个窗口，请用微信扫码 ——');
+                window.gz.log('[5/5] 转写引擎：就绪');
+                window.gz.step(3,'ok','转写引擎已就绪');
             }""")
             await pg.wait_for_timeout(300)
             e = await shape(pg)
             print("  配置完成态：", json.dumps(e["steps"], ensure_ascii=False), "| 日志行数", e["logLines"])
             await pg.screenshot(path=f"/tmp/onboard_{label}_done.png")
-            if [s["s"] for s in e["steps"]] != ["ok", "ok", "run"]:
+            if [s["s"] for s in e["steps"]] != ["ok", "ok", "run", "ok"]:
                 bad.append(f"{label}: 推进后状态不对 {e['steps']}")
-            if e["logLines"] < 5:
+            if e["logLines"] < 6:
                 bad.append(f"{label}: 日志没灌进去（{e['logLines']} 行）")
             if e["goDisabled"] is False:
                 bad.append(f"{label}: 配置途中按钮应禁用")

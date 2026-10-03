@@ -36,9 +36,11 @@ import board as board_mod
 import book_export
 import book_import
 import book_notes
+import cleanup
 import clip_article
 import feed as feed_mod
 import ffmpeg_tool
+import media_setup
 import mindmap
 import sync as cloudsync
 import video_note
@@ -49,7 +51,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "0.9.9"
+VERSION = "1.0.0"
 
 
 def py():
@@ -2069,10 +2071,19 @@ def feed_summary():
 
 
 _VIDEO_AVAIL = {"at": 0.0, "v": None}
+# 上一次问「转写组件在忙吗」得到的答案。只在「忙 → 闲」的那一刻才去作废 available 的
+# 缓存，平时一直闲就不动它（动一下就是一次大包 import）。
+_MEDIA_BUSY = {"v": False}
+
+
+def video_avail_forget():
+    """把那份 30 秒的缓存作废。装完组件、下完模型之后必须调一次 ——
+    否则用户点完「补齐组件」，那几盏灯还要再绿不绿半分钟，看着像没生效。"""
+    _VIDEO_AVAIL.update({"at": 0.0, "v": None})
 
 
 def video_avail():
-    """视频这条线现在能走到哪一步（下载器 / ffmpeg / 本地或云 ASR / LLM）。
+    """视频这条线现在能走到哪一步（下载器 / ffmpeg / 本地或云 ASR / LLM / 模型）。
 
     available() 要试 import 几个大包（mlx_whisper 那类），一次几十毫秒；状态栏是
     轮询的，所以缓存 30 秒 —— 用户刚装完组件时最迟半分钟就能看到绿灯。
@@ -2085,6 +2096,12 @@ def video_avail():
     except Exception:
         v = {"ytdlp": False, "ffmpeg": False, "asr": {"local": False, "cloud": True},
              "llm": False, "engines": []}
+    # 引擎/模型准备到哪一步了（装引擎、后台下模型都走 media_setup）。它自带锁和
+    # 一次目录扫描，几十毫秒量级，跟 available() 一起缓在同一个 30 秒里。
+    try:
+        v["setup"] = media_setup.status()
+    except Exception:
+        pass
     _VIDEO_AVAIL.update({"at": now, "v": v})
     return v
 
@@ -2696,6 +2713,23 @@ def video_do(body):
                 return {"ok": False, "msg": str(e)[:180]}
             r["downloads"] = _video_exports(d)
             return {"ok": True, "msg": "导好了：%(name)s" % r, "export": r}
+        if act in ("media_status", "media_engine", "media_model", "media_all"):
+            if act != "media_status":
+                kind = {"media_engine": "engine", "media_model": "model", "media_all": "auto"}[act]
+                ok, msg = media_setup.start(kind)
+                if not ok:
+                    return {"ok": False, "msg": msg, "setup": media_setup.status()}
+            # 状态现取（不走那个 30 秒缓存）：下载百分比要跳着往上走，缓存了就成了定格照。
+            st = media_setup.status()
+            # 刚好从「忙」变「闲」的那一帧，把 available 那份缓存作废 —— 装完引擎、
+            # 下完模型，那几盏灯必须立刻变绿，而不是再等半分钟。平时（一直闲）不动它，
+            # 否则每次轮询都要重新 import 那几个大包。
+            busy = bool(st.get("busy"))
+            if _MEDIA_BUSY["v"] and not busy:
+                video_avail_forget()
+            _MEDIA_BUSY["v"] = busy
+            return {"ok": True, "msg": st.get("note") or "已开始准备", "setup": st,
+                    "available": video_avail()}
         url = str(body.get("url") or "").strip()
         if not url:
             return {"ok": False, "msg": "先把视频链接粘进来"}
@@ -3689,6 +3723,23 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg, _ms = agent_test()
             return self._json({"ok": ok, "msg": msg})
 
+        if action == "cleanup":
+            # 维护那一栏：先试算（只看不删），用户点头了才真删。删的是几百 MB 到 1.6GB
+            # 且不可逆 —— 所以 plan 与 run 分成两步，界面必须把 plan 摆给用户看过。
+            mode = str((body or {}).get("mode") or "plan").strip()
+            what = str((body or {}).get("what") or "all").strip()
+            if what not in ("components", "data", "all"):
+                return self._json({"ok": False, "msg": "不认识要清哪一类"})
+            if mode == "run":
+                r = cleanup.run(what)
+                log("--- 维护：卸载/清理 %s → 释放 %s ---"
+                    % (what, cleanup.human(r["freed"])))
+                msg = "已释放 %s" % cleanup.human(r["freed"]) if r["ok"] else \
+                      ("有几样没删成：%s" % "；".join(r["errors"])[:180])
+                return self._json({"ok": r["ok"], "msg": msg, "result": r,
+                                   "plan": cleanup.plan("all")})
+            return self._json({"ok": True, "plan": cleanup.plan(what)})
+
         if action == "media.save":
             ok, msg = set_media_cfg(body.get("engine"), body.get("lang"))
             return self._json({"ok": ok, "msg": msg,
@@ -3871,7 +3922,18 @@ def main():
     for p in range(args.port, args.port + 20):
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)
+            # 绑到哪个口就写哪个口：默认端口被占时上面这个循环会自己往后挪，
+            # 而 MCP 适配器只拿得到我们请它用的那个数。不写下来，挪完就没人找得着。
+            pc.write_runtime(REPO, p, version=VERSION)
             print(f"  微信读书导出 → http://127.0.0.1:{p}", flush=True)
+            # 进门之后自动补视频那条线的组件：引擎缺就装、模型缺就在后台下（1.6GB 那个）。
+            # 只有壳（安装包）会设 GUIZANG_AUTO_MEDIA=1 —— 源码直接跑时不该因为起了一下
+            # 服务就悄悄拉一份 GB 级权重。是后台线程，不挡服务起来。
+            try:
+                ok, msg = media_setup.maybe_auto_start()
+                print(f"  转写组件: {msg}", flush=True)
+            except Exception as e:
+                print(f"  转写组件: 自动准备没起来（{type(e).__name__}: {e}）", flush=True)
             srv.serve_forever()
             return
         except OSError:

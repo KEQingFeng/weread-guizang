@@ -48,6 +48,8 @@ APP_FILES=(
   feed.py
   video_note.py
   ffmpeg_tool.py
+  media_setup.py
+  cleanup.py
   sync.py
   board.py
   mindmap.py

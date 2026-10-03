@@ -204,6 +204,27 @@ def main():
         chk("写想法：光标已经落进输入框", bool(pop) and pop["focused"], pop)
         chk("写想法：小条整个落在视口里", bool(pop) and pop["onscreen"], pop)
 
+        # 小条底下那排「格子」：七颗标签钮 + 取消 + 记下，全挤在一条 flex 行里会被压到
+        # 只剩 27px 宽 —— 两个字的标签只好一个字一行地竖排下来，最右那颗还越出边被
+        # overflow:hidden 裁掉。这条量的是真几何：按钮里的文字只许排一行，且右边缘不许
+        # 越出父容器的内容盒。量的是几何不是截图，改回挤压态立刻红。
+        if pop:
+            grid = page.evaluate("""() => {
+              const note = document.querySelector('#selpop .selnote');
+              return [...note.querySelectorAll('.kinds button, .cancel, .go')].map(el => {
+                const r = el.getBoundingClientRect();
+                const p = el.parentElement.getBoundingClientRect();
+                const rng = document.createRange();
+                rng.selectNodeContents(el);
+                return {t: el.textContent.trim(), lines: rng.getClientRects().length,
+                        over: Math.round(r.right - p.right),
+                        clipped: el.scrollWidth > el.clientWidth + 1};
+              });
+            }""")
+            bad = [g for g in grid if g["lines"] > 1 or g["over"] > 1 or g["clipped"]]
+            chk("写想法：标签与取消/记下各占一格、都排一行（没竖排、没裁掉）",
+                bool(grid) and not bad, bad)
+
         if pop:
             page.fill("#selpop .selnote textarea", "这一句是要点，回头写进卡片。")
             page.evaluate("() => document.querySelector('#selpop .selnote .go').click()")
@@ -266,6 +287,85 @@ def main():
             page.evaluate("() => selPopHide()")
         else:
             chk("写想法：小条都没开，后面几条存盘断言一并记失败", False, "no popup")
+
+        # ── 键盘与撤销：把笔记行当列表用 ──────────────────
+        # 行是 tabindex="0" 的，Tab 能停在它上面；停上去按什么都不能是白按。
+        # 回车跳回正文那一句、E 改想法、Delete 删除 —— 三条都得真有效果。
+        # 每条都等「效果真的出现」再断言：满负载跑整轮门禁时，固定 sleep 会不够
+        # （小条与提示都是进场动画，元素在动画走完之前还点不着、也读不到）。
+        def wait_js(expr, timeout=8000):
+            try:
+                page.wait_for_function(expr, timeout=timeout)
+                return True
+            except Exception:
+                return False
+
+        mkid = page.evaluate("() => document.querySelector('#ntList .ntrow[data-mk]').dataset.mk")
+        page.evaluate("""() => { NTLAST.mark = ''; NTLAST.text = '';
+          document.querySelector('#ntList .ntrow[data-mk]').focus(); }""")
+        page.keyboard.press("Enter")
+        wait_js("() => NTLAST.mark === '%s'" % mkid)
+        chk("笔记栏：行上按回车 = 跳回正文那一句",
+            page.evaluate("() => NTLAST.mark") == mkid, page.evaluate("() => NTLAST.mark"))
+        page.evaluate("""() => { selPopHide();
+          document.querySelector('#ntList .ntrow[data-mk]').focus(); }""")
+        page.keyboard.press("e")
+        wait_js("() => { const e = document.getElementById('selpop');"
+                " return !!(e && e.classList.contains('show')"
+                " && e.querySelector('.selnote textarea')); }")
+        kpop = page.evaluate("""() => {
+          const el = document.getElementById('selpop');
+          const ta = el && el.querySelector('.selnote textarea');
+          return {open: !!(el && el.classList.contains('show')), val: ta ? ta.value : null};
+        }""")
+        chk("笔记栏：行上按 E = 改想法（小条带着旧想法开出来）",
+            kpop["open"] and kpop["val"] == "这一句是要点，回头写进卡片。", kpop)
+
+        # 删完给一次反悔：右下角那条提示上挂颗「撤销」，点一下原样放回。
+        page.evaluate("() => selPopHide()")
+        n0 = page.evaluate("() => (NT.doc.marks || []).length")
+        page.evaluate("() => document.querySelector('#ntList .ntrow[data-mk]').focus()")
+        page.keyboard.press("Delete")
+        wait_js("() => { const b = document.querySelector('.whisper .wa');"
+                " return !!b && (NT.doc.marks || []).length === %d; }" % (n0 - 1))
+        ds = page.evaluate("""() => {
+          const b = document.querySelector('.whisper .wa');
+          return {rows: document.querySelectorAll('#ntList .ntrow[data-mk]').length,
+                  marks: (NT.doc.marks || []).length, label: b ? b.textContent.trim() : ''};
+        }""")
+        chk("笔记栏：行上按删除 = 删掉这条，且给一次「撤销」",
+            ds["marks"] == n0 - 1 and ds["rows"] == 0 and ds["label"] == "撤销", ds)
+        # 那颗钮得真的点得着：.whisper 是淡入进场（visibility 参与过渡），动画还没走完
+        # 的时候 elementFromPoint 会从它身上穿过去。所以等它可命中了再点。
+        hittable = wait_js("""() => {
+          const b = document.querySelector('.whisper .wa');
+          if (!b) return false;
+          const r = b.getBoundingClientRect();
+          return document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                           Math.round(r.y + r.height / 2)) === b;
+        }""")
+        ub = page.evaluate("""() => {
+          const b = document.querySelector('.whisper .wa');
+          if (!b) return null;
+          const r = b.getBoundingClientRect();
+          const hit = document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                               Math.round(r.y + r.height / 2));
+          return {ok: hit === b, over: r.top < 0 || r.bottom > innerHeight};
+        }""")
+        chk("撤销钮是真能点到的（没被 whisper 的 pointer-events 穿过去）",
+            hittable and bool(ub) and ub["ok"] and not ub["over"], ub)
+        if ub and ub["ok"]:
+            box = page.evaluate("""() => {
+              const r = document.querySelector('.whisper .wa').getBoundingClientRect();
+              return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)];
+            }""")
+            page.mouse.click(box[0], box[1])
+            wait_js("() => (NT.doc.marks || []).length === %d" % n0)
+        back = page.evaluate("""() => ({marks: (NT.doc.marks || []).length,
+          rows: document.querySelectorAll('#ntList .ntrow[data-mk]').length,
+          ink: document.querySelectorAll('#rdBody mark.gzmk').length})""")
+        chk("笔记栏：点「撤销」把划线与正文里的墨迹都放回去",
+            back["marks"] == n0 and back["rows"] == 1 and back["ink"] == 1, back)
 
         # ── 开编辑器 ─────────────────────────────────────
         page.evaluate("() => document.querySelector('#rdBody mark.gzmk').click()")

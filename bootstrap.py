@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """首次运行：把缺的东西一次补齐。
 
-界面中间那个「我思故我在」按下去，跑的就是这个脚本。三件事，按顺序来：
+界面中间那个「我思故我在」按下去，跑的就是这个脚本。分两段，按顺序来：
 
-  1. 建虚拟环境（.venv）—— 不动系统里的 Python，装的东西全在项目目录内
-  2. 装 Python 依赖（playwright、genanki、pypdf、feedparser、yt-dlp）
-  3. 装 Chromium（Playwright 的浏览器，约 368MB）—— 取正文靠它
+  前段（缺了就进不了门，失败即停）：
+    1. 建虚拟环境（.venv）—— 不动系统里的 Python，装的东西全在项目目录内
+    2. 装 Python 依赖（playwright、genanki、pypdf、feedparser、yt-dlp）
+    3. 装 Chromium（Playwright 的浏览器，约 368MB）—— 取正文靠它
 
-转写引擎（mlx-whisper / faster-whisper）不在这份清单里：它们是可选的大件，
-且分平台（mlx 只在 Apple 芯片上跑）。要本地转写时按界面提示单独装。
+  后段（视频转笔记那条线的组件，尽力而为，失败不拦门）：
+    4. ffmpeg —— 按需下一份静态的放在数据目录里，不装进系统
+    5. 转写引擎 —— mlx-whisper（Apple 芯片）/ faster-whisper（其它）
+
+转写**模型**（几百 MB ~ 1.6GB）不在这里下：引擎装完就让人进门，模型进门之后由
+ui_server 起后台线程拉，视频页那几盏灯显示进度（见 media_setup.py）。
+GB 级的东西不该把人拦在配置页等十几分钟，更不该因为一次下载失败就进不去。
 
 只补缺的那一步，已经有就跳过，所以第二次点它是一秒过。这个脚本自己**只用标准库**
-（外加同样只用标准库的 platform_compat），因为第一次跑的时候项目里什么都还没有，
-它必须在裸系统 Python 上也能起来。
+（外加同样只用标准库的 platform_compat、media_setup），因为第一次跑的时候项目里
+什么都还没有，它必须在裸系统 Python 上也能起来。
 
 虚拟环境建在数据目录里（源码直接跑就是项目目录，装成 app 就是用户目录 —— 由壳通过
 GUIZANG_DATA 指定），不往应用包里写东西。它不删不改任何已有文件；输出全部走 stdout，
@@ -110,9 +116,9 @@ def main():
     venv = pc.venv_dir(HERE)
     exe = pc.venv_python_only(HERE)
     if exe:
-        say("[1/3] 虚拟环境：已有，跳过")
+        say("[1/5] 虚拟环境：已有，跳过")
     else:
-        say("[1/3] 虚拟环境：正在创建（装的东西都落在这里，不碰系统 Python）")
+        say("[1/5] 虚拟环境：正在创建（装的东西都落在这里，不碰系统 Python）")
         say(f"      {venv}")
         run([sys.executable, "-m", "venv", venv])
         exe = pc.venv_python_only(HERE)
@@ -125,9 +131,9 @@ def main():
 
     # ── 2. Python 依赖 ────────────────────────────────────────────
     if python_works(exe, "import playwright, genanki, pypdf, feedparser, yt_dlp"):
-        say("[2/3] Python 依赖：已装齐，跳过")
+        say("[2/5] Python 依赖：已装齐，跳过")
     else:
-        say("[2/3] Python 依赖：正在安装（playwright、genanki、feedparser、yt-dlp）")
+        say("[2/5] Python 依赖：正在安装（playwright、genanki、feedparser、yt-dlp）")
         run([exe, "-m", "pip", "install", "--upgrade", "pip"], quiet=True)
         if run([exe, "-m", "pip", "install", "-r", "requirements.txt"]) != 0:
             say()
@@ -140,9 +146,9 @@ def main():
 
     # ── 3. Chromium ───────────────────────────────────────────────
     if browser_ready():
-        say("[3/3] Chromium：已有，跳过")
+        say("[3/5] Chromium：已有，跳过")
     else:
-        say(f"[3/3] Chromium：正在下载安装（约 {CHROME_MB}MB，这里要几分钟）")
+        say(f"[3/5] Chromium：正在下载安装（约 {CHROME_MB}MB，这里要几分钟）")
         say("      中途别关这个页面。下载慢的话，挂上代理再点一次会接着下。")
         if run([exe, "-m", "playwright", "install", "chromium"]) != 0:
             say()
@@ -153,8 +159,53 @@ def main():
             say("     HTTPS_PROXY=http://127.0.0.1:端口 <上面的虚拟环境>/bin/python -m playwright install chromium")
             return 1
 
+    # ── 4. ffmpeg / 5. 转写引擎 ─────────────────────────────────
+    # 这两样是「视频转笔记」的组件。它们**不拦门**：前一步的取书、剪藏、订阅、阅读器
+    # 全都不需要它们，为一次下载失败把人堵在配置页上不划算。缺哪样就在末尾说清楚，
+    # 进门之后在设置里还能补（而且转写模型本来就要进门之后才下）。
+    miss = []
     say()
-    say("环境已就绪。")
+    say("[4/5] ffmpeg：检查中")
+    if not pc.IS_MAC:
+        say("      跳过（自动下载只服务 macOS，别的系统请自己装一份放进 PATH）")
+    else:
+        try:
+            import ffmpeg_tool
+            if ffmpeg_tool.status().get("found"):
+                say("      已有，跳过")
+            else:
+                say("      正在下一份静态的（不装进系统，放在数据目录里）")
+                seen = {"s": None}
+
+                def ff_prog(stage, pct=None):
+                    if stage != seen["s"]:          # 只在下到新阶段时报一行，别刷屏
+                        seen["s"] = stage
+                        say("      %s%s" % (stage, ("  %d%%" % pct) if isinstance(pct, int) else ""))
+
+                ffmpeg_tool.ensure(progress=ff_prog)
+                say("      就绪")
+        except Exception as e:
+            miss.append("ffmpeg")
+            say("      没下来：%s" % str(e)[:200])
+
+    say("[5/5] 转写引擎：检查中")
+    try:
+        import media_setup as ms
+        ok, msg = ms.install_engine(say=say, run=lambda argv: run(argv))
+        say("      " + ("就绪（%s）" % ms.model_id() if ok else msg))
+        if not ok:
+            miss.append("转写引擎")
+    except Exception as e:
+        miss.append("转写引擎")
+        say("      跳过了（%s: %s）" % (type(e).__name__, e))
+
+    say()
+    if miss:
+        say("核心功能已经就绪，可以进去了。「%s」这次没配上（多半是网络）——"
+            % "、".join(miss))
+        say("进门后在「设置 → 视频转写」里点一下还能补；转写模型的下载也会在那里显示进度。")
+    else:
+        say("环境已就绪；转写模型会在进去之后自动下载。")
     return 0
 
 

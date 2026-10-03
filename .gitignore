@@ -5,3 +5,6 @@ output/
 *.log
 .DS_Store
 dist/
+# 服务起来后写的端口回执（源码直接跑时落在仓库里）：本机运行状态，不进版本库
+runtime.json
+runtime.json.tmp

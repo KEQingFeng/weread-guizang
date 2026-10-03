@@ -102,6 +102,17 @@ chk("video：mode=status 回 available",
     vd.get("ok") is True and isinstance(vd.get("available"), dict), vd)
 chk("video：available 里 ytdlp/ffmpeg/asr/llm 都在",
     all(k in vd["available"] for k in ("ytdlp", "ffmpeg", "asr", "llm")), vd.get("available"))
+# 转写组件的准备状态（引擎/模型）也要随 available 一起给出来 —— 视频页那盏「转写模型」
+# 灯全靠它，缺了这一块前端只能瞎猜。
+stv = vd["available"].get("setup") or {}
+chk("video：available.setup 报出引擎与模型到没到",
+    all(k in stv for k in ("engine", "engine_ready", "model", "model_ready")), stv)
+# 组件准备那个「随时问一句」的动作：视频页那盏灯靠它自己刷进度，不能是死的。
+# 只问不派活 —— 派活（media_engine/media_model）会真去装包或下 GB 级权重，
+# 那是用户点按钮才该发生的事，自测里不碰。
+mst = api("/api/video", {"act": "media_status"})
+chk("video：media_status 问得动，且回一份 setup", mst.get("ok") and isinstance(mst.get("setup"), dict), mst)
+chk("video：没在忙的时候不带 busy 标记", not (mst.get("setup") or {}).get("busy"), mst.get("setup"))
 
 # ── 转写偏好：保存 → 读回来（写的是沙盒 config.json） ──────────
 old = {"engine": st["video"].get("asr") or "auto", "lang": st["video"].get("lang") or ""}
@@ -167,8 +178,14 @@ with sync_playwright() as pw:
         chk(f"视频：「{what}」在", page.locator(f'[data-pane="video"] {sel}').count() == 1)
     lights = page.evaluate(
         "() => [...document.querySelectorAll('#vCap .it')].map(e => e.className)")
-    chk("视频：四盏灯都亮出来了（就绪/缺失各归各位）", len(lights) == 4, lights)
+    chk("视频：五盏灯都亮出来了（就绪/缺失各归各位）", len(lights) == 5, lights)
     chk("视频：每盏灯非 ok 即 no", all(("ok" in c) ^ ("no" in c) for c in lights), lights)
+    # 转写模型那盏灯必须说真话：沙盒里没下过权重，就不许冒充「就绪」。
+    chk("视频：没下过模型时，那盏灯不冒充就绪", page.evaluate("""() => {
+      const t = [...document.querySelectorAll('#vCap .it')]
+        .map(e => e.textContent).find(x => x.includes('转写模型'));
+      return !!t && (/未下载|准备中|没备好|缺转写引擎/.test(t));
+    }"""), page.evaluate("() => [...document.querySelectorAll('#vCap .it')].map(e => e.textContent)"))
     # 沙盒里 seeded 了一本转出来的书（tests/seed.py 的 video_SE_LECTURE），
     # 所以这一栏不该再是空态；空态那条话在 check_video_workbench.py 里另有验法。
     rows = page.evaluate("() => document.querySelectorAll('#vShelf .vtbook').length")

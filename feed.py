@@ -34,8 +34,6 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-import feedparser
-
 import platform_compat
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -475,6 +473,20 @@ def _first(d, *keys):
     return ""
 
 
+def _feedparser():
+    """按需取 feedparser。
+
+    它只有一个用处：把 RSS/Atom 的字节解析成结构化字段。放在模块顶层的话，
+    少装这一个包就会让整个服务起不来 —— 画板、导图、笔记全跟着陪葬，而它们
+    一个都不需要 feedparser。所以改成用到订阅时才取，缺了只影响订阅这一条路。
+    """
+    try:
+        import feedparser
+    except ImportError as e:
+        raise ValueError("缺少 feedparser：装一下即可恢复订阅（pip install feedparser）") from e
+    return feedparser
+
+
 def parse_feed(blob, base=""):
     """把字节解析成统一结构：{title, site, kind, link, entries:[...]}。
 
@@ -497,7 +509,7 @@ def parse_feed(blob, base=""):
     # 交给 feedparser 的是已经解码好的文本，不是原始字节：编码我们已经按 GBK 兜底
     # 判过一次了，再让它自己猜一遍只会把「头里写 utf-8、正文其实是 GB2312」的源
     # 解成满屏乱码。
-    parsed = feedparser.parse(text)
+    parsed = _feedparser().parse(text)
     base = base or (parsed.get("href") or "")
     feed = parsed.get("feed") or {}
     title = _first(feed, "title") or ""

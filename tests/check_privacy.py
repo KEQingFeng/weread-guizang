@@ -41,7 +41,7 @@ ALLOW = re.compile(r"example\.com|@users\.noreply\.github\.com|git@github\.com|y
 
 # 显式豁免：(路径前缀, 规则名)，'*' 表示所有规则。每条都必须是「看了就知道为什么」的公开信息。
 WAIVERS = [
-    # 三语 README 的 clone 地址 = 本仓库自己的公开地址，读者就是要用它。
+    # README 里的 clone 地址 = 本仓库自己的公开地址，读者就是要用它。
     ("README", "GitHub 身份"),
     # 这份体检表本身写着这些特征的匹配模式，不可能不匹配自己。
     ("tests/check_privacy.py", "*"),

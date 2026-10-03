@@ -5,8 +5,8 @@
 // 设计要点：取书是分钟级甚至小时级的长任务，MCP 调用不能阻塞等它跑完。
 // 所以 book_fetch 立即返回，进度用 app_status / task_log 轮询。
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, openSync, readFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
@@ -24,24 +24,54 @@ function findRepo() {
   return cands[0];
 }
 const REPO = findRepo();
-/** 项目虚拟环境里的解释器：Windows 在 Scripts/python.exe，其它平台在 bin/python。
- *  原来只认 POSIX 布局，Windows 上会退回到一个不存在的 python3 —— 服务与任务都起不来。 */
+/** 数据目录：与 platform_compat.data_dir 同一套规则（GUIZANG_DATA 优先，~ 要展开）。
+ *  虚拟环境和端口回执文件都在这儿，不在源码目录 —— 装成 app 之后源码是只读的。 */
+function dataDir() {
+  const d = (process.env.GUIZANG_DATA || "").trim();
+  if (!d) return REPO;
+  return d.startsWith("~") ? join(homedir(), d.slice(1)) : d;
+}
+/** 该用哪个解释器起服务：虚拟环境优先，和 platform_compat.venv_python 一个口径。
+ *  原来只认 <数据目录>/Scripts 与 <数据目录>/bin 这两个位置 —— 本项目建环境
+ *  建的是 .venv/，两个都不存在，于是每次退回 PATH 上的 python3：那台机器上
+ *  的 python3 没有本项目的依赖（feedparser、playwright…），服务进程起来就死，
+ *  适配器只等来一句「启动超时」。 */
 function venvPython(repo) {
   const override = process.env.GUIZANG_PYTHON;
   if (override && existsSync(override)) return override;
-  for (const parts of [["Scripts", "python.exe"], ["bin", "python"]]) {
-    const p = join(repo, ...parts);
+  const exe = process.platform === "win32" ? ["Scripts", "python.exe"] : ["bin", "python"];
+  const bases = [join(dataDir(), ".venv"), join(repo, ".venv"), join(dataDir(), "venv"),
+                 join(repo, "venv"), dataDir(), repo];
+  for (const base of bases) {
+    const p = join(base, ...exe);
     if (existsSync(p)) return p;
   }
   return process.platform === "win32" ? "python" : "python3";
 }
 const PY = venvPython(REPO);
 const PORT = Number(process.env.GUIZANG_PORT || 8770);
-const API = process.env.GUIZANG_API || `http://127.0.0.1:${PORT}`;
+const RUNTIME = join(dataDir(), "runtime.json");
+
+/** 服务实际绑在哪个端口。
+ *  8770 被占时 ui_server 会自己往后挪最多 20 个，挪完只有它自己知道。
+ *  GUIZANG_API 是显式指定，优先级最高；否则读回执文件，最后才用请它用的那个数。 */
+function apiBase() {
+  const explicit = (process.env.GUIZANG_API || "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  try {
+    const p = Number(JSON.parse(readFileSync(RUNTIME, "utf8")).port);
+    if (p > 0 && p < 65536) return `http://127.0.0.1:${p}`;
+  } catch { /* 还没写过：退回默认端口 */ }
+  return `http://127.0.0.1:${PORT}`;
+}
 
 /* ── 与服务通信 ─────────────────────────── */
-async function req(path, { method = "GET", body, ms = 15000 } = {}) {
-  const r = await fetch(API + path, {
+/** 参数对象允许拆成两段传：历史上有一批调用点写成 req(path, {method, body}, {ms})，
+ *  而 req 只收两个参数 —— 第三段（超时）被静默丢掉，于是「给 3 分钟」的画板存盘
+ *  其实只等到 15 秒就报超时。这里并起来，两处都算数。 */
+async function req(path, opts = {}, more = {}) {
+  const { method = "GET", body, ms = 15000 } = { ...opts, ...more };
+  const r = await fetch(apiBase() + path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -60,6 +90,20 @@ async function alive() {
   }
 }
 
+/** 只把日志里的「出事那几行」挑出来。
+ *  整段回传会把用户的路径（解释器、浏览器、书库三行启动横幅）带进对话里，
+ *  那是个人信息；异常行本身才是要看的。主目录一律折成 ~。 */
+function errorTail(file) {
+  let text = "";
+  try { text = readFileSync(file, "utf8"); } catch { return ""; }
+  const home = homedir();
+  const hits = text.split("\n")
+    .filter(l => /Error|error|Traceback|Exception|No module named|找不到可用端口|Address already/.test(l))
+    .map(l => (home ? l.split(home).join("~") : l).trim())
+    .filter(Boolean);
+  return hits.slice(-3).join(" ／ ");
+}
+
 let booting = null;
 async function ensureServer() {
   if (await alive()) return true;
@@ -68,12 +112,24 @@ async function ensureServer() {
       if (!existsSync(join(REPO, "ui_server.py"))) {
         throw new Error(`找不到归藏项目（在 ${REPO} 没看到 ui_server.py）。请把本文件放在项目的 mcp/ 目录下，或用环境变量 GUIZANG_REPO 指定项目目录。`);
       }
-      spawn(PY, ["ui_server.py", "--port", String(PORT)], {
-        cwd: REPO, detached: true, stdio: "ignore", windowsHide: true,
-      }).unref();
+      const log = join(tmpdir(), "guizang-mcp-server.log");
+      const fd = openSync(log, "w");
+      const child = spawn(PY, ["ui_server.py", "--port", String(PORT)], {
+        cwd: REPO, detached: true, stdio: ["ignore", fd, fd], windowsHide: true,
+      });
+      child.unref();
+      let died = null;
+      child.on("exit", code => { died = code; });
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
         if (await alive()) return true;
+        // 进程都退了还探什么：早点说清是哪儿不行，别让人干等 15 秒
+        if (died !== null) {
+          const why = errorTail(log);
+          throw new Error("归藏服务起不来（解释器 " + PY + "）"
+            + (why ? "：" + why : "，详见 " + log)
+            + "。可在项目目录里跑一次 " + PY + " ui_server.py 看完整输出。");
+        }
       }
       throw new Error("归藏服务启动超时。请在项目目录里手动运行：" + PY + " ui_server.py --port " + PORT);
     })().finally(() => { booting = null; });
@@ -81,9 +137,35 @@ async function ensureServer() {
   return booting;
 }
 
+/** 服务多久之内算「刚确认活着」：一次工具调用常常连着打十几个请求，
+ *  每个都先探一遍 /api/state 纯属白花时间为。 */
+const ALIVE_MS = 3000;
+let lastAliveAt = 0;
+
+/** 所有工具走的正门：先确保服务在，再发请求。
+ *  直接 req() 的那些年，服务没起时用户看到的是 "fetch failed" —— 那是 Node
+ *  的连接错误，不是归藏说的话，谁都不知道该干什么。 */
+async function api(path, opts = {}, more = {}) {
+  if (Date.now() - lastAliveAt > ALIVE_MS) {
+    await ensureServer();
+    lastAliveAt = Date.now();
+  }
+  try {
+    return await req(path, opts, more);
+  } catch (e) {
+    // 半路服务被关了（用户退了 app）：让它重来一次，只补一次，不循环自救
+    lastAliveAt = 0;
+    let back = false;
+    try { back = await ensureServer(); } catch { back = false; }
+    if (!back) {
+      throw new Error(`归藏服务没应答（${apiBase()}）：${e instanceof Error ? e.message : e}`);
+    }
+    return req(path, opts, more);
+  }
+}
+
 async function getState() {
-  await ensureServer();
-  return req("/api/state");
+  return api("/api/state");
 }
 
 function fmtChars(n) {
@@ -148,14 +230,14 @@ async function readFeed(params = {}) {
     if (v === undefined || v === null || v === "") continue;
     qs.set(k, String(v));
   }
-  const d = await req(`/api/feed?${qs.toString()}`, { ms: 60000 });
+  const d = await api(`/api/feed?${qs.toString()}`, { ms: 60000 });
   if (!d.ok) throw new Error(d.msg || "读订阅出错");
   return d;
 }
 
 async function postFeed(body, { ms = 120000 } = {}) {
   await ensureServer();
-  return req("/api/feed", { method: "POST", body, ms });
+  return api("/api/feed", { method: "POST", body, ms });
 }
 
 /** 书名 / 编号 → 本地书库里的一本书。
@@ -190,7 +272,7 @@ function fmtBytes(n) {
  *  req() 见到非 2xx 直接抛「HTTP 404 /api/board?…」，而后端在 404 的信封里写的
  *  是「没有这块画板」—— 那才是用户该看见的一句，别让状态码把它盖掉。 */
 async function reqSoft(path, { ms = 30000 } = {}) {
-  const r = await fetch(API + path, { signal: AbortSignal.timeout(ms) }).catch(() => null);
+  const r = await fetch(apiBase() + path, { signal: AbortSignal.timeout(ms) }).catch(() => null);
   if (!r) return { ok: false, msg: "本机服务没应答（归藏是不是没开着？）" };
   try {
     return await r.json();
@@ -241,7 +323,7 @@ async function patchTranscript(bookId, { edits, drop, add }, notes) {
   for (let guard = 0; guard < MAX_TRIPS; guard++) {
     const qs = new URLSearchParams({ mode: "transcript", book: bookId,
       offset: String(rows.length), limit: String(PAGE) });
-    const d = await req(`/api/video?${qs}`, { ms: 60000 });
+    const d = await api(`/api/video?${qs}`, { ms: 60000 });
     if (!d.ok) throw new Error(d.msg || "读不出整本转写，这次没动盘上那一份");
     const t = d.transcript || {};
     const page = t.segments || [];
@@ -306,7 +388,7 @@ async function shelfBooks() {
   await ensureServer();
   if (shelfCache.books.length && Date.now() - shelfCache.at < 300000) return shelfCache.books;
   try {
-    const d = await req("/api/weread", { method: "POST", body: { api_name: "/shelf/sync", params: {} }, ms: 40000 });
+    const d = await api("/api/weread", { method: "POST", body: { api_name: "/shelf/sync", params: {} }, ms: 40000 });
     shelfCache = {at: Date.now(), books: (d.data && d.data.books) || []};
   } catch (e) {
     shelfCache = {at: Date.now(), books: []};
@@ -379,7 +461,7 @@ const tools = {
     if (t.running) {
       const mins = t.started_at ? Math.round(Date.now() / 1000 - t.started_at) : 0;
       lines.push(`当前任务：进行中（${t.kind}${t.book ? " · " + t.book : ""}，已跑 ${Math.floor(mins / 60)} 分 ${mins % 60} 秒）`);
-      const lg = await req("/api/log?tail=8").catch(() => ({ lines: [] }));
+      const lg = await api("/api/log?tail=8").catch(() => ({ lines: [] }));
       const tail = fmtLog(lg.lines || []);
       if (tail) lines.push(`最近输出：\n${tail}`);
       lines.push("提示：取书是长任务，别在这里等，隔一会儿再查，或让用户看界面。");
@@ -400,7 +482,7 @@ const tools = {
   async task_log({ lines: n = 40 } = {}) {
     await ensureServer();
     const k = Math.max(1, Math.min(Number(n) || 40, 400));
-    const d = await req(`/api/log?tail=${k}`);
+    const d = await api(`/api/log?tail=${k}`);
     const text = fmtLog(d.lines || []);
     return text || "（还没有输出）";
   },
@@ -415,7 +497,7 @@ const tools = {
     const merged = join(s.out, `${b.title.replace(/[<>:"/\\|?*]/g, "_")}.md`);
     if (existsSync(merged)) out.push(`合并正文：${merged}`);
     try {
-      const r = await fetch(`${API}/api/zip?book=${encodeURIComponent(b.id)}`, { signal: AbortSignal.timeout(120000) });
+      const r = await fetch(`${apiBase()}/api/zip?book=${encodeURIComponent(b.id)}`, { signal: AbortSignal.timeout(120000) });
       if (r.ok) {
         await r.arrayBuffer();
         out.push(`打包 ZIP：${join(REPO, "cache/downloads", b.id + ".zip")}`);
@@ -429,7 +511,7 @@ const tools = {
     await ensureServer();
     const v = String(book || "").trim();
     if (!v) throw new Error("请给出书的链接或编号");
-    const r = await req("/api/action", { method: "POST", body: { action: "export", book: v } });
+    const r = await api("/api/action", { method: "POST", body: { action: "export", book: v } });
     if (!r.ok) throw new Error(r.msg);
     const id = v.includes("weread.qq.com") ? v.replace(/\/+$/, "").split("/").pop() : v;
     return [`已开始取书（编号 ${id}）。`, "这是长任务，可能要几分钟到几十分钟，我不会在这里等。",
@@ -437,12 +519,12 @@ const tools = {
   },
 
   async task_stop() {
-    const r = await req("/api/action", { method: "POST", body: { action: "stop" } });
+    const r = await api("/api/action", { method: "POST", body: { action: "stop" } });
     return r.ok ? "已请求中止，已取回的章节会保留。" : r.msg;
   },
 
   async folder_create({ name }) {
-    const r = await req("/api/action", { method: "POST", body: { action: "folder.new", name } });
+    const r = await api("/api/action", { method: "POST", body: { action: "folder.new", name } });
     if (!r.ok) throw new Error(r.msg);
     return `文件夹「${String(name).trim()}」已建立。`;
   },
@@ -452,7 +534,7 @@ const tools = {
     const b = pick(s.books || [], book);
     if (!b) throw new Error(`书架上没有匹配「${book}」的书`);
     const fid = resolveFolder(s.folders || [], folder);
-    const r = await req("/api/action", { method: "POST", body: { action: "book.move", book: b.id, folder: fid } });
+    const r = await api("/api/action", { method: "POST", body: { action: "book.move", book: b.id, folder: fid } });
     if (!r.ok) throw new Error(r.msg);
     const to = fid ? (s.folders.find(f => f.id === fid) || {}).name : "未归类";
     return `《${b.title}》已归入「${to}」。`;
@@ -460,9 +542,9 @@ const tools = {
 
   async account_connect() {
     await ensureServer();
-    const s = await req("/api/state");
+    const s = await api("/api/state");
     if (s.login && s.login.logged_in) return `已经连接着（${fmtWhen(s.login.checked_at)} 检查通过），不用重复扫码。`;
-    const r = await req("/api/action", { method: "POST", body: { action: "login" } });
+    const r = await api("/api/action", { method: "POST", body: { action: "login" } });
     if (!r.ok) throw new Error(r.msg);
     return "已唤起确认窗口，请让用户在弹出的浏览器里用微信扫码（5 分钟内有效）。扫完用 app_status 复核。";
   },
@@ -480,7 +562,7 @@ const tools = {
         if (hit) store = hit.bookId;
       }
     }
-    const d = (await req(`/api/detail?book=${encodeURIComponent(store)}&reader=${encodeURIComponent(reader)}`)).data || {};
+    const d = (await api(`/api/detail?book=${encodeURIComponent(store)}&reader=${encodeURIComponent(reader)}`)).data || {};
     const info = d.info || {}, pg = (d.progress || {}).book || {}, nb = d.notes || {};
     const out = [`《${info.title || reader}》`];
     if (info.author) out.push(`作者：${info.author}`);
@@ -499,11 +581,11 @@ const tools = {
 
   async notes_index() {
     await ensureServer();
-    const d = await req("/api/notes_index");
+    const d = await api("/api/notes_index");
     const st = d.data || {};
     if (st.running) return `正在建立：${st.done || 0}/${st.total || "?"}，已收 ${st.count || 0} 条。稍后再查。`;
     if (!st.built_at) {
-      await req("/api/notes_index", { method: "POST", body: { rebuild: false } });
+      await api("/api/notes_index", { method: "POST", body: { rebuild: false } });
       return "已开始建立笔记索引（把划线与想法读进本地）。这需要几分钟，完成后 notes_search / notes_random 才可用。";
     }
     return `索引就绪：${st.count} 条，建于 ${fmtWhen(st.built_at)}。`;
@@ -512,9 +594,9 @@ const tools = {
   async notes_search({ q, limit }) {
     await ensureServer();
     const n = Math.max(1, Math.min(Number(limit) || 30, 100));
-    const d = await req(`/api/notes_search?q=${encodeURIComponent(q || "")}&limit=${n}`);
+    const d = await api(`/api/notes_search?q=${encodeURIComponent(q || "")}&limit=${n}`);
     if (!d.total) {
-      const st = (await req("/api/notes_index")).data || {};
+      const st = (await api("/api/notes_index")).data || {};
       if (!st.count) return "还没有笔记索引。先调 notes_index 建一次（约几分钟），之后就能搜划线与想法。";
       return `没有匹配「${q}」的划线。`;
     }
@@ -529,9 +611,9 @@ const tools = {
   async notes_random({ count }) {
     await ensureServer();
     const n = Math.max(1, Math.min(Number(count) || 5, 20));
-    const d = await req(`/api/notes_random?n=${n}`);
+    const d = await api(`/api/notes_random?n=${n}`);
     if (!d.data || !d.data.length) {
-      const st = (await req("/api/notes_index")).data || {};
+      const st = (await api("/api/notes_index")).data || {};
       return st.count ? "暂时抽不到卡片。" : "还没有笔记索引。先调 notes_index 建一次。";
     }
     return d.data.map(x => `[${x.kind}] 《${x.title}》\n${x.text.slice(0, 260)}`).join("\n\n———\n\n");
@@ -546,7 +628,7 @@ const tools = {
       if (b) ids.push(b.id);
     }
     if (!ids.length) throw new Error("没认出这些书，先用 shelf_list 看有哪些");
-    const r = await req("/api/book_state", { method: "POST", body: { books: ids, state: state || "" } });
+    const r = await api("/api/book_state", { method: "POST", body: { books: ids, state: state || "" } });
     if (!r.ok) throw new Error(r.msg);
     return `已为 ${ids.length} 本标记「${state || "清除标记"}」。`;
   },
@@ -571,11 +653,11 @@ const tools = {
 
     if (want === "all" || want === "notes") {
       try {
-        const d = await req(`/api/notes_search?q=${encodeURIComponent(kw)}&limit=${n}`);
+        const d = await api(`/api/notes_search?q=${encodeURIComponent(kw)}&limit=${n}`);
         out.push(`【我的划线】命中 ${d.total || 0} 条`);
         for (const x of (d.data || [])) out.push(`- [${x.kind}]《${x.title}》${x.text.slice(0, 80)}`);
         if (!d.total) {
-          const st = (await req("/api/notes_index")).data || {};
+          const st = (await api("/api/notes_index")).data || {};
           if (!st.count) out.push("  （还没建笔记索引，先调 notes_index）");
         }
       } catch { out.push("【我的划线】暂时读不到"); }
@@ -583,7 +665,7 @@ const tools = {
 
     if (want === "all" || want === "store") {
       try {
-        const d = await req("/api/weread", {
+        const d = await api("/api/weread", {
           method: "POST", ms: 40000,
           body: { api_name: "/store/search", params: { keyword: kw, scope: 10 } },
         });
@@ -609,7 +691,7 @@ const tools = {
   async apkg_export({ book }) {
     await ensureServer();
     const { store, title } = await resolveStore(book);
-    const d = await req(`/api/apkg?book=${encodeURIComponent(store)}`
+    const d = await api(`/api/apkg?book=${encodeURIComponent(store)}`
       + `&title=${encodeURIComponent(title)}&json=1`, { ms: 180000 });
     if (!d.ok) throw new Error(d.msg || "导出失败");
     return [`《${title}》的划线卡包已生成：${d.count} 张`, `文件：${d.path}`,
@@ -625,7 +707,7 @@ const tools = {
       if (b) ids.push(b.id); else missing.push(String(key));
     }
     if (!ids.length) throw new Error("这些书都还没取回本地，没有可打包的内容。先用 book_fetch 取书。");
-    const d = await req(`/api/zip-multi?books=${encodeURIComponent(ids.join(","))}&json=1`, { ms: 300000 });
+    const d = await api(`/api/zip-multi?books=${encodeURIComponent(ids.join(","))}&json=1`, { ms: 300000 });
     if (!d.ok) throw new Error(d.msg || "打包失败");
     const out = [`已打包 ${d.count} 本（含逐章 Markdown 与图片）：${d.path}`];
     if (missing.length) out.push(`没认出的：${missing.join("、")}（要先取回本地才能打包）`);
@@ -640,7 +722,7 @@ const tools = {
     if (s.task && s.task.running) {
       return `现在有任务在跑（${s.task.kind} · ${s.task.book}）。后端一次只取一本，等它跑完或用 task_stop 中止后再来。`;
     }
-    const r = await req("/api/action", { method: "POST", body: { action: "export", book: list[0] } });
+    const r = await api("/api/action", { method: "POST", body: { action: "export", book: list[0] } });
     if (!r.ok) throw new Error(r.msg);
     const out = [`已开始取第 1 本：${list[0]}`];
     if (list.length > 1) {
@@ -667,7 +749,7 @@ const tools = {
         "微信读书里的划线笔记不受影响，之后可以重新取。",
         "确认要删的话，再调一次并传 confirm: true。"].join("\n");
     }
-    const r = await req("/api/delete_many", { method: "POST", body: { books: ids } });
+    const r = await api("/api/delete_many", { method: "POST", body: { books: ids } });
     if (!r.ok) throw new Error(r.msg);
     const out = [`${r.msg || "已删除"}：${titles.join("、")}`];
     if (missing.length) out.push(`没认出的：${missing.join("、")}`);
@@ -684,7 +766,7 @@ const tools = {
     if (/^\d{5,20}$/.test(k)) {
       ids = [k];
     } else {
-      const d = await req("/api/weread", {
+      const d = await api("/api/weread", {
         method: "POST", ms: 40000,
         body: { api_name: "/store/search", params: { keyword: k, scope: 10 } },
       });
@@ -705,7 +787,7 @@ const tools = {
       if (!exact.length) note = `按书名匹配到《${pick.title}》`;
     }
 
-    const r = await req("/api/action", {
+    const r = await api("/api/action", {
       method: "POST", ms: 130000, body: { action: "shelf.add", ids },
     });
     if (!r.ok) throw new Error(r.msg || "加书架没成功");
@@ -721,7 +803,7 @@ const tools = {
     await ensureServer();
     const u = String(url || "").trim();
     if (!/^https?:\/\//i.test(u)) throw new Error("请给出以 http(s):// 开头的完整链接");
-    const r = await req("/api/clip", { method: "POST", ms: 180000, body: { mode, url: u } });
+    const r = await api("/api/clip", { method: "POST", ms: 180000, body: { mode, url: u } });
     if (!r.ok) throw new Error(r.msg || "这篇剪不动");
     if (mode === "preview") {
       const p = r.preview || {};
@@ -837,7 +919,7 @@ const tools = {
 
   async video_capability() {
     await ensureServer();
-    const d = await req("/api/video?mode=status");
+    const d = await api("/api/video?mode=status");
     const a = d.available || {};
     const out = ["视频转笔记依赖四样东西，缺哪样都会如实告诉你：",
       `- 下载器 yt-dlp：${a.ytdlp ? "就绪" : "缺（设置里点「补齐组件」）"}`,
@@ -852,7 +934,7 @@ const tools = {
   async video_plan({ url }) {
     const u = String(url || "").trim();
     if (!u) throw new Error("请给出视频链接");
-    const d = await req(`/api/video?mode=plan&url=${encodeURIComponent(u)}`, { ms: 60000 });
+    const d = await api(`/api/video?mode=plan&url=${encodeURIComponent(u)}`, { ms: 60000 });
     if (!d.ok) throw new Error(d.msg || "这个链接认不出来");
     const p = d.plan || {};
     const out = [`认出来了：《${p.title || ""}》`];
@@ -870,12 +952,12 @@ const tools = {
       return `现在有任务在跑（${s.task.kind}${s.task.book ? " · " + s.task.book : ""}）。`
         + "后端一次只跑一件，等它跑完或用 task_stop 中止后再来。";
     }
-    const avail = (s.video && s.video.available) || (await req("/api/video?mode=status")).available || {};
+    const avail = (s.video && s.video.available) || (await api("/api/video?mode=status")).available || {};
     if (!avail.ytdlp) throw new Error("还没装下载器 yt-dlp，先在界面设置里点「补齐组件」");
     const body = { act: "start", url: String(url || "").trim() };
     if (engine) body.asr = { engine: String(engine) };
     if (language) body.language = String(language);
-    const r = await req("/api/video", { method: "POST", body });
+    const r = await api("/api/video", { method: "POST", body });
     if (!r.ok) throw new Error(r.msg || "这条视频没跑起来");
     const out = [r.msg || "已开始转笔记"];
     if (!avail.llm) out.push("提醒：现在没配大模型，这次只会存下转写文字，没有 AI 摘要和思维导图。");
@@ -887,7 +969,7 @@ const tools = {
   /* ── 视频转写工作台（界面上那一屏的能力，这里给到 agent） ────────── */
 
   async video_books() {
-    const d = await req("/api/video?mode=books", { ms: 60000 });
+    const d = await api("/api/video?mode=books", { ms: 60000 });
     const books = d.books || [];
     if (!books.length) return "本地还没有「视频转出来」的书。用 video_plan 认链接、video_to_shelf 开跑，跑完再来回来看。";
     const out = [`视频转出来的书 ${books.length} 本（最近动过的排前面）：`];
@@ -921,7 +1003,7 @@ const tools = {
     if (q) qs.set("q", String(q));
     if (from) qs.set("from", String(from));
     if (to) qs.set("to", String(to));
-    const d = await req(`/api/video?${qs}`, { ms: 60000 });
+    const d = await api(`/api/video?${qs}`, { ms: 60000 });
     if (!d.ok) throw new Error(d.msg || "这本的转写没读到");
     const t = d.transcript || {};
     const rows = t.segments || [];
@@ -952,7 +1034,7 @@ const tools = {
     if (!patch && !whole) throw new Error("没给要存的内容：用 edits/drop/add 说清改了哪几段，或用 segments 整本覆盖（空列表一律不接，防的就是把整本抹掉）。");
     const notes = [];
     const rows = whole ? segments : await patchTranscript(b.id, { edits, drop, add }, notes);
-    const r = await req("/api/video", { method: "POST",
+    const r = await api("/api/video", { method: "POST",
       body: { act: "save_transcript", book: b.id, segments: rows } }, { ms: 90000 });
     if (!r.ok) throw new Error(r.msg || "转写没存进去");
     const out = [r.msg || "转写已存好"];
@@ -963,7 +1045,7 @@ const tools = {
 
   async video_rebuild({ book }) {
     const b = await localBook(book);
-    const r = await req("/api/video", { method: "POST", body: { act: "rebuild", book: b.id } }, { ms: 180000 });
+    const r = await api("/api/video", { method: "POST", body: { act: "rebuild", book: b.id } }, { ms: 180000 });
     if (!r.ok) throw new Error(r.msg || "章节没能按转写重建");
     const g = r.rebuilt || {};
     const out = [r.msg || "章节已重建"];
@@ -976,7 +1058,7 @@ const tools = {
   async video_export({ book, fmt = "srt" }) {
     const b = await localBook(book);
     const f = String(fmt || "srt").trim().toLowerCase().replace(/^\./, "");
-    const r = await req("/api/video", { method: "POST", body: { act: "export", book: b.id, fmt: f } }, { ms: 120000 });
+    const r = await api("/api/video", { method: "POST", body: { act: "export", book: b.id, fmt: f } }, { ms: 120000 });
     if (!r.ok) throw new Error(r.msg || "导出没成");
     const e = r.export || {};
     const out = [`导好了：${e.name || "（没拿到文件名）"} · ${fmtBytes(e.bytes)} · ${e.segments || 0} 段`];
@@ -999,7 +1081,7 @@ const tools = {
     const qs = new URLSearchParams({ book: b.id });
     if (form) qs.set("form", String(form));
     if (mode === "md" || mode === "svg") qs.set("mode", mode);
-    const d = await req(`/api/mindmap?${qs}`, { ms: 60000 });
+    const d = await api(`/api/mindmap?${qs}`, { ms: 60000 });
     if (!d.ok) throw new Error(d.msg || "这张图没读出来");
     if (mode === "md") {
       const md = String(d.md || "").trim();
@@ -1041,7 +1123,7 @@ const tools = {
 
   async map_from_notes({ book, cut = "tag" }) {
     const b = await localBook(book);
-    const d = await req("/api/mindmap", { method: "POST",
+    const d = await api("/api/mindmap", { method: "POST",
       body: { act: "from_notes", book: b.id, cut: String(cut || "tag") } }, { ms: 90000 });
     if (!d.ok) throw new Error(d.msg || "笔记没能变成图");
     const doc = d.doc || {};
@@ -1071,13 +1153,13 @@ const tools = {
     } else {
       // 没给 nodes 就只改标题 / 形态，绝不顺手交一张空图出去：这个接口是整本覆盖，
       // 空 nodes 会把用户手点出来的那张清干净 —— 丢一次图，用户就再也不信这个工具了。
-      const cur = await req(`/api/mindmap?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+      const cur = await api(`/api/mindmap?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
       if (!cur.ok) throw new Error(cur.msg || "先读不到这本书现有的导图，这次没动盘");
       Object.assign(doc, cur.doc || {});
       if (title) doc.title = String(title);
     }
     if (form) doc.form = String(form);
-    const r = await req("/api/mindmap", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 90000 });
+    const r = await api("/api/mindmap", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 90000 });
     if (!r.ok) throw new Error(r.msg || "这张图没存进去");
     const out = [r.msg || `导图已存好（${r.nodes || 0} 个节点）`];
     if (r.dropped) out.push(`注意：有 ${r.dropped} 个节点被裁掉了 —— 一张图的上限是 400 个框、8 层深。`);
@@ -1090,7 +1172,7 @@ const tools = {
 
   async board_list({ book }) {
     const b = await localBook(book);
-    const d = await req(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+    const d = await api(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
     if (!d.ok) throw new Error(d.msg || "这本书的画板没读到");
     const rows = d.boards || [];
     const head = [`《${b.title}》的画板：${d.count || rows.length} / ${d.max_boards || "?"} 块`,
@@ -1117,7 +1199,7 @@ const tools = {
     if (!bid) throw new Error("请给出画板 id（board_list 里每块都写着）");
     const mode = String(as || "info").trim().toLowerCase();
     if (mode === "md") {
-      const r = await req("/api/board", { method: "POST", body: { act: "md", book: b.id, id: bid } }, { ms: 60000 });
+      const r = await api("/api/board", { method: "POST", body: { act: "md", book: b.id, id: bid } }, { ms: 60000 });
       if (!r.ok) throw new Error(r.msg || "这块板转不成笔记");
       return [String(r.md || "").trim(), "", r.has_image
         ? "（图导出过，笔记里那条链接点开就是它。）"
@@ -1162,20 +1244,20 @@ const tools = {
 
   async board_new({ book, title, paper }) {
     const b = await localBook(book);
-    const list = await req(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+    const list = await api(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
     if (!list.ok) throw new Error(list.msg || "这本书的画板目录没读到，先确认书名对不对");
     const papers = list.papers || [];
     const want = paper ? String(paper).trim().toLowerCase() : "";
     if (want && !papers.includes(want)) {
       throw new Error(`纸面只认 ${papers.join(" / ")}，「${paper}」不会用 —— 这次一块板也没建，免得留一块跟你想的不一样。`);
     }
-    const created = await req("/api/board", { method: "POST",
+    const created = await api("/api/board", { method: "POST",
       body: { act: "new", book: b.id, title: String(title || "") } }, { ms: 30000 });
     if (!created.ok) throw new Error(created.msg || "新建画板没成");
     const doc = created.board || {};
     if (want && want !== doc.paper) {
       doc.paper = want;
-      const saved = await req("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 30000 });
+      const saved = await api("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 30000 });
       if (!saved.ok) return `画板建好了 [id: ${doc.id}]，但纸面没改成「${want}」：${saved.msg || "保存没成"}`;
     }
     return [`新建了一块画板：「${doc.title || "（未命名）"}」  [id: ${doc.id}]`,
@@ -1204,7 +1286,7 @@ const tools = {
       doc.canvas = canvas;
       replaced = true;
     }
-    const r = await req("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 60000 });
+    const r = await api("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 60000 });
     if (!r.ok) throw new Error(r.msg || "这块板没存进去");
     const out = [r.msg || "画板已存好", `画板 ${r.id} · 画布 ${fmtBytes(r.bytes)}`];
     const objs = (doc.canvas && doc.canvas.objects) || [];
@@ -1222,7 +1304,7 @@ const tools = {
     const b = await localBook(book);
     const bid = String(id || "").trim();
     if (!bid) throw new Error("请给出要删的画板 id（board_list 里每块都写着）");
-    const r = await req("/api/board", { method: "POST",
+    const r = await api("/api/board", { method: "POST",
       body: { act: "delete", book: b.id, id: bid, purge: !!purge } }, { ms: 30000 });
     if (!r.ok) throw new Error(r.msg || "这块板没删掉");
     const out = [r.msg || "画板已删掉", `这本书还剩 ${(r.boards || []).length} 块板。`];
