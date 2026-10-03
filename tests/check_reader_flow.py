@@ -346,13 +346,13 @@ def main():
                         const r = b.getBoundingClientRect();
                         return r.right > vw + 1 || r.left < -1 || r.bottom > vh + 1 || r.top < -1;
                       }).map(b => (b.textContent.trim() || b.title || '色片').slice(0, 8)),
-                      keep: bs.filter(b => /记一笔|写条目/.test(b.textContent)).length};
+                      keep: bs.filter(b => /写想法|写条目/.test(b.textContent)).length};
             }""")
         chk("窄窗：划词真能拉出小条（上面一排工具、下面一排笔）", bool(bar) and bar["n"] >= 8,
             {"bar": bar, "spot": spot, "seg": seg})
         chk("窄窗：小条整个在视口里", bool(bar) and bar["w"] <= bar["vw"], bar)
         chk("窄窗：笔那一排一个钮都没被顶出去", bool(bar) and not bar["out"], bar)
-        chk("窄窗：折行后「记一笔」「写条目」还在", bool(bar) and bar["keep"] == 2, bar)
+        chk("窄窗：折行后「写想法」「写条目」还在", bool(bar) and bar["keep"] == 2, bar)
 
         # 图没随书带出来时得说句话，别留一个透明的洞（.mfade 的 opacity:0 会把
         # 浏览器的碎图标一起藏掉，看着像这一页少了一段）。

@@ -269,6 +269,36 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         return (o["logged_in"] as? Bool) ?? false
     }
 
+    /// 转写引擎装好没。装在哪、装的是哪一个，只有 media_setup 知道，所以真跑一句 python 问它。
+    /// 必须用 .venv 的解释器 —— 系统那个看不到装进 venv 的包。
+    /// 模型不在这儿问：它是进门之后才在后台下的（视频页那几盏灯显示进度）。
+    private func mediaEngineReady() -> Bool {
+        guard let py = venvPython() else { return false }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: py)
+        p.arguments = ["-c", "import media_setup as m,sys;sys.stdout.write('1' if m.engine_ready() else '0')"]
+        p.currentDirectoryURL = appDir
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONPATH"] = appDir.path
+        env["PYTHONDONTWRITEBYTECODE"] = "1"   // 包可能是只读的，别往里写 pycache
+        p.environment = env
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return false }
+        let deadline = Date().addingTimeInterval(20)   // 首跑要扫一遍 venv，慢一点
+        while p.isRunning && Date() < deadline { usleep(50_000) }
+        if p.isRunning {
+            p.terminate()
+            usleep(200_000)
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+            return false
+        }
+        let shown = String(data: out.fileHandleForReading.readDataToEndOfFile(),
+                           encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return p.terminationStatus == 0 && shown == "1"
+    }
+
     /// 三样齐了才算就绪：解释器、浏览器、账号。
     /// 依赖装没装这里不查 —— 那是 bootstrap.py 的事，它一跑就知道，查两次没意义。
     private func isReady() -> Bool { venvPython() != nil && browserReady() && accountReady() }
@@ -280,7 +310,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     }
 
     private func pushState() {
-        js("window.gz.init({env:\(venvPython() != nil),browser:\(browserReady()),account:\(accountReady())})")
+        js("window.gz.init({env:\(venvPython() != nil),browser:\(browserReady()),account:\(accountReady()),media:\(mediaEngineReady())})")
     }
 
     private func js(_ code: String) {
@@ -430,6 +460,12 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
                 self.js("window.gz.fail(\(jsString("Chromium 没装上，挂上代理重试一次。")) )")
                 return
             }
+            // 转写组件那一步：引擎装好就点绿灯；没装上也不拦 —— 取书、剪藏、订阅、
+            // 阅读器都不需要它，进门后「设置 → 视频转写」里还能补。模型是进门之后
+            // 才在后台下的，所以这一步只报引擎。
+            let mo = self.mediaEngineReady()
+                ? "'ok','转写引擎已就绪'" : "'idle','进门后可在设置里补'"
+            self.js("window.gz.step(3,\(mo))")
             self.login()
         }
     }
@@ -481,6 +517,9 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         env["GUIZANG_BOOKS"] = booksDir.path   // 书库＝用户文档下的「归藏」
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"   // 别往只读的应用包里写 __pycache__
+        // 进门之后自动补「视频转笔记」那条线的组件：引擎缺就装、模型缺就在后台下。
+        // 只在这一处开这个开关（源码直接跑时不该因为起了一下服务就拉 GB 级权重）。
+        env["GUIZANG_AUTO_MEDIA"] = "1"
         // 让引擎里那些子进程用 .venv 的解释器，不走系统那套
         if let v = venvPython() { env["GUIZANG_PYTHON"] = v }
         p.environment = env

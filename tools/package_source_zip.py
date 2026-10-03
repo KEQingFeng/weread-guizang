@@ -14,8 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / "shell" / "build_macos.sh"
 
 # 打包脚本之外、源码包还要额外带上的东西（.app 用不到，但收到 zip 的人要用）。
-EXTRA_FILES = ["启动归藏.command", "启动归藏.bat",
-               "README.md", "README.en.md", "README.ja.md"]
+EXTRA_FILES = ["启动归藏.command", "启动归藏.bat", "README.md"]
 EXTRA_DIRS = ["shell", "tools", "tests", "docs"]
 
 SKIP_SUFFIX = {".pyc"}

@@ -353,6 +353,45 @@ with sync_playwright() as pw:
     tail = page.evaluate("() => (document.querySelector('.fetail')||{}).innerText || ''")
     chk("尾巴说清铺了多少、还剩多少", "已铺" in tail and "再来一批" in tail, tail)
 
+    # 竖排这一类毛病在这一屏反复出现：左栏只有 252px，中栏被右栏一挤说窄就窄。
+    # 所以量「这几个该占几行的东西，实际占了几行」。判据用高度不是 getClientRects：
+    # 带 text-overflow:ellipsis 的元素，Chromium 会把那个「…」也报成一个 rect，
+    # 看着像两行，其实只有一行（实测 h=17）。
+    VERT_JS = """(limits) => {
+      const lines = el => {
+        const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+        const lh = parseFloat(cs.lineHeight);
+        const unit = (isFinite(lh) && lh > 0) ? lh : parseFloat(cs.fontSize) * 1.45;
+        return Math.max(1, Math.round(r.height / unit));
+      };
+      // 先验一验探针本身：一个 12px 宽、装着三个字的伪标签，必须被判成「竖排」。
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;left:-9999px;width:12px;font-size:12px;line-height:17px';
+      probe.textContent = '看哪些';
+      document.body.append(probe);
+      const selfcheck = lines(probe) > 1;
+      probe.remove();
+      const out = [];
+      for (const sel in limits) {
+        for (const el of document.querySelectorAll(sel)) {
+          const n = lines(el);
+          if (n > limits[sel]) {
+            out.push(sel + ':' + (el.textContent || '').trim().slice(0, 10)
+                     + ' ' + n + ' 行 > ' + limits[sel]);
+          }
+        }
+      }
+      return {selfcheck, out};
+    }"""
+
+    def vert_check(tag, limits):
+        r = page.evaluate(VERT_JS, limits)
+        chk(f"订阅（{tag}）：竖排探针抓得到真竖排的东西（判定没写反）", r["selfcheck"], r)
+        chk(f"订阅（{tag}）：该占几行的就占几行，没被挤成竖排", not r["out"], r["out"])
+
+    # 三栏刚铺出来：左栏的栏名与节标题只许一行
+    vert_check("左栏", {'.fehd .t': 1, '.fegrp > .t': 1, '.fetail span': 1, '.frow .nm': 1})
+
     # ── 打开一条读，Esc 收回 ──
     page.locator("#fList .frow").first.click()
     page.wait_for_function("() => !!document.querySelector('#fRead .rdbd .md')", timeout=20000)
@@ -370,6 +409,9 @@ with sync_playwright() as pw:
         flush(page)
         rw = read_w(page)
     chk("右栏宽度铺开了", rw > 300, rw)
+    # 右栏一摊开就是中栏最窄的时候 —— 这时候最容易被压出「一个字一行」。
+    # 标题只许一行，摘要最多两行（它本来就封了两行）。
+    vert_check("右栏打开后", {'.frow .nm': 1, '.frow .sub': 2})
     page.keyboard.press("Escape")
     page.wait_for_timeout(500)
     chk("Esc 把右栏收回去了", not page.evaluate(

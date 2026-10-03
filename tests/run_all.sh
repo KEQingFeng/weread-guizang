@@ -62,6 +62,14 @@ run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_v
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
 run "画板（存得下 / 读得出 / 导得走 / 删得掉 / 不越界）" "$PY" tests/check_board.py
+# 转写组件那一套也是纯逻辑 + 接线检查：挑引擎、算缓存目录、直连失败换镜像、空壳不算就绪、
+# 自动准备默认不开（源码跑起来不该悄悄拉 1.6GB），外加「这两步不拦门 / 进包 / 壳里开开关」。
+# 下载那一步用桩替掉，全程不联网。所以归静态段，--fast 也得带上。
+run "转写组件（引擎挑选 / 模型缓存 / 镜像回退 / 接线）" "$PY" tests/check_media_setup.py
+# 维护那一套（卸载组件 / 清除数据）最要紧的不是「删得掉」而是「删不掉不该删的」：
+# 书库、别人家的模型、别人家的浏览器、数据目录本身 —— 四条红线各钉一条。
+# 全程在临时沙盒里跑，不碰真实的 cache / 书库 / HF 缓存 / playwright 缓存。
+run "维护（白名单清理 / 四条红线 / 试算不删）" "$PY" tests/check_cleanup.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
@@ -125,6 +133,10 @@ fresh_shelf; run "转写工作台（筛 / 存 / 重建 / 导出 / 真机）" "$P
 # 这一套把 45 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
 # 护栏钉成可失败的检查 —— 它要 node，所以归真机段（本机没 node 时明确 SKIP，不装绿）。
 fresh_shelf; run "MCP 工具清单与三条新线" "$PY" tests/check_mcp_tools.py "$BASE"
+# 上面那套挂在活服务上，验不到「后台没人、第一次点」—— 那是用户装完只开 agent 的默认处境。
+# 这一套自己不起服务，让适配器去拉：解释器找错、可选包拖死服务、端口挪窝找不着、
+# 跳过拉起直接抛 fetch failed，四个坑各钉一条，全都得在冷启动下跑通。
+fresh_shelf; run "MCP 冷启动（服务没起时自己拉起来）" "$PY" tests/check_mcp_boot.py
 # 订阅那一屏自己起服务、自己铺夹具源（订源要真的订、真的抓），所以不吃上面那份沙盒。
 run "订阅阅读器全流程" "$PY" tests/check_feed_ui.py
 run "首启页" "$PY" tests/check_onboarding.py

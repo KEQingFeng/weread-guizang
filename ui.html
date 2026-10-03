@@ -481,6 +481,14 @@
   }
   .whisper.up{opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);
     transition:opacity .24s ease, transform .24s cubic-bezier(.2,.9,.28,1), visibility 0s linear}
+  /* 提示上挂一颗可点的钮（比如删完给一次「撤销」）。整条 whisper 本来是
+     pointer-events:none —— 不在这里开回来，那颗钮看着在、点下去是穿过去的。 */
+  .whisper.act{display:inline-flex; align-items:center; gap:10px; pointer-events:auto}
+  .whisper.act > span{min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .whisper.act > .wa{border:0; border-radius:999px; background:rgba(255,255,255,.2);
+    color:inherit; cursor:pointer; font:inherit; font-size:12px; font-weight:600;
+    padding:3px 11px; white-space:nowrap; flex:none; transition:background .14s ease}
+  .whisper.act > .wa:hover{background:rgba(255,255,255,.34)}
   @media (prefers-color-scheme:dark){
     :root:not([data-theme="light"]) .whisper{background:rgba(233,237,244,.94); color:#12151b}
   }
@@ -903,29 +911,43 @@
   /* ── 订阅 / 视频转笔记 ───────────────────
      行结构与剪藏那张表是同一个形状（左边说清是什么，右边说清到哪一步），但换了一套
      类名 —— 剪藏那套只服务于剪藏，借名复用会让以后改一处牵动三处。 */
-  .frow{display:flex; align-items:flex-start; gap:12px; padding:12px 15px; border-top:1px solid var(--line)}
-  .frow:first-child{border-top:0}
+  /* 一条 = 一张小卡，不是表格里的一行。原来靠 border-top 一条条拿发丝线隔开，
+     和笔记栏那种「圆角卡 + 悬停着色」的清单长得完全是两样东西；换成同一套之后，
+     两屏看着才像一个产品。左右各留 6px，圆角才不贴着栏边。
+     flex-wrap 是给窄中栏留的活路：右边那五颗动作钮是 flex:none，一挤就先把标题
+     那一块压到只剩一两字宽，摘要会一个一个字竖着排下来（截图里真见过）。允许折行
+     之后，装不下就整排钮落到下一行，正文至少还能保住 220px。 */
+  .frow{display:flex; align-items:flex-start; gap:11px; flex-wrap:wrap; cursor:pointer;
+    padding:11px 12px;
+    border-radius:var(--r-sm); margin:0 6px 2px; transition:background .16s ease}
+  .frow:hover{background:var(--surface-2)}
   .frow .dot{flex:none; width:7px; height:7px; margin-top:6px; border-radius:50%; background:var(--accent)}
-  .frow .dot.off{background:rgba(127,140,160,.28)}
-  .frow .bd{flex:1; min-width:0}
+  .frow .dot.off{background:var(--paper-inset)}
+  .frow .bd{flex:1 1 220px; min-width:0}
   .frow .nm{
     font-size:12.5px; color:var(--ink); line-height:1.5;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .frow .nm.unread{font-weight:600}
   .frow .nm.pending{color:var(--ink-3); font-weight:400}
-  .frow .sub{margin-top:3px; font-size:11px; color:var(--ink-3); line-height:1.55}
+  /* 摘要最多两行：这是「这一条讲什么」的一句话，不是正文本身。不封顶的话，
+     中栏一窄它就一路往下铺成一根竖条。 */
+  .frow .sub{margin-top:3px; font-size:11px; color:var(--ink-3); line-height:1.55;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
   .frow .sub.bad{color:var(--err)}
   .frow .st{
     flex:none; margin-top:1px; padding:2px 8px; border-radius:7px; font-size:10.5px;
-    background:rgba(127,140,160,.14); color:var(--ink-3);
+    background:var(--surface-2); color:var(--ink-3);
   }
   .frow .st.doing{background:var(--accent-soft); color:var(--accent)}
   .frow .st.done{background:rgba(60,150,95,.15); color:#2f7d4f}
   .frow .st.bad{background:rgba(200,85,74,.13); color:var(--err)}
-  .frow .acts{flex:none; display:flex; gap:6px; align-items:center}
+  .frow .acts{flex:0 0 auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap}
+  /* 高度写死 26px，文字一旦被挤到换行就会从钮里溢出来（钮本身不会长高）。所以
+     这几颗钮一律 nowrap：宁可整排折到下一行，也不让「收进书架」四个字竖着摞。 */
   .frow .acts button{
     height:26px; padding:0 11px; border-radius:8px; cursor:pointer; font:inherit; font-size:11.5px;
+    white-space:nowrap;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
     transition:background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease;
   }
@@ -944,8 +966,16 @@
   .fewrap{
     display:grid;
     grid-template-columns:var(--fe-side) minmax(0,1fr) var(--fe-read);
-    --fe-side:228px;
+    /* 左栏取 252，和阅读器那条目录栏（.rdwrap 的 --rd-nav-w）同一个数：两屏的侧栏
+       一样宽，切换过去不会有「栏跳了一下」的感觉；也刚好装得下「看哪些 + 四颗钮」。 */
+    --fe-side:252px;
     --fe-read:0px;
+    /* 控件的尺码收成三档，别再一个钮一个高度：正常钮 26、行内小钮 22、输入 28。
+       阅读器那边就是这套（`.nttabs button` 26、`.rdpick` 30、输入 28）—— 对齐了这
+       两屏才像同一个产品，而不是「订阅」自带一套控件。 */
+    --fe-ctl:26px;
+    --fe-mini:22px;
+    --fe-in:28px;
     height:100%; min-height:0; margin:0;
     border-top:1px solid var(--line);
     transition:grid-template-columns .3s var(--spring);
@@ -960,13 +990,16 @@
   .fewrap > .felist{border-right:1px solid var(--line)}
   .fewrap.nonav .feside{opacity:0; pointer-events:none; overflow:hidden}
   /* 顶栏：折叠按钮 / 计数 / 筛选态都在这一条里，跟着各自那一栏滚的话会晃出视野 */
-  .fehd{flex:none; display:flex; align-items:center; gap:8px;
+  .fehd{flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
     padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper);
     font-size:11.5px; color:var(--ink-3)}
-  .fehd .t{font-size:12px; font-weight:600; color:var(--ink-2)}
+  /* 栏名「看哪些」和它后面那几颗钮住同一行。栏宽只有 228，四颗钮加起来的自然宽度
+     刚好压过这一行 —— 不给 nowrap + flex:none，栏名就会被挤成一个字一行。 */
+  .fehd .t{font-size:12px; font-weight:600; color:var(--ink-2); flex:none; white-space:nowrap}
   .fehd .grow{flex:1}
   .fehd .ic{
-    min-width:24px; height:24px; flex:none; padding:0 7px; border-radius:7px; cursor:pointer;
+    min-width:var(--fe-ctl); height:var(--fe-ctl); flex:none; padding:0 8px; border-radius:8px;
+    cursor:pointer;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-3);
     display:inline-flex; align-items:center; justify-content:center;
     font:inherit; font-size:11px; line-height:1;
@@ -974,21 +1007,23 @@
   }
   .fehd .ic:hover{background:var(--accent-soft); color:var(--accent)}
   .fehd .ic:active{transform:scale(.92)}
-  .fegrp{padding:14px 12px 5px; font-size:11px; color:var(--ink-3); letter-spacing:.04em}
+  .fegrp{padding:13px 6px 5px; font-size:11px; color:var(--ink-3); letter-spacing:.04em}
   .feitem{
-    display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:9px;
+    display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:var(--r-sm);
     cursor:pointer; font-size:12px; color:var(--ink-2); line-height:1.4;
     transition:background .14s ease, color .14s ease;
   }
-  .feitem:hover{background:rgba(127,140,160,.1)}
+  .feitem:hover{background:var(--surface-2)}
   .feitem.on{background:var(--accent-soft); color:var(--accent); font-weight:600}
   .feitem .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .feitem .n{flex:none; font-size:10.5px; color:var(--ink-3); font-variant-numeric:tabular-nums}
   .feitem.on .n{color:var(--accent)}
   .feitem.err .nm{color:var(--err)}
+  /* 行里那颗退订/改名的钮：平时不露面，鼠标压到这一行才淡进来。宽度给够 26，
+     免得「⋯」这种窄字形把圆角压成一条缝。 */
   .feitem .go{
-    width:24px; height:22px; flex:none; border:0; background:transparent; cursor:pointer;
-    border-radius:6px; color:var(--ink-3); opacity:0; font-size:11px;
+    width:26px; height:var(--fe-mini); flex:none; border:0; background:transparent; cursor:pointer;
+    border-radius:7px; color:var(--ink-3); opacity:0; font-size:11px;
     transition:opacity .16s ease, background .14s ease, transform .12s ease;
   }
   .feitem:hover .go{opacity:1}
@@ -998,29 +1033,31 @@
   .fetools, .vttb{flex:none; display:flex; align-items:center; gap:7px; flex-wrap:wrap;
     padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper)}
   .fetools input.f, .vttb input.f{
-    height:28px; min-width:120px; flex:1; padding:0 10px; border-radius:9px; font:inherit;
+    height:var(--fe-in); min-width:120px; flex:1; padding:0 10px; border-radius:8px; font:inherit;
     font-size:12px; border:1px solid var(--line-2); background:transparent; color:var(--ink);
     transition:border-color .15s ease, box-shadow .15s ease;
   }
-  .fetools input.f:focus, .vttb input.f:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); outline:none}
+  .fetools input.f:focus, .vttb input.f:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); outline:none}
   .fetools select.f, .vttb select.f{
-    height:28px; padding:0 8px; border-radius:9px; font:inherit; font-size:11.5px;
+    height:var(--fe-in); padding:0 8px; border-radius:8px; font:inherit; font-size:11.5px;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2); cursor:pointer;
   }
+  /* 筛选态那片小牌，和笔记栏的 .ntchip 是同一件东西：圆角取胶囊、底色取纸上的浅槽。
+     之前是 8px 圆角 + accent 底，摆在别的小牌旁边像另一个组件库的。 */
   .fechip{
-    display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 4px 0 9px;
-    border-radius:8px; background:var(--accent-soft); color:var(--accent);
-    font-size:11px; max-width:220px;
+    display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 4px 0 10px;
+    border:1px solid var(--line-2); border-radius:999px; background:var(--paper-inset);
+    color:var(--ink-2); font-size:11px; max-width:220px;
   }
-  .fechip span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .fechip b{
-    width:17px; height:17px; border:0; border-radius:5px; cursor:pointer; font:inherit;
-    background:transparent; color:var(--accent); font-size:12px; line-height:1;
+    width:17px; height:17px; border:0; border-radius:999px; cursor:pointer; font:inherit;
+    background:transparent; color:var(--ink-3); font-size:12px; line-height:1;
   }
-  .fechip b:hover{background:rgba(47,127,240,.16)}
+  .fechip b:hover{background:var(--surface-2); color:var(--ink)}
+  .fechip span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .febar{flex:none; display:flex; align-items:center; gap:9px; padding:8px 12px;
     border-bottom:1px solid var(--line); font-size:11px; color:var(--ink-3)}
-  .febar .tr{flex:1; height:5px; border-radius:999px; background:rgba(127,140,160,.18); overflow:hidden}
+  .febar .tr{flex:1; height:5px; border-radius:999px; background:var(--paper-inset); overflow:hidden}
   .febar .tr i{display:block; height:100%; width:0; border-radius:999px; background:var(--accent);
     transition:width .45s cubic-bezier(.32,.72,0,1)}
   .febar .pc{font-variant-numeric:tabular-nums; color:var(--ink-2)}
@@ -1029,7 +1066,8 @@
     padding:7px 12px; border-bottom:1px solid var(--line); background:var(--paper-2);
     font-size:11.5px; color:var(--ink-2)}
   .febatch button{
-    height:24px; padding:0 9px; border-radius:7px; cursor:pointer; font:inherit; font-size:11px;
+    height:var(--fe-ctl); padding:0 10px; border-radius:8px; cursor:pointer; font:inherit;
+    font-size:11px;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
     transition:background .15s ease, color .15s ease, transform .12s ease;
   }
@@ -1038,11 +1076,13 @@
   .febatch button.danger:hover{background:rgba(200,85,74,.12); color:var(--err)}
   .frow .ck{flex:none; width:15px; height:15px; margin-top:3px; cursor:pointer; accent-color:var(--accent)}
   .frow.pick{background:var(--accent-soft)}
-  .frow.cur{box-shadow:inset 2px 0 0 var(--accent); background:rgba(127,140,160,.08)}
+  .frow.cur{box-shadow:inset 2px 0 0 var(--accent); background:var(--surface-2)}
   .frow .tags{display:flex; gap:4px; flex-wrap:wrap; margin-top:5px}
+  /* 标签片和笔记栏的 .nk 是同一种东西（纸上的浅槽 + 胶囊），形状对齐一下；
+     之前是 6px 圆角 + 一档写死的灰，深色主题下那层灰是发闷的。 */
   .frow .tags i{
-    font-style:normal; padding:1px 6px; border-radius:6px; font-size:10px;
-    background:rgba(127,140,160,.14); color:var(--ink-3);
+    font-style:normal; padding:1px 6px; border-radius:999px; font-size:10px;
+    background:var(--surface-2); color:var(--ink-3);
   }
   /* 能点的标签片带 title（点这里改这一条的标签），就顺手给它一点「摸得着」的样子。
      不带 title 的那些是别处来的纯展示标签，不装作可点。 */
@@ -1055,7 +1095,8 @@
   .feread .rdh .mt{margin-top:5px; font-size:11px; color:var(--ink-3); line-height:1.6}
   .feread .rdh .acts{display:flex; gap:6px; flex-wrap:wrap; margin-top:9px}
   .feread .rdh .acts button{
-    height:26px; padding:0 10px; border-radius:8px; cursor:pointer; font:inherit; font-size:11.5px;
+    height:var(--fe-ctl); padding:0 10px; border-radius:8px; cursor:pointer; font:inherit;
+    font-size:11.5px;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
     transition:background .15s ease, color .15s ease, transform .12s ease;
   }
@@ -1112,11 +1153,14 @@
   .feaddr .row2 .grow{flex:1}
   .feaddr .row2 .cnt{font-variant-numeric:tabular-nums}
   .fewrap > .feside{overflow:hidden}
-  #fSide{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding-bottom:14px}
+  /* 左右各留 6px：条目和分组标题都是圆角的，贴着栏边那道竖线会显得毛糙。
+     留出来之后，圆角卡（.feitem / .frow）四周才有一圈背景色，悬停底色也不顶到边上。 */
+  #fSide{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:2px 6px 14px}
+  #fList{padding:6px 6px 12px}
   #fCands{flex:none; max-height:34%; overflow:auto; overscroll-behavior:contain;
     border-bottom:1px solid var(--line); background:var(--paper-2)}
   /* 工具条里那颗「清空筛选」和栏头同一套形状；分组标题右边那颗「新建」也借这个形 */
-  .fetools .ic{min-width:24px; height:28px; flex:none; padding:0 9px; border-radius:9px;
+  .fetools .ic{min-width:var(--fe-in); height:var(--fe-in); flex:none; padding:0 10px; border-radius:8px;
     cursor:pointer; border:1px solid var(--line-2); background:transparent; color:var(--ink-3);
     font:inherit; font-size:11px; line-height:1;
     transition:background .15s ease, color .15s ease, transform .12s ease}
@@ -1126,23 +1170,26 @@
      不留这一颗的话界面就折死在收起态，再也展不开。 */
   .fetools .unf{display:none}
   .fewrap.nonav .fetools .unf{display:inline-flex}
-  .fegrp{display:flex; align-items:center; gap:7px}
-  .fegrp button{height:20px; padding:0 8px; border-radius:7px; cursor:pointer;
+  .fegrp{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
+  /* 节标题（「范围」「分组」「订阅源」…）：不许被同一行那几颗钮挤成一根竖条。
+     nowrap 让它保持一行，flex:none 让它不参与收缩；放不下就整颗钮换行（靠上面那条）。 */
+  .fegrp > .t{flex:none; white-space:nowrap}
+  .fegrp button{height:var(--fe-mini); padding:0 8px; border-radius:7px; cursor:pointer;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-3);
     font:inherit; font-size:10.5px; line-height:1;
     transition:background .15s ease, color .15s ease, transform .12s ease}
   .fegrp button:hover{background:var(--accent-soft); color:var(--accent)}
   .fegrp button:active{transform:scale(.94)}
-  .febar button{height:22px; padding:0 9px; border-radius:7px; cursor:pointer;
+  .febar button{height:var(--fe-ctl); padding:0 10px; border-radius:8px; cursor:pointer;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
     font:inherit; font-size:11px; line-height:1;
     transition:background .15s ease, color .15s ease, transform .12s ease}
   .febar button:hover{background:var(--accent-soft); color:var(--accent)}
   .febar button:active{transform:scale(.94)}
   .febar .danger:hover{background:rgba(200,85,74,.12); color:var(--err)}
-  .fetail{display:flex; align-items:center; gap:9px; padding:11px 12px 4px}
-  .fetail span{font-size:11px; color:var(--ink-3)}
-  .fetail button{height:26px; padding:0 12px; border-radius:8px; cursor:pointer;
+  .fetail{display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:11px 12px 4px}
+  .fetail span{font-size:11px; color:var(--ink-3); flex:none; white-space:nowrap}
+  .fetail button{height:var(--fe-ctl); padding:0 12px; border-radius:8px; cursor:pointer;
     border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
     font:inherit; font-size:11.5px;
     transition:background .15s ease, color .15s ease, transform .12s ease}
@@ -2135,7 +2182,7 @@
     -webkit-backdrop-filter:blur(16px) saturate(180%); backdrop-filter:blur(16px) saturate(180%)}
   .selpop.show{display:block; opacity:1; transform:none}
   /* 摆位只把小条夹回视口左边，宽度它管不了：笔那一排十二个钮，窄窗（<=840 那种
-     整页滚的阅读态）下整条会顶出屏幕右侧，被挤出去的恰好是「记一笔」「写条目」
+     整页滚的阅读态）下整条会顶出屏幕右侧，被挤出去的恰好是「写想法」「写条目」
      —— 最该留的两个。所以宽度封顶，两排都允许折行。 */
   .selpop{max-width:min(92vw, 520px)}
   .selpop .selbar{display:flex; align-items:stretch; flex-wrap:wrap}
@@ -2161,7 +2208,7 @@
   .selpop .selpens .sep{display:block; padding:0; animation:none; width:1px; height:16px;
     background:rgba(255,255,255,.16); margin:0 3px}
   /* 划词即记：小条里直接写想法，存下来自动带上原文与出处。 */
-  .selpop .selnote{width:min(300px, 86vw); padding:10px 11px 11px}
+  .selpop .selnote{width:min(320px, 88vw); padding:10px 11px 11px}
   .selpop .selnote .q{font-size:11.5px; line-height:1.55; color:rgba(255,255,255,.62);
     max-height:44px; overflow:hidden; word-break:break-word;
     border-left:2px solid var(--mkc, rgba(255,255,255,.3)); padding-left:7px; margin-bottom:8px}
@@ -2170,21 +2217,31 @@
     color:#f7f8fa; font:inherit; font-size:12.5px; line-height:1.6; padding:7px 9px; outline:none;
     transition:border-color .16s ease, background .16s ease}
   .selpop .selnote textarea:focus{border-color:rgba(255,255,255,.42); background:rgba(255,255,255,.12)}
-  .selpop .selnote .row{display:flex; align-items:center; gap:4px; margin-top:8px}
-  .selpop .selnote .row .grow{flex:1}
-  .selpop .selnote .kinds{display:flex; gap:3px}
+  /* 底下这一排：标签一格一格排在这些「格子」里。七颗标签钮 + 取消 + 记下挤在一条
+     flex 行里，会被压到只剩 27px 宽 —— 两个字的标签只好一个字一行地竖排下来，
+     最右那颗还越过边被 overflow:hidden 裁掉。所以分成两行：标签自己占满一行
+     （不够就在行内再折），动作行靠 grow 顶到右边。
+     注意 padding/border-radius 要显式归零：.row 这个类名上面（248 行）是设置面板
+     那一行的样式，带着 10px 12px 的内边距，不拦住就白吃掉 24px 宽度，七颗标签
+     又排不下。 */
+  .selpop .selnote .row{display:flex; align-items:center; gap:4px; margin-top:8px;
+    flex-wrap:wrap; row-gap:6px; padding:0; border-radius:0}
+  .selpop .selnote .row .grow{flex:1 1 10px; min-width:0}
+  .selpop .selnote .kinds{display:flex; gap:3px; flex:1 0 100%; flex-wrap:wrap; row-gap:4px}
   .selpop .selnote .kinds button{border:1px solid rgba(255,255,255,.18); border-radius:7px;
     background:transparent; color:rgba(255,255,255,.75); cursor:pointer; font:inherit;
-    font-size:11px; height:23px; padding:0 7px; transition:background .14s ease, color .14s ease,
-    border-color .14s ease}
+    font-size:11px; height:23px; padding:0 7px; white-space:nowrap; flex:none;
+    transition:background .14s ease, color .14s ease, border-color .14s ease}
   .selpop .selnote .kinds button:hover{background:rgba(255,255,255,.12); color:#fff}
   .selpop .selnote .kinds button.on{background:#fff; color:#191c22; border-color:#fff;
     font-weight:600}
   .selpop .selnote .go{border:0; border-radius:8px; background:#f2f4f8; color:#1a1e26;
-    cursor:pointer; font:inherit; font-size:12px; font-weight:600; height:26px; padding:0 12px}
+    cursor:pointer; font:inherit; font-size:12px; font-weight:600; height:26px; padding:0 12px;
+    white-space:nowrap; flex:none}
   .selpop .selnote .go:hover{background:#fff}
   .selpop .selnote .cancel{border:0; background:transparent; color:rgba(255,255,255,.6);
-    cursor:pointer; font:inherit; font-size:11.5px; height:26px; padding:0 6px}
+    cursor:pointer; font:inherit; font-size:11.5px; height:26px; padding:0 6px;
+    white-space:nowrap; flex:none}
   .selpop .selnote .cancel:hover{color:#fff}
   .selpop .selcard{padding:11px 14px 12px; width:max-content; max-width:min(380px,84vw);
     max-height:min(340px,60vh); overflow:auto; line-height:1.66; font-size:13px;
@@ -2631,6 +2688,7 @@
     <button class="pcat" data-cat="agent">小 Agent</button>
     <button class="pcat" data-cat="media">视频转写</button>
     <button class="pcat" data-cat="sync">云同步</button>
+    <button class="pcat" data-cat="maint">维护</button>
     <button class="pcat" data-cat="about">关于</button>
   </aside>
   <div class="popbody" id="popbody">
@@ -2779,7 +2837,15 @@
         <span class="grow"></span>
         <button class="deed" id="vfFix">装 ffmpeg</button>
       </div>
-      <div class="hint">「装 ffmpeg」按需下一份静态 ffmpeg 放进归藏自己的数据目录，不动系统。yt-dlp 与转写引擎是 Python 包（<code>pip install yt-dlp feedparser</code>，转写再加 <code>mlx-whisper</code> 或 <code>faster-whisper</code>）；云端转写要在「小 Agent」那一栏把接口地址和模型配好。</div>
+      <div class="row">
+        <span class="k">转写模型</span>
+        <span class="v" id="v-media">—</span>
+        <span class="grow"></span>
+        <button class="deed" id="vModelFix">准备</button>
+      </div>
+      <div class="hint">装好归藏之后，转写引擎会随安装一次配好；转写模型（几百 MB ~ 1.6 GB）在进门后
+        自动在后台下，这里能看到进度，下完就能转。ffmpeg 按需下一份静态的放进归藏自己的数据目录，不动系统；
+        云端转写要在「小 Agent」那一栏把接口地址和模型配好。想换台机器接着用，把数据目录整个搬过去即可。</div>
     </section>
 
     <section class="popcat" data-cat="sync">
@@ -2865,6 +2931,28 @@
         <button class="deed" id="syncSave">保存设置</button>
       </div>
       <div class="hint" id="synchint">配好之后点「保存设置」，再点「立即同步」就把东西送上去。密钥只存在本机、不会进界面，也不会写进日志。</div>
+    </section>
+
+    <section class="popcat" data-cat="maint">
+      <div class="sechd">维护</div>
+      <div class="row">
+        <span class="k">组件</span>
+        <span class="v" id="v-comp">—</span>
+        <span class="grow"></span>
+        <button class="deed" id="clComp">卸载组件</button>
+      </div>
+      <div class="hint">卸掉的是「为了让它跑起来才装的东西」：虚拟环境（转写引擎装在里头）、
+        自己下的那份 ffmpeg、转写模型（几百 MB ~ 1.6GB）、取书用的 Chromium。
+        卸完还想用，回来点一次「补齐」会重新装，不用重下整个软件。</div>
+      <div class="row">
+        <span class="k">本地数据</span>
+        <span class="v" id="v-data">—</span>
+        <span class="grow"></span>
+        <button class="deed" id="clData">清除本地数据</button>
+      </div>
+      <div class="hint" id="clBooks">清掉的是它自己攒下的那些：登录态、书架清单、设置、阅读时长、
+        笔记索引、订阅条目、剪藏、封面、下载中间件。<b>书一定不动</b> —— 书在「文档 / 归藏」里，
+        那是你自己的文件。软件本体（那个 .app）也不归这儿管，不用了直接拖进废纸篓。</div>
     </section>
 
     <section class="popcat" data-cat="about">
@@ -3393,16 +3481,41 @@ function paintTaskCount() {
 }
 
 let whisperEl = null, whisperTimer = null;
-function whisper(msg) {
+/** 右下角那一条提示的容器，懒建。 */
+function whisperBox() {
   if (!whisperEl) {
     whisperEl = document.createElement('div');
     whisperEl.className = 'whisper';
     document.body.append(whisperEl);
   }
-  whisperEl.textContent = msg;
-  requestAnimationFrame(() => whisperEl.classList.add('up'));
+  return whisperEl;
+}
+
+function whisper(msg) {
+  const el = whisperBox();
+  el.className = 'whisper';                 // 上一次可能是带钮的那条，先退回去
+  el.textContent = msg;
+  requestAnimationFrame(() => el.classList.add('up'));
   clearTimeout(whisperTimer);
-  whisperTimer = setTimeout(() => whisperEl.classList.remove('up'), 2400);
+  whisperTimer = setTimeout(() => el.classList.remove('up'), 2400);
+}
+
+/** 提示上挂一颗可点的钮：删完给一次「撤销」之类。
+ *  比弹个确认框省一步，也不打断手上的节奏 —— 后悔了再点，比拦在前面问一次轻。 */
+function whisperAct(msg, label, fn, ms) {
+  const el = whisperBox();
+  const t = document.createElement('span');
+  t.textContent = msg;
+  const a = document.createElement('button');
+  a.type = 'button';
+  a.className = 'wa';
+  a.textContent = label;
+  a.onclick = () => { el.classList.remove('up'); fn(); };
+  el.className = 'whisper act';
+  el.replaceChildren(t, a);
+  requestAnimationFrame(() => el.classList.add('up'));
+  clearTimeout(whisperTimer);
+  whisperTimer = setTimeout(() => el.classList.remove('up'), ms || 6000);
 }
 
 async function fetchLog(tail) {
@@ -4088,6 +4201,7 @@ function setCat(name) {
   if (!nav.querySelector(`.pcat[data-cat="${name}"]`)) name = 'acct';
   [...nav.querySelectorAll('.pcat')].forEach(b => b.classList.toggle('on', b.dataset.cat === name));
   [...body.querySelectorAll('.popcat')].forEach(s => s.classList.toggle('on', s.dataset.cat === name));
+  if (name === 'maint') paintCleanup();      // 进这一栏才去算体积（要扫几个 GB 的目录）
   body.scrollTop = 0;
   try { localStorage.setItem(POPCAT_KEY, name); } catch (e) {}
 }
@@ -6363,7 +6477,12 @@ function feNavItem(o) {
 
 function feSection(title, rows, more, id) {
   const box = document.createDocumentFragment();
-  const h = feEl('div', 'fegrp', title);
+  // 标题单独包一层再挂进去：它是这一行 flex 里的第一项，裸文本节点会被后面的按钮
+  // 挤到只剩几个像素宽 —— 表现就是「看哪些」「范围」一个字一行竖着排下来。包成
+  // span 配上 nowrap + flex:none，标题就稳住了；真放不下时由 .fegrp 的 flex-wrap
+  // 把按钮挪到下一行，而不是把标题压成一根竖条。
+  const h = feEl('div', 'fegrp');
+  h.append(feEl('span', 't', title));
   if (more) {
     const b = feBtn(more.label, () => more.run(), '');
     b.style.marginLeft = '6px';
@@ -7484,13 +7603,26 @@ function vidHrs(sec) {
 /** 「能不能跑」那一行：一项一个小灯。缺什么、要不要点「补齐组件」，进来一眼就知道。 */
 function paintVideoCap(v) {
   if (!VIDEO.cap) return;
-  const a = (v || {}).available || {};
+  v = v || {};
+  const a = v.available || v || {};
+  const st = v.setup || a.setup || {};
   const asr = a.asr || {};
   const loc = !!asr.local, cloud = !!asr.cloud;
+  // 转写模型那盏灯：引擎没装先报缺引擎；引擎有了但权重没下齐，说清是「准备中」（后台
+  // 正在拉，百分比会跳）；只有权重真在缓存里了才亮绿灯。假装就绪比不亮更坏 —— 用户会
+  // 一直等一个永远不会来的转写结果。
+  let modelOk = false, modelTxt = '转写模型未下载';
+  if (!st.engine_ready) modelTxt = '缺转写引擎（设置里可补）';
+  else if (st.model_ready) { modelOk = true; modelTxt = '转写模型就绪'; }
+  else if (st.busy) {
+    modelTxt = st.pct >= 0 ? `转写模型准备中 ${st.pct}%` : '转写模型准备中';
+    if (st.got) modelTxt += `（已下 ${Math.round(st.got / 1048576)}MB）`;
+  } else if (st.err) modelTxt = '转写模型没备好（设置里可重试）';
   const items = [
     {ok: !!a.ytdlp, txt: a.ytdlp ? '下载器就绪' : '缺下载器 yt-dlp'},
     {ok: !!a.ffmpeg, txt: a.ffmpeg ? 'ffmpeg 就绪' : '缺 ffmpeg'},
     {ok: loc || cloud, txt: loc ? '本地语音识别就绪' : (cloud ? '只能走云端语音识别' : '没有语音识别')},
+    {ok: modelOk, txt: modelTxt},
     {ok: !!a.llm, txt: a.llm ? '大模型已配置' : '大模型未配置（可只转写）'},
   ];
   VIDEO.cap.replaceChildren(...items.map(it => {
@@ -7502,12 +7634,6 @@ function paintVideoCap(v) {
   }));
   const g = document.createElement('span');
   g.className = 'grow';
-  const b = document.createElement('button');
-  b.className = 'deed';
-  b.style.height = '26px';
-  b.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
-  b.title = 'ffmpeg 是转写的必需件。归藏按需下一份静态的放在自己的数据目录里，不动系统。';
-  b.onclick = () => vidEnsure(b);
   const nb = document.createElement('button');
   nb.className = 'deed';
   nb.style.height = '26px';
@@ -7515,7 +7641,56 @@ function paintVideoCap(v) {
   // 弹层外的手一松，全局那个「点别处就收掉弹层」的监听会立刻把它关掉 —— 齿轮按钮靠 stopPropagation
   // 躲过这一下，这里照办，否则点「转写设置」等于什么都没发生
   nb.onclick = e => { e.stopPropagation(); setPop(true); setCat('media'); };
+  // 一颗钮按情绪换活干：缺 ffmpeg 先补 ffmpeg（它是转写的硬前置），否则补引擎/模型。
+  const b = document.createElement('button');
+  b.className = 'deed';
+  b.style.height = '26px';
+  if (!a.ffmpeg) {
+    b.textContent = '装 ffmpeg';
+    b.title = 'ffmpeg 是转写的必需件。归藏按需下一份静态的放在自己的数据目录里，不动系统。';
+    b.onclick = () => vidEnsure(b);
+  } else if (!st.engine_ready || !st.model_ready) {
+    b.textContent = st.busy ? '正在准备…' : (!st.engine_ready ? '装转写引擎' : '下载转写模型');
+    b.disabled = !!st.busy;
+    b.title = '转写模型有几百 MB 到 1.6 GB；下的时候可以照常用别的功能，回来点一下就行。';
+    b.onclick = () => vidPrep(b);
+  } else {
+    b.textContent = '重装 ffmpeg';
+    b.title = 'ffmpeg 已经就绪；按一下会重新下一份。';
+    b.onclick = () => vidEnsure(b);
+  }
   VIDEO.cap.append(g, nb, b);
+  // 正在下模型就开着轮询让百分比自己走；不忙就停下来，别拿轮询去换电。
+  if (st.busy) vidPollOn(); else vidPollOff();
+}
+
+let vidTimer = 0;
+
+function vidPollOn() { if (!vidTimer) vidTimer = setInterval(vidPollOnce, 2000); }
+function vidPollOff() { if (vidTimer) { clearInterval(vidTimer); vidTimer = 0; } }
+
+/** 转写组件的进度是后台线程在推的，界面每两秒问一次；一忙完就停。 */
+async function vidPollOnce() {
+  let r;
+  try { r = await videoPost({act: 'media_status'}); } catch (e) { return; }
+  if (!r || !r.ok) return;
+  if (!r.setup || !r.setup.busy) vidPollOff();
+  paintVideoCap({available: Object.assign({}, r.available || {}, {setup: r.setup})});
+}
+
+/** 一键补转写组件：引擎缺就装引擎，模型缺就在后台下。 */
+async function vidPrep(btn) {
+  const keep = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在准备…';
+  const r = await videoPost({act: 'media_all'});
+  whisper(r.msg || (r.ok ? '开始准备转写组件' : '没能开始准备'));
+  if (r.ok) {
+    vidPollOn();
+    if (r.setup) paintVideoCap({available: Object.assign({}, r.available || {}, {setup: r.setup})});
+  } else {
+    setTimeout(() => { if (document.body.contains(btn)) { btn.disabled = false; btn.textContent = keep; } }, 2500);
+  }
 }
 
 async function vidEnsure(btn) {
@@ -8577,6 +8752,25 @@ function paintVideoCfg(v) {
   }
   const vf = $('#vfFix');
   if (vf && !vf.disabled) vf.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
+  // 转写模型那一行：说清是「在下（几成）」还是「已就绪」还是「没备好」，钮跟着改口。
+  // 变量名不能叫 st —— 上面「语音识别」那行已经占了这个名字（同一函数作用域）。
+  const vm = $('#v-media');
+  const mst = a.setup || {};
+  if (vm) {
+    if (!mst.engine_ready) vm.textContent = '缺转写引擎';
+    else if (mst.model_ready) vm.textContent = '已就绪 · ' + (mst.model || '');
+    else if (mst.busy) {
+      vm.textContent = ('正在后台下载' + (mst.pct >= 0 ? ' ' + mst.pct + '%' : ''))
+        + (mst.got ? '（已下 ' + Math.round(mst.got / 1048576) + 'MB）' : '');
+    } else if (mst.err) vm.textContent = String(mst.err).slice(0, 60);
+    else vm.textContent = '未下载';
+  }
+  const vmf = $('#vModelFix');
+  if (vmf && !vmf.disabled) {
+    vmf.textContent = mst.busy ? '准备中…' : (!mst.engine_ready ? '装转写引擎'
+      : (mst.model_ready ? '校验' : '下载'));
+    vmf.disabled = !!mst.busy;
+  }
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
@@ -9492,6 +9686,20 @@ function wireReader(p) {
     if (t.dataset.tab) { ntTab(t.dataset.tab); return; }
     if (t.dataset.ch !== undefined) rdGo(+t.dataset.ch);
   });
+  // 笔记行是 tabindex="0" 的 —— 键盘既然能停在它跟前，就得走得动：Enter 跳回正文那一句，
+  // E 改想法（条目是「接着写」），Delete 删除。不给这几条，Tab 停上去按什么都是白按。
+  p.addEventListener('keydown', e => {
+    const row = e.target.closest && e.target.closest('.ntrow');
+    if (!row || !p.contains(row)) return;
+    if (e.target !== row) return;          // 焦点在行里那颗钮上时，让钮自己接回车
+    if (e.key === 'Enter') { e.preventDefault(); ntJump(row); return; }
+    if ((e.key === 'e' || e.key === 'E') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      ntRowKey(row, row.dataset.mk ? 'memo' : 'edit');
+      return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); ntRowKey(row, 'del'); }
+  });
   // 划词：拖选一段就贴出小条；单击英文单词直接查义。
   // 「问」钮按下时 preventDefault —— 不让按钮抢走焦点、把选区弄没了。
   p.addEventListener('mousedown', e => {
@@ -10137,8 +10345,14 @@ function ntPaint() {
   box.innerHTML = list.length ? list.map(ntMarkRow).join('')
     : '<div class="ntempty">' + (marks.length
       ? '这些笔还没划到这儿。选中正文里的一句话，浮层上点一支笔就记下了。'
-      : '还没有划线。选中正文里的一句话，浮层里点一支笔就记下了；想顺手写两句，点「记一笔」。')
+      : '还没有划线。选中正文里的一句话，浮层里点一支笔就记下了；想顺手写两句，点「写想法」。')
       + '</div>';
+}
+
+/** 键盘按行：找到行上同名那颗钮替按一下，行为不另写一份，免得两处走偏。 */
+function ntRowKey(row, act) {
+  const b = row.querySelector('.nacts button[data-act="' + act + '"]');
+  if (b) ntRowAct(b, row);
 }
 
 /** 行上的小按钮：跳转 / 写想法 / 接着写 / 删。 */
@@ -10367,7 +10581,7 @@ function ntApply() {
 }
 
 /** 新加一笔划线（或改笔型）：记下原文 + 上下文 + 章，然后重贴、存盘。
- *  around / ch 可以由调用方先抄一份 —— 「记一笔」那个浮层里要点进输入框打字，
+ *  around / ch 可以由调用方先抄一份 —— 「写想法」那个浮层里要点进输入框打字，
  *  那时候文档选区早被抢走了，不先抄就不知道用户到底选了哪句。 */
 function ntAdd(sel, txt, opts) {
   opts = opts || {};
@@ -10405,21 +10619,50 @@ function ntUpdate(id, patch) {
   return true;
 }
 
+/** 删完不留个反悔口，手一滑就没了 —— 右下角那条提示上挂颗「撤销」，点一下原样放回。
+ *  单独删一条不值得弹确认框：拦在前面问一遍，比让人事后点一下更烦。 */
+function ntOfferUndo(msg, putBack) {
+  whisperAct(msg, '撤销', () => { putBack(); whisper('已经放回去了'); });
+}
+
 function ntDel(ids) {
   if (!NT.doc || !ids || !ids.length) return;
   const drop = {};
   ids.forEach(i => { drop[i] = 1; });
+  const gone = [];
+  (NT.doc.marks || []).forEach((m, i) => { if (drop[m.id]) gone.push([i, m]); });
+  if (!gone.length) return;
   NT.doc.marks = (NT.doc.marks || []).filter(m => !drop[m.id]);
   ntTouch();
   ntApply();
   if (!NT.lock) ntPaint();
+  ntOfferUndo(gone.length > 1 ? '删掉 ' + gone.length + ' 条划线' : '删掉一条划线', () => {
+    if (!NT.doc) return;
+    const arr = NT.doc.marks || (NT.doc.marks = []);
+    // 按原位置挨个插回去（gone 是升序），顺序和删之前一模一样。
+    gone.forEach(([i, m]) => arr.splice(Math.min(i, arr.length), 0, m));
+    ntTouch();
+    ntApply();
+    if (!NT.lock) ntPaint();
+  });
 }
 
 function ntDelEntry(id) {
   if (!NT.doc) return;
-  NT.doc.entries = (NT.doc.entries || []).filter(e => e.id !== id);
+  const arr0 = NT.doc.entries || [];
+  const at = arr0.findIndex(e => e.id === id);
+  if (at < 0) return;
+  const gone = arr0[at];
+  NT.doc.entries = arr0.filter(e => e.id !== id);
   ntTouch();
   if (!NT.lock) ntPaint();
+  ntOfferUndo('删掉一条笔记', () => {
+    if (!NT.doc) return;
+    const arr = NT.doc.entries || (NT.doc.entries = []);
+    arr.splice(Math.min(at, arr.length), 0, gone);
+    ntTouch();
+    if (!NT.lock) ntPaint();
+  });
 }
 
 /** 选区压着了几道现有划线（用来给「擦掉」那颗钮）。 */
@@ -10441,8 +10684,8 @@ function penBody() {
   return (p && p.querySelector('#rdBody')) || null;
 }
 
-/** 浮层上那一排笔：五支带色的 + 三种笔画 + 记一笔 +（有的话）擦掉。
- *  位置和上下文在这儿一次性抄好：色片点下去就落笔，「记一笔」还要先进输入框打字，
+/** 浮层上那一排笔：五支带色的 + 三种笔画 + 写想法 +（有的话）擦掉。
+ *  位置和上下文在这儿一次性抄好：色片点下去就落笔，「写想法」还要先进输入框打字，
  *  两处用的是同一份快照，免得一小时后才发现选区早没了。 */
 function ntPenItems(root, sel, txt) {
   const around = root ? ntAround(root, sel) : {prefix: '', suffix: ''};
@@ -10464,7 +10707,7 @@ function ntPenItems(root, sel, txt) {
   items.push({sep: 1, label: '粗', title: '加粗', fn: () => put({kind: 'bold'}, '加粗')});
   items.push({label: '下划', title: '下划线', fn: () => put({kind: 'underline'}, '下划线')});
   items.push({label: '删', title: '删除线', fn: () => put({kind: 'strike'}, '删除线')});
-  items.push({sep: 1, label: '记一笔', title: '写句想法，自动带上原文和位置',
+  items.push({sep: 1, label: '写想法', title: '写句想法，自动带上原文和位置',
     fn: (x, y) => selPopNote(x, y, {text: txt, around, ch, sel})});
   items.push({label: '写条目', title: '把这句引进去，写一篇自己的长笔记',
     fn: () => { selPopHide(); ntEdOpen(null, {text: txt, ch}); }});
@@ -11794,7 +12037,8 @@ async function bdSave() {
   BD.env.paper = BD.paper;
   const id = BD.id;
   const d = await bdPost({act: 'save', doc: BD.env}).catch(() => null);
-  if (!d || BD.id !== id) return;
+  if (!d) { bdInfo('这一笔没存上：本机服务没在跑'); return; }
+  if (BD.id !== id) return;
   if (!d.ok) { bdInfo(d.msg || '没存上'); return; }
   if (d.boards) BD.boards = d.boards;
   bdPaintList();
@@ -12597,7 +12841,7 @@ function selPopEl() {
   selPop.className = 'selpop';
   selPop.id = 'selpop';
   // 在小条上按下别把正文选区弄丢，也别触发外面的「点外收起」——
-  // 但「记一笔」那个浮层要能在里面打字，输入框得真的拿到焦点。
+  // 但「写想法」那个浮层要能在里面打字，输入框得真的拿到焦点。
   selPop.addEventListener('mousedown', e => {
     e.stopPropagation();
     const tag = e.target && e.target.tagName;
@@ -12608,7 +12852,7 @@ function selPopEl() {
   return selPop;
 }
 
-/** 浮层正被人用着：鼠标停在它上面，或「记一笔」的输入框里已经拿了焦点。
+/** 浮层正被人用着：鼠标停在它上面，或「写想法」的输入框里已经拿了焦点。
  *  这两种时候滚正文不该把它收掉 —— 一边打字一边往下翻是常态，
  *  收一次就是丢一份没保存的想法。 */
 function selPopBusy() {
@@ -12949,7 +13193,7 @@ function rdAsk() {
 document.addEventListener('click', e => {
   if (!selPop || !selPop.classList.contains('show')) return;
   // 判「点的是不是小条自己」要看事件路径，不能用 closest：浮层里的按钮经常在点下去
-  // 的那一刻就被换掉了（「记一笔」是把整层换成输入框），换了身的元素 closest 找不到
+  // 的那一刻就被换掉了（「写想法」是把整层换成输入框），换了身的元素 closest 找不到
   // 浮层，于是刚弹出的编辑器立刻被当成“点到外面”收走。
   const path = e.composedPath ? e.composedPath() : [];
   if (path.indexOf(selPop) >= 0) return;
@@ -13565,6 +13809,87 @@ $('#asrSave').onclick = async () => {
   if (r.ok) asrDirty = false;      // 存住了就交还给轮询，之后按后端的值显示
 };
 $('#vfFix').onclick = () => vidEnsure($('#vfFix'));
+$('#vModelFix').onclick = () => vidPrep($('#vModelFix'));
+
+/* ── 维护：卸载组件 / 清除本地数据 ─────────────────
+   两件都不可逆，删的是几百 MB 到 1.6GB，所以一律两步走：先要一份「试算」（删什么、
+   多大、书库在哪），连同「书一定不动」摆出来给用户看清，点头了才真删。 */
+function humanBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return v + ' B';
+  if (v < 1048576) return (v / 1024).toFixed(v < 10240 ? 1 : 0) + ' KB';
+  if (v < 1073741824) return (v / 1048576).toFixed(1) + ' MB';
+  return (v / 1073741824).toFixed(2) + ' GB';
+}
+
+async function cleanupPlan(what) {
+  const r = await post('cleanup', {mode: 'plan', what});
+  if (!r.ok) { whisper(r.msg || '没能算出要清什么'); return null; }
+  return r.plan || null;
+}
+
+function cleanupDetail(plan) {
+  const out = [];
+  for (const g of plan.groups || []) {
+    const rows = (g.items || []).filter(it => it.exist);
+    if (!rows.length) continue;
+    out.push(g.label + '　合计 ' + humanBytes(g.size));
+    for (const it of rows) out.push('  · ' + it.label + '　' + humanBytes(it.size));
+    out.push('');
+  }
+  return out.length ? out.join('\n') : '没有可清的东西了。';
+}
+
+async function paintCleanup() {
+  const plan = await cleanupPlan('all');
+  if (!plan) return null;
+  const by = {};
+  for (const g of plan.groups || []) by[g.key] = g;
+  const fill = (id, g) => {
+    const el = $(id);
+    if (el) el.textContent = (g && g.size) ? humanBytes(g.size) + ' 可释放' : '没有可清的';
+  };
+  fill('#v-comp', by.components);
+  fill('#v-data', by.data);
+  const bk = $('#clBooks');
+  if (bk && plan.books) {
+    // 把书库的真实路径写出来：点「清除数据」时最怕的就是把书一起清了，
+    // 明说「这块地在哪、我不碰」比一句「请放心」有用得多。
+    bk.innerHTML = '清掉的是它自己攒下的那些：登录态、书架清单、设置、阅读时长、'
+      + '笔记索引、订阅条目、剪藏、封面、下载中间件。<b>书一定不动</b> —— 你的书在 '
+      + '<code>' + plan.books + '</code>，这边一律不碰。软件本体（那个 .app）也不归这儿管，'
+      + '不用了直接拖进废纸篓。';
+  }
+  return plan;
+}
+
+async function cleanupAsk(what, label, warn) {
+  // 试算只算这一次要删的那一类：点了「清除本地数据」却把「卸载组件」那 788MB 也列进
+  // 单子里，用户会以为按下去连组件一起没了。两颗钮旁边那行数字另算（那要两类都看）。
+  const plan = await cleanupPlan(what);
+  if (!plan) return;
+  paintCleanup();
+  if (!plan.total) { whisper('没有可清的东西了'); return; }
+  sheet({
+    title: label,
+    text: warn + '删掉就找不回来了。',
+    body: cleanupDetail(plan) + '\n合计 ' + humanBytes(plan.total),
+    actions: [
+      {label: '再想想'},
+      {label: '确定', lead: true, run: async () => {
+        const r = await post('cleanup', {mode: 'run', what});
+        whisper(r.ok ? ('已释放 ' + humanBytes((r.result || {}).freed || 0))
+                     : (r.msg || '有几样没删成，再点一次试试'));
+        paintCleanup();
+      }},
+    ],
+  });
+}
+
+$('#clComp').onclick = () => cleanupAsk('components', '卸载组件',
+  '卸掉之后「取书」「视频转写」要重新补齐才能用。');
+$('#clData').onclick = () => cleanupAsk('data', '清除本地数据',
+  '登录态、书架清单、设置、订阅条目、剪藏都会清掉；书不动。');
 
 /* ── 云同步（设置里那一块） ─────────────
    通道与协议都在后端 sync.py，这边只管把状态画出来、把几个动作发出去。

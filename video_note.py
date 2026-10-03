@@ -54,6 +54,7 @@ import uuid
 import book_import
 import book_notes
 import ffmpeg_tool
+import media_setup as ms
 import platform_compat as pc
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -74,8 +75,10 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
 BILIBILI_HEADERS = {"User-Agent": UA, "Referer": "https://www.bilibili.com/"}
 
-DEFAULT_MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
-DEFAULT_FASTER_MODEL = "small"          # CTranslate2 权重名，不是 HF repo id
+# 模型名单一真源在 media_setup（那边还负责下它、报告它到没到），这里只取来用，
+# 免得「装的时候按 A 下、跑的时候按 B 找」这种两处各写一遍的错。
+DEFAULT_MLX_MODEL = ms.ENGINES["mlx"]["model"]
+DEFAULT_FASTER_MODEL = ms.ENGINES["faster"]["model"]        # CTranslate2 权重短名，不是 HF repo id
 DEFAULT_CLOUD_MODEL = "whisper-1"
 DEFAULT_LANGUAGE = "zh"
 
@@ -279,6 +282,14 @@ def available():
         engines.append("cloud")
         out["engines"] = engines
         out["asr"]["local"] = ("mlx" in engines) or ("faster" in engines)
+    except Exception:
+        pass
+    # 引擎「装了没」与模型「下齐了没」是两件事：引擎几十 MB 随安装就位，模型要几百 MB
+    # 到 1.6GB，进门之后才在后台下。界面那几盏灯分开报，用户才知道该等什么。
+    try:
+        out["engine_ready"] = ms.engine_ready()
+        out["model"] = ms.model_id()
+        out["model_ready"] = ms.model_ready()
     except Exception:
         pass
     try:

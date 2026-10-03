@@ -221,6 +221,12 @@
       <div class="stx"><b>微信读书账号</b><span id="n2">待检视</span></div>
       <div class="bar"><i></i></div>
     </div>
+    <div class="step" id="s3" data-s="idle">
+      <div class="dot"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.1"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 6.3 4.9 8.8 9.6 3.6"/></svg></div>
+      <div class="stx"><b>视频转写组件</b><span id="n3">待检视</span></div>
+      <div class="bar"><i></i></div>
+    </div>
     <div class="logwrap" id="logwrap"><pre class="log" id="log"></pre></div>
   </div>
 
@@ -267,9 +273,12 @@ function pushLog(line) {
 window.gz = {
   init(state) {
     const map = [
-      ['env',     0, '运行环境',     '依赖已装齐'],
-      ['browser', 1, '取书浏览器',   'Chromium 已就绪'],
-      ['account', 2, '微信读书账号', '账号已连接'],
+      ['env',     0, '运行环境',         '依赖已装齐'],
+      ['browser', 1, '取书浏览器',       'Chromium 已就绪'],
+      ['account', 2, '微信读书账号',     '账号已连接'],
+      // 转写引擎随安装配好就点绿灯；模型不在这儿等 —— 它是进门之后在后台下的，
+      // 视频页那几盏灯会显示进度（见 media_setup.py）。
+      ['media',   3, '视频转写组件',     '转写引擎已就绪'],
     ];
     map.forEach(([key, i, , ok]) => {
       setStep(i, state[key] ? 'ok' : 'idle', state[key] ? ok : '待配置');

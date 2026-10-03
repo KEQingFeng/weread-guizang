@@ -10,6 +10,8 @@
 诊断出的就是这个症状：点「连接」→ 后端 Popen 找不到 `.venv/bin/python` →
 异常逃出请求处理函数 → 连接被掐断 → 前端 await 直接 reject → 页面毫无反应。
 """
+import json
+import json
 import os
 import signal
 import socket
@@ -267,6 +269,32 @@ def kill_stray_browsers(profile_dir, wait=1.0):
         pass
     if wait:
         time.sleep(wait)
+
+
+def runtime_file(repo):
+    """服务当前在哪个端口上：起来的时候写，别人（MCP 适配器、壳）来查。
+
+    为什么要有这个文件：8770 被占时服务会自己往后找一个空闲端口（最多 20 个），
+    而调用方只认 8770。端口一错开，适配器探的就是一个没人应答的口子，
+    用户看到的却是「归藏没开着」。写盘的是服务自己，它知道自己最终绑到了哪个口。
+
+    跟 data_dir 走而不是跟源码走：装成 app 之后包体是只读的。
+    """
+    return os.path.join(data_dir(repo), "runtime.json")
+
+
+def write_runtime(repo, port, pid=None, version=""):
+    """记下当前端口。写失败不影响服务本身，所以只尽力而为，不抛异常。"""
+    try:
+        os.makedirs(data_dir(repo), exist_ok=True)
+        tmp = runtime_file(repo) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"port": int(port), "pid": int(pid or os.getpid()),
+                       "version": version, "started_at": int(time.time())}, f)
+        os.replace(tmp, runtime_file(repo))   # 先写临时再改名：别让读到半截的 JSON
+        return True
+    except Exception:
+        return False
 
 
 def open_in_file_manager(path):
