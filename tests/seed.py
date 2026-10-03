@@ -15,6 +15,7 @@ import os
 import pathlib
 import shutil
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import selftest  # noqa: E402
@@ -36,6 +37,21 @@ SHELF_BOOKS = [
 # 这两类在书架上走的是「自己的书」那条分支，按钮和真书不一样，套件要能点到。
 IMPORT_BOOK = ("imp_SE_RECIPE", "我的菜谱草稿")
 CLIP_BOOK = ("clip_SE_POST", "一篇剪藏下来的文章")
+
+# 视频转笔记那一屏要有真转写才点得动：一本带时间戳的视频书，段里故意留了两处
+# 「听错的词」（内村 / 进成），套件的转写工作台就照着这两处改、存、导。
+VIDEO_BOOK = ("video_SE_LECTURE", "操作系统导论·第 3 讲", "某个讲师")
+VIDEO_SEGS = [
+    (0.0, 6.4, "大家好，今天这一讲说的是内存管理。", ""),
+    (6.4, 14.2, "上一讲我们把进程的生命周期过了一遍。", ""),
+    (14.2, 23.8, "这一讲先看内村分配的三个基本问题。", "讲师"),
+    (23.8, 33.1, "第一个是碎片，第二个是进成速度。", "讲师"),
+    (33.1, 42.6, "同学可以把这三点自己在纸上写一遍。", ""),
+    (42.6, 53.9, "然后我们看伙伴系统怎么把空闲块串起来。", ""),
+    (53.9, 66.3, "这里的关键词是合并，也就是 coalescing。", ""),
+    (66.3, 78.0, "下一讲接着说虚拟内存和页表。", ""),
+]
+
 
 
 def _paragraph(i):
@@ -59,7 +75,10 @@ def _write_book(root, bid, title, author, chapters, done=True, source="weread",
     (d / "images").mkdir(parents=True)
     (d / "raw").mkdir(parents=True)
     for i in range(chapters):
-        (d / "chapters" / ("%04d.md" % (i + 1))).write_text(
+        # 章节文件名照产品的口径来：引擎、book_import、book_notes 认的都是 0000.md 起头
+        # （0 基）。铺成 0001 起头的话，右栏那份「章节标题表」会整体错一格，测出来的
+        # 「标题对不上」跟产品没关系，纯粹是货架自己埋的坑。人的序号还在标题里（第 1 章）。
+        (d / "chapters" / ("%04d.md" % i)).write_text(
             "# 第%d章 %s\n\n%s\n" % (i + 1, title[:6], _paragraph(i + 1)), encoding="utf-8")
     catalog = [{"chapterTitle": "第%d章" % (i + 1)} for i in range(chapters)]
     (d / "_catalog.json").write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
@@ -71,6 +90,50 @@ def _write_book(root, bid, title, author, chapters, done=True, source="weread",
         meta.update({"format": "clip", "url": "https://example.com/a", "words": 800})
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     (d / "raw" / "note.txt").write_text("占位原始包\n", encoding="utf-8")
+    return d
+
+
+def _write_video_book(root, bid, title, uploader):
+    """一本「转完了」的视频书：transcript.json 带时间戳，章节和摘要都在。
+
+    转写工作台要能改字、能存、能导，靠的就是一份真形状的 transcript.json —— 手搓的
+    假形状会让套件测出一条真产品里不存在的路，那就白测了。字段照 video_note 的
+    _transcript_doc 摆，段落故意留两处听错的词。
+    """
+    d = root / bid
+    shutil.rmtree(d, ignore_errors=True)
+    (d / "chapters").mkdir(parents=True)
+    text = "\n".join(s[2] for s in VIDEO_SEGS)
+    segs = [{"start": a, "end": b, "text": t, "id": "s%05d" % i}
+            for i, (a, b, t, _sp) in enumerate(VIDEO_SEGS)]
+    # 两段带说话人：工作台那一栏要看得出「这一段是谁说的」，也测得到筛说话人这条路。
+    for i, (_a, _b, _t, sp) in enumerate(VIDEO_SEGS):
+        if sp:
+            segs[i]["speaker"] = sp
+    (d / "transcript.json").write_text(json.dumps(
+        {"schema": 1, "engine": "fake-whisper", "language": "zh", "duration": 78.0,
+         "title": title, "vid": "SEFAKE03", "page": 3, "segments": segs,
+         "generated_at": "2026-10-01 09:00:00"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (d / "transcript.txt").write_text(text + "\n", encoding="utf-8")
+    (d / "summary.json").write_text(json.dumps(
+        {"title": title, "overview": "这一讲讲内存管理的三个基本问题。",
+         "bulletPoints": ["碎片", "分配速度", "伙伴系统"],
+         "chapters": [{"title": "三个基本问题", "start": 0, "summary": "碎片与速度"},
+                      {"title": "伙伴系统", "start": 42.6, "summary": "空闲块合并"}]},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    for i, ch in enumerate(["三个基本问题", "伙伴系统", "下一讲"]):
+        (d / "chapters" / ("%04d.md" % i)).write_text(
+            "# %s\n\n%s\n" % (ch, text if i == 0 else "（这一节的正文来自转写。）"),
+            encoding="utf-8")
+    (d / "merged.md").write_text("# " + title + "\n\n" + text + "\n", encoding="utf-8")
+    (d / "meta.json").write_text(json.dumps(
+        {"title": title, "page_title": title, "author": uploader, "uploader": uploader,
+         "site": "bilibili", "url": "https://www.bilibili.com/video/SEFAKE03?p=3",
+         "source": "video", "done": True, "duration": 78, "words": len(text),
+         "chars": len(text), "chapters": 3, "segments": len(segs), "page": 3, "pages": 12,
+         "asr_engine": "fake-whisper", "language": "zh", "transcript_edited": False,
+         "video_at": "2026-10-01 09:00:00", "updated_at": int(time.time())},
+        ensure_ascii=False, indent=2), encoding="utf-8")
     return d
 
 
@@ -86,6 +149,8 @@ def seed(books_dir=None, force=False):
         _write_book(root, bid, title, author, n)
     _write_book(root, IMPORT_BOOK[0], IMPORT_BOOK[1], "我自己", 3, source="local", prefix="imp")
     _write_book(root, CLIP_BOOK[0], CLIP_BOOK[1], "某个公众号", 1, source="clip", prefix="clip")
+    # 视频那一屏的工作台要有带时间戳的转写才点得动（改字 / 保存 / 导字幕全在这本上跑）
+    _write_video_book(root, VIDEO_BOOK[0], VIDEO_BOOK[1], VIDEO_BOOK[2])
 
     # 一本「取了一半」的书：卡片上应该给「续取」而不是「正文」，这是 0.9.8 那两道锁的靶子。
     part = _write_book(root, "SE_PARTIAL", "只取了一半的书", "某人", 2, done=False)

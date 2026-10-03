@@ -7,6 +7,11 @@
   · 换章是带方向的淡入（WAAPI 直接播），不再走「摘 class → 读 offsetWidth 逼重排」；
   · 统计那屏的数字冷启动从 0 滚到位，滚完要停在真值上（别卡在 0）。
 
+第二十九轮补的是窄窗那一档：≤840 时 @media 把 .rdscroll 的 overflow 关了，滚的是整页，
+而进度细线、续读位置、大纲「在读」三样都只读 #rdScroll —— 窄窗里三处一起哑、宽窗却全好，
+所以必须真把窗口收窄才验得出来。连同划词小条在 480 宽下被顶出屏幕、图没随书带出来时
+正文留了个透明的洞，这几样都是「不缩窄 / 不缺图就看不见」的。
+
 前提：有一个指向沙盒书库的服务，且 seed 铺好了 GAPBOOK1（`python tests/seed.py`）。
 服务地址走命令行第一个参数或 GUIZANG_TEST_URL，缺省 8770。
 """
@@ -20,7 +25,10 @@ from playwright.sync_api import sync_playwright
 
 BASE = selftest.need_base(1)
 BOOK = "GAPBOOK1"
-CH3 = pathlib.Path(selftest.BOOKS) / BOOK / "chapters" / "0003.md"
+# 章节文件名是 0 基的（产品口径：引擎 / book_import / book_notes 都从 0000.md 起头），
+# 所以「翻到第 3 章」（rdGo(2)）改的那一份是 0002.md —— 里头人读的序号还是第3章，
+# 别被名字骗了：写成 0003.md 会铺到第 4 章上，这一章就短得滚不起来。
+CH3 = pathlib.Path(selftest.BOOKS) / BOOK / "chapters" / "0002.md"
 selftest.SHOTS.mkdir(parents=True, exist_ok=True)
 SHOT = str(selftest.SHOTS / "reader-outline.png")
 
@@ -222,6 +230,148 @@ def main():
         pg.wait_for_timeout(500)
         warm = pg.evaluate(STATS_JS)
         chk("滚完停在真值上（和不滚那次一致）", late == warm, {"late": late, "warm": warm})
+
+        # ── 窄窗：正文不再自己滚，滚的是整页 ─────────────────────
+        # @media (max-width:840px) 把 .rdscroll 的 overflow 关掉了（手机上顺着整页读到底
+        # 更舒服），代价是 #rdScroll.scrollTop 从此钉死在 0。第二十九轮之前，进度细线、
+        # 续读位置、大纲「在读」三样全读它 —— 窄窗里进度条永远空着、重开回到章首、
+        # 大纲永远亮第一节，三处一起哑。现在改成先问「到底谁在滚」（rdScroller），
+        # 判据读当前生效的 CSS，不抄 840 这个数。这条必须真把窗口收窄才验得出来。
+        pg.set_viewport_size({"width": 760, "height": 820})
+        pg.wait_for_timeout(500)
+        pg.evaluate("() => setView('shelf')")
+        pg.wait_for_timeout(400)
+        open_book(pg)
+        pg.evaluate("() => rdGo(2)")
+        pg.wait_for_timeout(700)
+        mode = pg.evaluate("""() => {
+          const sc = document.querySelector('#rdScroll');
+          return {ov: sc ? getComputedStyle(sc).overflowY : '?',
+                  reading: document.body.classList.contains('reading'),
+                  box: sc ? Math.round(sc.scrollTop) : -1};
+        }""")
+        chk("窄窗确实是整页滚（.rdscroll 不自己滚）",
+            mode["ov"] == "visible" and mode["reading"], mode)
+
+        pg.evaluate("() => window.scrollTo(0, 900)")
+        pg.wait_for_timeout(1400)                 # 停手 800ms 才落盘，等它写完
+        thin = pg.evaluate("""() => {
+          let pos = null;
+          try { pos = JSON.parse(localStorage.getItem('guizang-readpos-%s')); } catch (e) {}
+          const a = document.querySelector('#rdProg'), m = document.querySelector('.rdmain');
+          return {w: a ? a.style.width : '', box: document.querySelector('#rdScroll').scrollTop,
+                  y: Math.round(window.scrollY), pos: pos,
+                  lifted: !!(m && m.classList.contains('scrolled'))};
+        }""" % BOOK)
+        pg.evaluate("() => window.scrollTo(0, 2600)")
+        pg.wait_for_timeout(400)
+        deeper = pg.evaluate("() => document.querySelector('#rdProg').style.width")
+        # 「不是 0」不够 —— 量错了盒子时那条会算成 100%（容器自己不滚，可滚距离是 0，
+        # 代码把它当「读完了」），照样不是 0。所以要它落在中段，并且越滚越大。
+        pct = float((thin["w"] or "0").rstrip("%"))
+        chk("窄窗滚一页，进度细线走到中段（不是 0 也不是「读完了」）",
+            2 < pct < 95, thin)
+        chk("窄窗：越往下滚细线越长", float((deeper or "0").rstrip("%")) > pct + 3,
+            {"pct": pct, "deeper": deeper})
+        chk("窄窗里 #rdScroll 自己不滚（量的不是它）", thin["box"] == 0 and thin["y"] > 400, thin)
+        chk("窄窗也把页底那道浮影收放了", thin["lifted"], thin)
+        chk("窄窗也记下「章 + 页内位置」（不是只记章）",
+            bool(thin["pos"]) and thin["pos"]["c"] == 2 and thin["pos"]["y"] > 400, thin)
+        # 重开要真的重开（整页刷一遍）：手动 scroll 回顶再重开是假动作 ——
+        # 回顶那一下自己就会把位置存成 0，「回到那一行」当场被自己抹掉。
+        # 而且页面不刷的话，整页一直停在原地，那条也会白过。
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_timeout(1200)
+        open_book(pg)
+        pg.wait_for_timeout(900)
+        back = pg.evaluate("""() => ({
+          at: (typeof RD !== 'undefined') ? RD.at : -1,
+          y: Math.round(window.scrollY),
+          w: (document.querySelector('#rdProg') || {style: {}}).style.width})""")
+        chk("窄窗重开回到第 3 章那一行", back["at"] == 2 and back["y"] > 400, back)
+        chk("窄窗重开进度条跟着回到中段",
+            back["w"] and 2 < float(back["w"].rstrip("%")) < 95, back)
+
+        # ── 更窄一档：划词小条的笔那一排不许被顶出屏幕 ───────────
+        # 笔色是用户自己加的（NT.tags），默认五支时那排刚好塞得进 480，加到九支就顶出去了；
+        # 顶出去的是右半边 —— 正好是「记一笔」「写条目」，最该留的两个。
+        # 摆位只管把小条夹回左边，宽度它不管，所以这里要：宽度封顶 + 两排都能折行。
+        pg.set_viewport_size({"width": 480, "height": 640})
+        pg.wait_for_timeout(500)
+        pg.evaluate("""() => {
+          const cs = ['#e8b04b', '#d76a6a', '#6aa9d7', '#7bc08a', '#b07ad7',
+                      '#d78a5a', '#5ab8b8', '#c4c45a', '#8a8ad7'];
+          NT.tags = cs.map((c, i) => ({key: 't' + i, name: '标签' + (i + 1), color: c}));
+        }""")
+        spot = pg.evaluate("""() => {
+          const vh = innerHeight;
+          const p = [...document.querySelectorAll('#rdBody p')].find(x => {
+            if ((x.textContent || '').trim().length < 30) return false;
+            const r = x.getBoundingClientRect();
+            return r.width > 120 && r.top > -vh && r.bottom < vh * 2;
+          });
+          if (!p) return null;
+          // 先把要选的那一段滚到视口中间再量：鼠标坐标是视口系的，
+          // 这一段在上一步刚续读落到哪儿都行，不滚过来就可能整段在屏幕外。
+          p.scrollIntoView({block: 'center'});
+          return 1;
+        }""")
+        pg.wait_for_timeout(500)
+        bar = None
+        seg = None
+        if spot:
+            seg = pg.evaluate("""() => {
+              const p = [...document.querySelectorAll('#rdBody p')].find(x => {
+                const r = x.getBoundingClientRect();
+                return (x.textContent || '').trim().length > 30
+                  && r.top > 70 && r.bottom < innerHeight - 70 && r.width > 120;
+              });
+              if (!p) return null;
+              const r = p.getBoundingClientRect();
+              return [Math.round(r.left + 8), Math.round(r.top + r.height / 2)];
+            }""")
+        if seg:
+            pg.mouse.move(seg[0], seg[1])
+            pg.mouse.down()
+            pg.mouse.move(min(seg[0] + 200, 470), seg[1], steps=8)
+            pg.mouse.up()
+            pg.wait_for_timeout(500)
+            bar = pg.evaluate("""() => {
+              const el = document.getElementById('selpop');
+              if (!el || !el.classList.contains('show')) return null;
+              const bs = [...el.querySelectorAll('button')], vw = innerWidth, vh = innerHeight;
+              const box = el.getBoundingClientRect();
+              return {n: bs.length, w: Math.round(box.width), vw,
+                      out: bs.filter(b => {
+                        const r = b.getBoundingClientRect();
+                        return r.right > vw + 1 || r.left < -1 || r.bottom > vh + 1 || r.top < -1;
+                      }).map(b => (b.textContent.trim() || b.title || '色片').slice(0, 8)),
+                      keep: bs.filter(b => /记一笔|写条目/.test(b.textContent)).length};
+            }""")
+        chk("窄窗：划词真能拉出小条（上面一排工具、下面一排笔）", bool(bar) and bar["n"] >= 8,
+            {"bar": bar, "spot": spot, "seg": seg})
+        chk("窄窗：小条整个在视口里", bool(bar) and bar["w"] <= bar["vw"], bar)
+        chk("窄窗：笔那一排一个钮都没被顶出去", bool(bar) and not bar["out"], bar)
+        chk("窄窗：折行后「记一笔」「写条目」还在", bool(bar) and bar["keep"] == 2, bar)
+
+        # 图没随书带出来时得说句话，别留一个透明的洞（.mfade 的 opacity:0 会把
+        # 浏览器的碎图标一起藏掉，看着像这一页少了一段）。
+        imgs = pg.evaluate("""async () => {
+          const bg = document.querySelector('#rdBody');
+          const html = bg.innerHTML;
+          bg.innerHTML = '<p><img src="images/没有这张.png"></p>' + html;
+          rdFixMedia(bg);
+          await new Promise(r => setTimeout(r, 700));
+          const ph = bg.querySelector('.imgmiss');
+          const im = bg.querySelector('img');
+          const out = {ph: ph ? ph.textContent : '', gone: !!(im && im.classList.contains('mgone')),
+                       shown: ph ? getComputedStyle(ph).display !== 'none' : false};
+          bg.innerHTML = html;
+          return out;
+        }""")
+        chk("图没带出来：换成一句明说的话，不留空洞",
+            bool(imgs["ph"]) and imgs["gone"] and imgs["shown"] and "图没带出来" in imgs["ph"],
+            imgs)
 
         br.close()
 

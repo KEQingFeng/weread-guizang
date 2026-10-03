@@ -32,12 +32,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 import platform_compat as pc
+import board as board_mod
 import book_export
 import book_import
 import book_notes
 import clip_article
 import feed as feed_mod
 import ffmpeg_tool
+import mindmap
 import sync as cloudsync
 import video_note
 import web_parse
@@ -940,6 +942,26 @@ def warm_covers(limit=80):
 
 # ---------- 一键建立 MCP 的提示词 ----------
 
+def mcp_tool_names():
+    """从适配器源码里数出「一共有几个工具」—— 界面上那句说明要用它。
+
+    为什么不写死一个数：这份提示词是拿去给别人的 agent 读的，工具加一个它旧一次。
+    上一版写死「20 个工具」，这一轮画板 / 导图 / 转写三条线加完已经是 45 个，
+    说明却还停在 20 —— 用户照着念给 agent 听，一句准话就变成了误导。
+    唯一真源是 TOOL_DEFS 那份清单，读一次就有，永远跟着代码走。
+    """
+    path = os.path.join(REPO, "mcp", "guizang-mcp.mjs")
+    try:
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+    except OSError:
+        return []
+    tail = src.split("const TOOL_DEFS = [", 1)
+    if len(tail) < 2:
+        return []
+    return re.findall(r'^\s{4}name: "([^"]+)"', tail[1], re.M)
+
+
 def mcp_prompt():
     """给 AI Agent 的接入提示词。
 
@@ -947,6 +969,8 @@ def mcp_prompt():
     这份提示词是要发给别人或别人机器上用的，路径与服务地址都可能不同，
     所以只描述「做什么、找什么文件、怎么配」，具体位置让 Agent 自己确认。
     """
+    n = len(mcp_tool_names())
+    head = ("它提供 %d 个工具，分这些类：" % n) if n else "它提供的工具分这些类："
     return "\n".join([
         "请帮我接入一个本地 MCP 服务器，让我能用自然语言操作「归藏」——一个本地微信读书导出工具。",
         "",
@@ -968,17 +992,29 @@ def mcp_prompt():
         "",
         "配好后重启一下让 MCP 生效（MCP 是启动时加载的，不像 skills 能热加载）。",
         "",
-        "它提供 20 个工具，分四类：",
+        head,
         "· 书架与状态：shelf_list、app_status、task_log、book_files、folder_create、book_move",
-        "· 取书：book_fetch（开始）、task_stop（中止）、batch_fetch（排队多本）、account_connect（扫码登录）",
-        "· 书与笔记：book_detail（简介/进度/划线数/是否已抓取）、search_books（本地+划线+书城三域）、",
-        "  notes_index、notes_search、notes_random、book_mark（待读/在读/已读）、",
-        "  shelf_add（把书城里搜到的书加进我自己的微信读书书架，唯一的写操作）",
-        "· 导出：apkg_export（划线导成 Anki 卡包）、zip_export（多本打包）、cache_delete（删本地缓存，默认只列不删）",
+        "· 取书与账号：book_fetch（开始）、task_stop（中止）、batch_fetch（排队多本）、account_connect（扫码登录）",
+        "· 书与笔记：book_detail、search_books（本地 + 划线 + 书城三域）、notes_index、notes_search、",
+        "  notes_random、book_mark（待读 / 在读 / 已读）",
+        "· 写回与导出：shelf_add（把书城搜到的书加进我自己的微信读书书架）、apkg_export（划线 → Anki 卡包）、",
+        "  zip_export（多本打包）、cache_delete（删本地缓存，默认只列不删）",
+        "· 网页剪藏：clip_url（知乎 / 小红书 / X / 公众号链接 → 一本本地书）",
+        "· 订阅（RSS）：feed_list、feed_discover、feed_add、feed_entries、feed_entry、feed_refresh、",
+        "  feed_to_shelf、feed_remove",
+        "· 视频转笔记：video_capability、video_plan、video_to_shelf（开始转写）、video_books、",
+        "  video_transcript（读，每段带 id）、video_transcript_save（改）、video_rebuild（重建正文）、video_export（导字幕）",
+        "· 思维导图：map_show、map_from_notes（只给不存）、map_save",
+        "· 画板：board_list、board_show、board_new、board_save、board_delete",
         "",
-        "两点注意：取书是分钟到小时级的长任务，book_fetch 会立即返回，",
-        "进度要用 app_status / task_log 轮询；不要在这里等它跑完。",
-        "删除类操作（cache_delete）要带 confirm=true 才真删，否则会先把要删的列出来。",
+        "四点注意，都是这个工具的设计口径，请照着做：",
+        "1. 取书、转写、批量取书、刷新订阅都是分钟到小时级的长任务：调用会立即返回，",
+        "   进度用 app_status / task_log 轮询，不要在调用里等它跑完。",
+        "2. 改转写请只用 video_transcript_save 的 edits / drop / add —— 只说改了哪几段，",
+        "   工具自己读回整本再写盘；后端那个接口是整本覆盖的，别把整本抄一遍发上去。",
+        "3. map_save 不给 nodes 就只改标题 / 形态，board_save 不带 canvas 就不动画面 ——",
+        "   用户手画的图和涂鸦覆盖不了第二次。",
+        "4. 删除类要显式确认：cache_delete 带 confirm=true 才真删，board_delete 是不可恢复的。",
         "",
         "弄好后用 shelf_list 试一下，能读出书架就说明通了。",
     ])
@@ -1676,6 +1712,27 @@ def book_image(book_id, name):
     return p, _IMG_MIME[ext]
 
 
+def board_file(book_dir, name):
+    """画板的导出物：<书>/boards/<name>，只认 <id>.svg / <id>.png / <id>.json。
+
+    和 book_image 同一个白名单口径（名字里不许有斜杠和点号玩法），区别只在于
+    这里的 SVG 是「浏览器导出来存下的东西」，不是我们自己生成的。SVG 能带脚本，
+    同域直接打开就会跑 —— 所以调用方给 SVG 配一条 CSP（default-src 'none'），
+    读图归读图，别让它有机会说话。
+    """
+    if not name or not re.fullmatch(r"[A-Za-z0-9_-]+\.(json|svg|png)", name):
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    mime = {"json": "application/json; charset=utf-8"}.get(ext) or _IMG_MIME.get(ext)
+    if not mime:
+        return None
+    root = os.path.realpath(os.path.join(book_dir, board_mod.BOARD_DIR))
+    p = os.path.realpath(os.path.join(root, name))
+    if not p.startswith(root + os.sep) or not os.path.isfile(p):
+        return None
+    return p, mime
+
+
 
 def write_meta(book_id, title, author, done):
     d = safe_book_dir(book_id)
@@ -2032,70 +2089,381 @@ def video_avail():
     return v
 
 
+_FEED_RF = {"lock": threading.Lock(), "run": False, "stop": None,
+            "p": {"running": False, "done": 0, "total": 0, "new": 0,
+                  "note": "", "errors": [], "at": "", "scope": ""}}
+
+
+def _feed_now():
+    return time.strftime("%H:%M:%S")
+
+
+def feed_refresh_status():
+    """给界面轮询的进度。刷新是批量网络活，几百个源能跑一分钟起步，
+    塞在一个 POST 里等它返就只能够转圈、也没法中途停 —— 所以放后台线程，
+    这边只报状态。"""
+    with _FEED_RF["lock"]:
+        out = dict(_FEED_RF["p"])
+        out["running"] = _FEED_RF["run"]
+        out["errors"] = list(out.get("errors") or [])[:5]
+        return out
+
+
+def feed_refresh_start(scope):
+    """scope 是 {feed_id, group, force, fulltext}；一次只许跑一轮。"""
+    with _FEED_RF["lock"]:
+        if _FEED_RF["run"]:
+            return {"ok": False, "msg": "正在刷新，先等它跑完（或点停止）",
+                    "progress": feed_refresh_status()}
+        stop = threading.Event()
+        _FEED_RF["stop"] = stop
+        _FEED_RF["run"] = True
+        _FEED_RF["p"] = {"running": True, "done": 0, "total": 0, "new": 0,
+                         "note": "开始刷新…", "errors": [], "at": _feed_now(),
+                         "scope": scope.get("label") or ""}
+
+    def prog(done, total, label=""):
+        with _FEED_RF["lock"]:
+            _FEED_RF["p"].update({"done": int(done or 0), "total": int(total or 0),
+                                  "note": str(label)[:160], "at": _feed_now()})
+
+    def job():
+        r = {}
+        try:
+            r = feed_mod.refresh(feed_id=scope.get("feed_id"),
+                                 force=bool(scope.get("force")),
+                                 group=scope.get("group"),
+                                 progress=prog,
+                                 should_stop=stop.is_set,
+                                 fulltext=scope.get("fulltext"))
+            _FEED_RF["p"].update({"new": int(r.get("new") or 0),
+                                  "errors": list(r.get("errors") or []),
+                                  "note": ("已停止" if r.get("stopped")
+                                           else "刷完了"),
+                                  "at": _feed_now()})
+            log("订阅刷新%s：跑了 %d 个源，新增 %d 条"
+                % ("中止" if r.get("stopped") else "完成",
+                   r.get("feeds", 0), r.get("new", 0)))
+        except Exception as e:
+            _FEED_RF["p"].update({"note": "刷新出错：%s" % str(e)[:120],
+                                  "at": _feed_now()})
+            log("--- 订阅刷新失败：%s: %s ---" % (type(e).__name__, e))
+        finally:
+            _FEED_SUMMARY["k"] = None
+            with _FEED_RF["lock"]:
+                _FEED_RF["run"] = False
+                _FEED_RF["stop"] = None
+
+    threading.Thread(target=job, daemon=True).start()
+    return {"ok": True, "started": True, "msg": "开始刷新了",
+            "progress": feed_refresh_status()}
+
+
+def feed_refresh_stop():
+    with _FEED_RF["lock"]:
+        stop = _FEED_RF["stop"]
+        if not _FEED_RF["run"] or stop is None:
+            return {"ok": True, "msg": "这会儿没在刷新"}
+        stop.set()
+    return {"ok": True, "msg": "正在收尾，这一轮跑完当前那个源就停"}
+
+
+def _tri(raw):
+    """三态筛选：没传 → None（这个条件不参与），传 1/true → 是，其余 → 否。
+    收藏和稍后读都得能筛「有」和「没有」两种，二元开关筛不出后者。"""
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if s in ("", "all", "any", "any^"):
+        return None
+    return s in ("1", "true", "yes", "on")
+
+
 def feed_view(q):
     """GET /api/feed?mode=… —— 只读，自己不抛（抛了前端就是「点了没反应」）。"""
     mode = (q.get("mode", ["list"])[0] or "list").strip()
+
+    def one(key, default=""):
+        return (q.get(key, [default])[0] or default)
+
     try:
         if mode == "entry":
-            return {"ok": True, "entry": feed_mod.entry(q.get("id", [""])[0])}
+            return {"ok": True, "entry": feed_mod.entry(one("id"))}
         if mode == "entries":
-            return {"ok": True, "entries": feed_mod.entries(
-                feed_id=(q.get("feed", [""])[0] or None),
-                unread_only=q.get("unread", ["0"])[0] in ("1", "true"),
-                limit=int(q.get("limit", ["200"])[0] or 200),
-                q=q.get("q", [""])[0])}
-        return {"ok": True, "subs": feed_mod.subs(), "summary": feed_summary()}
+            # 「未分组」在库里存的是空串，所以这几个键要看「传没传」而不是「空不空」，
+            # 否则用户点侧栏那个「未分组」就会筛成「不限」。
+            kw = dict(
+                feed_id=(one("feed") or None),
+                unread_only=one("unread") in ("1", "true"),
+                q=one("q"),
+                starred=_tri(q.get("starred", [None])[0]),
+                later=_tri(q.get("later", [None])[0]),
+                unread=_tri(q.get("unread2", [None])[0]),
+                group=(q.get("group", [None])[0] if "group" in q else None),
+                tag=(q.get("tag", [None])[0] if "tag" in q else None),
+                tag_match=one("tag_match", "any"),
+                since=(one("since") or None),
+                until=(one("until") or None),
+                sort=one("sort", "published_desc"))
+            out = feed_mod.entries(
+                limit=max(1, min(500, int(q.get("limit", ["200"])[0] or 200))),
+                offset=max(0, int(q.get("offset", ["0"])[0] or 0)), **kw)
+            # total 用同一套筛法数一遍：前端「这一档共 N 条 · 已铺 M 条」要说得出
+            # 还剩多少，让用户知道「再来一批」还有没有东西，而不是点了没反应。
+            return {"ok": True, "entries": out, "total": feed_mod.count_entries(**kw)}
+        if mode == "summary":
+            return {"ok": True, "summary": feed_mod.summary()}
+        if mode == "groups":
+            return {"ok": True, "groups": feed_mod.groups(),
+                    "subs": feed_mod.subs(order="manual")}
+        if mode == "tags":
+            return {"ok": True, "tags": feed_mod.tag_list()}
+        if mode == "settings":
+            return {"ok": True, "settings": feed_mod.settings(),
+                    "fulltext": feed_mod.fulltext_enabled()}
+        if mode == "snapshots":
+            return {"ok": True, "snapshots": feed_mod.snapshots()}
+        if mode == "refresh_status":
+            return {"ok": True, "progress": feed_refresh_status()}
+        if mode == "opml":
+            return {"ok": True, "xml": feed_mod.export_opml(
+                include_empty=one("empty", "1") in ("1", "true"))}
+        return {"ok": True, "subs": feed_mod.subs(), "summary": feed_summary(),
+                "reader": feed_mod.summary(), "groups": feed_mod.groups(),
+                "tags": feed_mod.tag_list(), "settings": feed_mod.settings(),
+                "fulltext": feed_mod.fulltext_enabled(),
+                "refresh": feed_refresh_status(),
+                # 撤销是「这一步做错了」唯一的退路，前端要在铺列表时就知道有没有得撤，
+                # 为此多开一次 mode=snapshots 不值得（快照本来就在内存里）。
+                "snapshots": feed_mod.snapshots()}
     except Exception as e:
         return {"ok": False, "msg": "读订阅出错：%s" % str(e)[:140]}
 
 
+def _feed_ids(body, key="ids"):
+    v = body.get(key)
+    if isinstance(v, list):
+        return [str(x) for x in v if str(x).strip()][:500]
+    one = str(body.get("id") or "").strip()
+    return [one] if one else []
+
+
+def _feed_tags(body, key="tags"):
+    v = body.get(key)
+    if isinstance(v, str):
+        v = [x for x in re.split(r"[,，\s]+", v) if x]
+    if not isinstance(v, list):
+        return []
+    return [str(x).strip() for x in v if str(x).strip()][:12]
+
+
 def feed_do(body):
-    """POST /api/feed —— 加 / 删 / 改 / 刷 / 标已读 / 收进书架。"""
+    """POST /api/feed —— 订阅管理 + 阅读动作。界面里的每个按钮都对应这里一个 act。"""
     act = str((body or {}).get("act") or "").strip()
     try:
         if act == "discover":
             return {"ok": True, "cands": feed_mod.discover(str(body.get("url") or ""))}
         if act == "add":
             f = feed_mod.add(str(body.get("url") or ""),
-                             folder=str(body.get("folder") or "")[:40])
+                             folder=str(body.get("folder") or "")[:40],
+                             group=(str(body.get("group"))[:40]
+                                    if body.get("group") is not None else None))
             _FEED_SUMMARY["k"] = None
             return {"ok": True, "feed": f, "subs": feed_mod.subs(),
                     "msg": "已订阅《%s》" % (f.get("title") or f.get("url"))}
         if act == "remove":
-            ok = feed_mod.remove(str(body.get("id") or ""))
+            fid = str(body.get("id") or "")
+            feed_mod.snapshot("退订前")
+            ok = feed_mod.remove(fid)
             _FEED_SUMMARY["k"] = None
             return {"ok": ok, "subs": feed_mod.subs(),
-                    "msg": "已退订" if ok else "没找到这个订阅源"}
+                    "undo": True,
+                    "msg": ("已退订，可以撤销" if ok else "没找到这个订阅源")}
         if act == "mark":
             fid = str(body.get("id") or "")
             if body.get("drop"):
+                feed_mod.snapshot("退订前")
                 feed_mod.remove(fid)
                 title = None
             else:
                 title = body.get("title")
-            if body.get("folder") is not None or title is not None:
+            if (body.get("folder") is not None or title is not None
+                    or body.get("group") is not None):
                 feed_mod.mark(fid, title=(str(title).strip()[:80] if title is not None else None),
                               folder=(str(body.get("folder"))[:40]
-                                      if body.get("folder") is not None else None))
+                                      if body.get("folder") is not None else None),
+                              group=(str(body.get("group"))[:40]
+                                     if body.get("group") is not None else None))
             _FEED_SUMMARY["k"] = None
             return {"ok": True, "subs": feed_mod.subs(), "msg": "已更新"}
         if act == "refresh":
-            r = feed_mod.refresh(feed_id=(str(body.get("id") or "") or None),
-                                 force=bool(body.get("force")))
-            _FEED_SUMMARY["k"] = None
-            msg = "刷新了 %d 个源" % r.get("feeds", 0)
-            if r.get("new"):
-                msg += "，新增 %d 条" % r["new"]
-            errs = r.get("errors") or []
-            if errs:
-                msg += "；%d 个源没抓成（%s）" % (len(errs), errs[0])
-            return {"ok": True, "msg": msg, "new": r.get("new", 0),
-                    "errors": errs, "subs": feed_mod.subs()}
+            scope = {"feed_id": (str(body.get("id") or "") or None),
+                     "group": (str(body.get("group")) if body.get("group") is not None else None),
+                     "force": bool(body.get("force")),
+                     "fulltext": (bool(body["fulltext"]) if "fulltext" in body else None)}
+            scope["label"] = ("这一组" if scope["group"] else
+                              ("这个源" if scope["feed_id"] else "全部"))
+            return feed_refresh_start(scope)
+        if act == "refresh_stop":
+            return feed_refresh_stop()
+        if act == "refresh_status":
+            return {"ok": True, "progress": feed_refresh_status()}
         if act == "read":
-            ids = body.get("ids") or ([body["id"]] if body.get("id") else [])
+            ids = _feed_ids(body)
+            if not ids:
+                return {"ok": False, "msg": "没说要标哪几条"}
             n = feed_mod.mark_read(ids, read=bool(body.get("read", True)))
             _FEED_SUMMARY["k"] = None
-            return {"ok": True, "n": n, "msg": "已标记"}
+            return {"ok": True, "n": n, "msg": "已标 %d 条" % n}
+        if act == "read_all":
+            r = feed_mod.mark_read_all(feed_id=(str(body.get("id") or "") or None),
+                                       group=(str(body.get("group"))
+                                              if body.get("group") is not None else None),
+                                       read=bool(body.get("read", True)),
+                                       older_than=body.get("older_than"))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": r.get("n", 0), "undo_token": r.get("undo_token"),
+                    "msg": "已标记 %d 条，可以撤销" % int(r.get("n") or 0)}
+        if act == "star":
+            ids = _feed_ids(body)
+            if not ids:
+                return {"ok": False, "msg": "没说要收藏哪几条"}
+            n = feed_mod.mark_star(ids, starred=bool(body.get("on", True)))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": n,
+                    "msg": ("已收藏 %d 条" % n) if body.get("on", True) else ("已取消收藏 %d 条" % n)}
+        if act == "star_toggle":
+            out = feed_mod.toggle_star(str(body.get("id") or "")) or {}
+            _FEED_SUMMARY["k"] = None
+            on = bool(out.get("starred"))
+            return {"ok": True, "starred": on,
+                    "msg": "已收藏" if on else "已取消收藏"}
+        if act == "later":
+            ids = _feed_ids(body)
+            if not ids:
+                return {"ok": False, "msg": "没说要放哪几条"}
+            n = feed_mod.mark_later(ids, later=bool(body.get("on", True)))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": n,
+                    "msg": ("已放进稍后读 %d 条" % n) if body.get("on", True)
+                    else ("已从稍后读取出 %d 条" % n)}
+        if act == "later_toggle":
+            out = feed_mod.toggle_later(str(body.get("id") or "")) or {}
+            _FEED_SUMMARY["k"] = None
+            on = bool(out.get("later"))
+            return {"ok": True, "later": on,
+                    "msg": "已放进稍后读" if on else "已从稍后读取出"}
+        if act == "tag_add":
+            ids = _feed_ids(body)
+            tags = _feed_tags(body)
+            if not ids or not tags:
+                return {"ok": False, "msg": "要给哪几条挂哪个标签，没说清"}
+            n = feed_mod.tag_add(ids, tags)
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": n, "tags": feed_mod.tag_list(),
+                    "msg": "已给 %d 条挂上标签" % n}
+        if act == "tag_remove":
+            ids = _feed_ids(body)
+            n = feed_mod.tag_remove(ids, tags=_feed_tags(body) or None)
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "n": n, "tags": feed_mod.tag_list(),
+                    "msg": "已去掉标签"}
+        if act == "tag_set":
+            eid = str(body.get("id") or "")
+            if not eid:
+                return {"ok": False, "msg": "没说要改哪一条"}
+            tags = feed_mod.tag_set(eid, _feed_tags(body))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "tags": tags, "all": feed_mod.tag_list(), "msg": "已改"}
+        if act == "delete":
+            ids = _feed_ids(body)
+            if not ids:
+                return {"ok": False, "msg": "没说要删哪几条"}
+            r = feed_mod.delete_entries(ids, purge_seen=bool(body.get("purge_seen")),
+                                        undo=True)
+            _FEED_SUMMARY["k"] = None
+            n = r.get("n") if isinstance(r, dict) else r
+            return {"ok": True, "n": n, "undo_token": (r or {}).get("undo_token"),
+                    "msg": "已删 %s 条，可以撤销" % (n if n is not None else len(ids))}
+        if act == "undo":
+            r = feed_mod.undo(str(body.get("token") or "") or None)
+            r = r if isinstance(r, dict) else {}
+            _FEED_SUMMARY["k"] = None
+            return {"ok": bool(r.get("ok")), "restored": r,
+                    "subs": feed_mod.subs(), "snapshots": feed_mod.snapshots(),
+                    "msg": ("已撤销%s" % (("：" + r["label"]) if r.get("label") else ""))
+                    if r.get("ok") else "没得撤销了（撤销只记这一次开着程序的几步）"}
+        if act == "snapshots":
+            return {"ok": True, "snapshots": feed_mod.snapshots()}
+        if act == "group_create":
+            return {"ok": True, "groups": feed_mod.group_create(
+                str(body.get("name") or ""))}
+        if act == "group_rename":
+            return {"ok": True, "groups": feed_mod.group_rename(
+                str(body.get("old") or ""), str(body.get("name") or ""))}
+        if act == "group_delete":
+            return {"ok": True, "groups": feed_mod.group_delete(
+                str(body.get("name") or ""), ungroup=not body.get("drop_feeds"))}
+        if act == "reorder":
+            feed_mod.reorder(str(body.get("id") or ""),
+                             index=(int(body["index"]) if body.get("index") is not None else None),
+                             after=(str(body.get("after")) if body.get("after") else None))
+            return {"ok": True, "subs": feed_mod.subs(), "msg": "顺序已改"}
+        if act == "fetch_content":
+            r = feed_mod.fetch_content(entry_ids=_feed_ids(body) or None,
+                                       feed_id=(str(body.get("id") or "") or None),
+                                       group=(str(body.get("group"))
+                                              if body.get("group") is not None else None),
+                                       only_missing=bool(body.get("only_missing", True)),
+                                       limit=max(1, min(200, int(body.get("limit") or 50))))
+            _FEED_SUMMARY["k"] = None
+            r = r if isinstance(r, dict) else {}
+            return {"ok": True, "result": r,
+                    "msg": "补全了 %s 条，%s 条没补上，另有 %s 条本来就有全文"
+                           % (r.get("n", 0), len(r.get("failed") or []),
+                              r.get("skipped", 0))}
+        if act == "fulltext":
+            on = bool(body.get("on"))
+            feed_mod.set_fulltext(on)
+            return {"ok": True, "fulltext": on,
+                    "msg": "以后刷新会回源补全文" if on else "以后刷新只用源给的内容"}
+        if act == "settings":
+            s = feed_mod.set_settings(fulltext=(bool(body["fulltext"]) if "fulltext" in body else None),
+                                      policy=body.get("policy")
+                                      if isinstance(body.get("policy"), dict) else None)
+            return {"ok": True, "settings": s, "msg": "偏好已存"}
+        if act == "prune":
+            feed_mod.snapshot("清理旧条目前")
+            r = feed_mod.prune(days=(int(body["days"]) if body.get("days") else None),
+                               max_entries=(int(body["max_entries"])
+                                            if body.get("max_entries") else None),
+                               keep_starred=bool(body.get("keep_starred", True)),
+                               feed_id=(str(body.get("id") or "") or None),
+                               group=(str(body.get("group"))
+                                      if body.get("group") is not None else None),
+                               dry_run=bool(body.get("dry_run")))
+            _FEED_SUMMARY["k"] = None
+            r = r if isinstance(r, dict) else {}
+            return {"ok": True, "result": r, "undo_token": r.get("undo_token"),
+                    "msg": r.get("note") or
+                           ("预览：会清掉 %s 条" % r.get("removed", 0) if body.get("dry_run")
+                            else "已清掉 %s 条，可以撤销" % r.get("removed", 0))}
+        if act == "opml_write":
+            p = feed_mod.write_opml(path=(str(body.get("path") or "") or None),
+                                    title=str(body.get("title") or "归藏订阅"))
+            return {"ok": bool(p), "path": p or "",
+                    "msg": ("已导出 OPML：%s" % p) if p else "OPML 没写出去"}
+        if act == "opml_import":
+            xml = str(body.get("xml") or "")
+            if not xml.strip():
+                return {"ok": False, "msg": "OPML 内容是空的"}
+            r = feed_mod.import_opml(xml, default_group=str(body.get("group") or ""),
+                                     dry_run=bool(body.get("dry_run")))
+            _FEED_SUMMARY["k"] = None
+            return {"ok": True, "result": r, "subs": feed_mod.subs(),
+                    "msg": ("预览：新订 %s 个，已有 %s 个，失败 %s 个"
+                            % (r.get("added", 0), r.get("existed", 0),
+                               len(r.get("failed") or [])))}
         if act == "shelf":
             eid = str(body.get("id") or "")
             info = feed_mod.to_shelf(eid, OUT_DIR)
@@ -2112,20 +2480,175 @@ def feed_do(body):
         return {"ok": False, "msg": msg}
 
 
-def video_view(q):
-    """GET /api/video?mode=plan|status —— 认链接、报可用性。"""
-    mode = (q.get("mode", ["status"])[0] or "status").strip()
-    if mode == "plan":
+def _vnum(v):
+    """meta 里的数字收成 int，脏值当 0 —— 清单只是展示用，不该因为一个怪值就整栏崩掉。"""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return 0
+    return int(n) if n == n else 0
+
+
+def _video_exports(book_dir):
+    """这本书已经导出过哪些转写文件（exports/ 下）：名字、格式、多大、什么时候。
+
+    列给界面用，让用户看得见「上次导的是哪一份」，而不是每次点导出都盲写一个文件。
+    """
+    holder = os.path.join(book_dir, video_note.EXPORT_DIR)
+    out = []
+    if not os.path.isdir(holder):
+        return out
+    for name in sorted(os.listdir(holder)):
+        p = os.path.join(holder, name)
+        if not os.path.isfile(p):
+            continue
+        ext = os.path.splitext(name)[1].lstrip(".").lower()
         try:
-            return {"ok": True, "plan": video_note.plan(q.get("url", [""])[0])}
-        except Exception as e:
-            return {"ok": False, "msg": str(e)[:180]}
-    return {"ok": True, "available": video_avail()}
+            st = os.stat(p)
+        except OSError:
+            continue
+        out.append({"name": name, "fmt": ext, "bytes": st.st_size,
+                    "at": int(st.st_mtime)})
+    return out
+
+
+def _count_chapter_files(book_dir):
+    """数一数 chapters/ 下有几个 .md —— meta 没记节数时的兜底，和 local_books 同一套数法。"""
+    holder = os.path.join(book_dir, "chapters")
+    if not os.path.isdir(holder):
+        return 0
+    return sum(1 for f in os.listdir(holder) if f.endswith(".md"))
+
+
+def video_books():
+    """转出来的视频书，连各自转写的状态一起回 —— 工作台那一栏靠这个挑书。
+
+    只读 meta.json 里已有的字段，不去解析 transcript.json 那份大文件：清单要的是
+    「有没有带时间戳的转写、多少段、重建过没有」，全文等用户点进某一本书再说。
+    """
+    out = []
+    if not os.path.isdir(OUT_DIR):
+        return out
+    for name in sorted(os.listdir(OUT_DIR)):
+        d = safe_book_dir(name)
+        if not d:
+            continue
+        m = book_meta(name)
+        if (m.get("source") or "") != "video":
+            continue
+        try:
+            upd = float(m.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            upd = 0.0
+        out.append({
+            "id": name,
+            "title": m.get("page_title") or m.get("title") or name,
+            "book_title": m.get("title") or "",
+            "uploader": m.get("uploader") or "", "site": m.get("site") or "",
+            "url": m.get("url") or "", "cover": m.get("cover") or "",
+            "duration": _vnum(m.get("duration")), "words": _vnum(m.get("words")),
+            # 节数优先信 meta；老书 / 中途改过名的书 meta 里可能是 0，而章节就在 chapters/
+            # 下摆着 —— 数一眼目录比在界面上写「0 节」诚实，那会让人以为这本没分出章。
+            "chapters": _vnum(m.get("chapters")) or _count_chapter_files(d),
+            "segments": _vnum(m.get("segments")),
+            "page": _vnum(m.get("page")) or 1, "pages": _vnum(m.get("pages")) or 1,
+            "engine": m.get("asr_engine") or "", "language": m.get("language") or "",
+            "edited": bool(m.get("transcript_edited")),
+            "ai_error": m.get("ai_error") or "",
+            "has_json": os.path.isfile(os.path.join(d, video_note.TRANS_FILE)),
+            "has_txt": os.path.isfile(os.path.join(d, video_note.TRANS_TXT)),
+            "exports": _video_exports(d), "updated_at": upd,
+        })
+    out.sort(key=lambda x: -(x["updated_at"] or 0))
+    return out
+
+
+def video_export_file(book_id, name):
+    """<书>/exports/<name> → (绝对路径, MIME)。名字不对、目录越界都回 None。
+
+    导出物是转写本身（字幕 / 纯文本 / Markdown / JSON），同域打开不会跑脚本，
+    但还是按 board_file 那套白名单来：只认 exports/ 这一层里的文件，
+    扩展名限定在已知的那五种，`..` 和子目录一概进不来。
+    """
+    d = safe_book_dir(book_id)
+    if not d or not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    ext = os.path.splitext(name)[1].lstrip(".").lower()
+    if ext not in video_note.EXPORT_EXT:
+        return None
+    root = os.path.realpath(os.path.join(d, video_note.EXPORT_DIR))
+    p = os.path.realpath(os.path.join(root, name))
+    if not p.startswith(root + os.sep) or not os.path.isfile(p):
+        return None
+    mime = {"srt": "application/x-subrip", "vtt": "text/vtt; charset=utf-8",
+            "txt": "text/plain; charset=utf-8", "md": "text/markdown; charset=utf-8",
+            "json": "application/json; charset=utf-8"}.get(ext) or "application/octet-stream"
+    return p, mime
+
+
+# 一次回给前端的段落上限：一小时的视频约几百段，真整本长文（几小时直播）一次全吐
+# 会把浏览器卡住。切在这个数上，并把「还有多少」如实报出去，界面好写「再来一屏」。
+VIDEO_SEG_PAGE = 1200
+
+
+def video_view(q):
+    """GET /api/video?mode=… —— 认链接 / 报可用性 / 列转出来的书 / 读一本的转写。
+
+    全部只读。抛出去的东西前端只会看到「点了没反应」，所以这里每个分支都自己兜住，
+    把人话放进 msg。
+    """
+    mode = (q.get("mode", ["status"])[0] or "status").strip()
+
+    def one(key, default=""):
+        return (q.get(key, [default])[0] or default)
+
+    try:
+        if mode == "plan":
+            return {"ok": True, "plan": video_note.plan(one("url"))}
+        if mode == "books":
+            return {"ok": True, "books": video_books()}
+        if mode == "transcript":
+            d = safe_book_dir(one("book"))
+            if not d:
+                return {"ok": False, "msg": "没找到这本书，或它不在书库里"}
+            raw_from, raw_to = one("from"), one("to")
+            frm = video_note.parse_stamp(raw_from)
+            to = video_note.parse_stamp(raw_to)
+            if (raw_from.strip() and frm is None) or (raw_to.strip() and to is None):
+                return {"ok": False, "msg": "时间没看懂：写 1:23 这样的，或直接写秒数"}
+            offset = max(0, _vnum(one("offset")))
+            # 前端可以只要一小屏（界面按 240 段一屏铺，一次建两千个节点会卡住滚动）；
+            # 上限仍是 VIDEO_SEG_PAGE，谁也不能靠这个参数把整本几万字一次拖走。
+            limit = _vnum(one("limit")) or VIDEO_SEG_PAGE
+            limit = max(1, min(VIDEO_SEG_PAGE, limit))
+            try:
+                t = video_note.load_transcript(d, keyword=one("q"), start=frm, end=to)
+            except ValueError as e:
+                return {"ok": False, "msg": str(e)[:180]}
+            rows = t.pop("segments", [])
+            # 全文（整本转写能到几十万字）和段落是同一份东西的两种写法，跟着筛出来的段落
+            # 一起发会让人误解一次，还白占一大块带宽。界面上要全文的地方（重建、导出）
+            # 都在后端自己做，这里一条都不发 —— 不弹掉的话上面那句注释就只是愿望。
+            t.pop("text", None)
+            page = rows[offset:offset + limit]
+            t.update({"segments": page, "offset": offset,
+                      "returned": len(page), "has_more": offset + len(page) < len(rows)})
+            return {"ok": True, "transcript": t}
+        return {"ok": True, "available": video_avail()}
+    except Exception as e:
+        msg = str(e)[:180] or "视频这块没读到东西"
+        log(f"--- 视频查询失败（{mode}）：{type(e).__name__}: {msg} ---")
+        return {"ok": False, "msg": msg}
 
 
 def video_do(body):
-    """POST /api/video —— 起一条转笔记任务 / 下 ffmpeg / 查进度。"""
+    """POST /api/video —— 起转写任务 / 下 ffmpeg / 存改过的转写 / 重建 / 导字幕。"""
     act = str((body or {}).get("act") or "start").strip()
+
+    def book_dir():
+        d = safe_book_dir(str((body or {}).get("book") or "").strip())
+        return d or None
+
     try:
         if act == "ffmpeg":
             notes = []
@@ -2138,6 +2661,41 @@ def video_do(body):
         if act == "stop":
             ok, msg = stop_task()
             return {"ok": ok, "msg": msg}
+        if act == "save_transcript":
+            d = book_dir()
+            if not d:
+                return {"ok": False, "msg": "没找到这本书，转写没处存"}
+            segs = (body or {}).get("segments")
+            if not isinstance(segs, (list, tuple)):
+                return {"ok": False, "msg": "转写段落得是一个列表，这次没存"}
+            try:
+                r = video_note.save_transcript(
+                    d, segs, engine=str(body.get("engine") or "") or None,
+                    language=str(body.get("language") or "") or None)
+            except ValueError as e:
+                return {"ok": False, "msg": str(e)[:180]}
+            return {"ok": True, "msg": r["msg"], "saved": r}
+        if act == "rebuild":
+            d = book_dir()
+            if not d:
+                return {"ok": False, "msg": "没找到这本书，重建不了"}
+            try:
+                r = video_note.rebuild_book(d)
+            except ValueError as e:
+                return {"ok": False, "msg": str(e)[:180]}
+            log(f"--- 视频书重建：{os.path.basename(d)} → {r['chapters']} 节 · 旧文件进 {r['backup']} ---")
+            return {"ok": True, "msg": r["msg"], "rebuilt": r}
+        if act == "export":
+            d = book_dir()
+            if not d:
+                return {"ok": False, "msg": "没找到这本书，导不出东西"}
+            fmt = str((body or {}).get("fmt") or "srt").strip().lower()
+            try:
+                r = video_note.export_transcript(d, fmt)
+            except ValueError as e:
+                return {"ok": False, "msg": str(e)[:180]}
+            r["downloads"] = _video_exports(d)
+            return {"ok": True, "msg": "导好了：%(name)s" % r, "export": r}
         url = str(body.get("url") or "").strip()
         if not url:
             return {"ok": False, "msg": "先把视频链接粘进来"}
@@ -2208,7 +2766,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
-        q = parse_qs(u.query)
+        # keep_blank_values：空的 group= / tag= 是「未分组」「不限标签」这一档筛选，
+        # 默认的 parse_qs 会把空值整个丢掉，键就不存在了 —— 前端点「未分组」于是筛成「不限」。
+        q = parse_qs(u.query, keep_blank_values=True)
         path = u.path
 
         if path in ("/", "/index.html"):
@@ -2262,6 +2822,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(feed_view(q))
 
         if path == "/api/video":
+            # mode=file 是「把导出的字幕 / 纯文本给我」这一种问法：它回的是字节，
+            # 不是 JSON，所以不能整包交给 video_view（那只会吐一句「不支持的模式」）。
+            if (q.get("mode", [""])[0] or "") == "file":
+                hit = video_export_file(q.get("book", [""])[0], q.get("name", [""])[0])
+                if not hit:
+                    return self._send(404, "text/plain; charset=utf-8", "没有这个导出文件")
+                fp, mime = hit
+                return self._send(200, mime, open(fp, "rb").read(), {
+                    "Content-Disposition": "attachment; filename*=UTF-8''%s"
+                    % urllib.parse.quote(os.path.basename(fp)),
+                    "Cache-Control": "no-store"})
             return self._json(video_view(q))
 
         if path == "/api/readstat":
@@ -2544,6 +3115,74 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/note_tpl":
             return self._json({"ok": True,
                                "items": book_notes.templates(CACHE_DIR)})
+
+        if path == "/api/board":
+            # 画板：一块板一个 <id>.json，导出物 <id>.svg / <id>.png 同在 boards/ 里。
+            # 三种问法：点名 name= 回文件本身（<img src> 要的字节），点名 id= 回那份画布，
+            # 都不点就回这一页清单。画板是「边看书边画」那一侧的东西，一切落在书目录里。
+            book = q.get("book", [""])[0]
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"}, 404)
+            name = q.get("name", [""])[0]
+            if name:
+                hit = board_file(d, name)
+                if not hit:
+                    return self._send(404, "text/plain; charset=utf-8", "没有这个画板文件")
+                fp, mime = hit
+                head = {"Cache-Control": "public, max-age=300"}
+                if mime.startswith("image/svg"):
+                    # 这份 SVG 是从浏览器接过来的，不是我们生成的：同域打开它就可能跑脚本。
+                    # 界面只把它当 <img> 用（img 里的脚本本来就不执行），这一条是给「有人直接把
+                    # URL 敲进地址栏」兜底的：什么都别许，脚本、表单、跳转一概不许。
+                    head["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"
+                    head["X-Content-Type-Options"] = "nosniff"
+                with open(fp, "rb") as f:
+                    return self._send(200, mime, f.read(), head)
+            bid = q.get("id", [""])[0]
+            if bid:
+                doc = board_mod.load_board(d, bid)
+                if doc is None:
+                    return self._json({"ok": False, "msg": "没有这块画板", "id": bid}, 404)
+                return self._json({"ok": True, "book": book, "board": doc})
+            return self._json({"ok": True, "book": book,
+                               "boards": board_mod.list_boards(d),
+                               "count": board_mod.board_counts(d),
+                               "dir": os.path.join(d, board_mod.BOARD_DIR),
+                               "papers": list(board_mod.PAPERS),
+                               "max_boards": board_mod.MAX_BOARDS})
+
+        if path == "/api/mindmap":
+            # 这本书自己那张可编辑的脑图（mindmap.json 一个书目录一份）。
+            # 布局必须在后端算：四种形态的排布是几十行几何，前端再写一遍就是两份真相，
+            # 存回来的坐标和屏幕上看见的会越用越歪。前端只管画 boxes/edges 和回传编辑。
+            book = q.get("book", [""])[0]
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"}, 404)
+            doc = mindmap.load_map(d)
+            form = q.get("form", [""])[0]
+            mode = q.get("mode", [""])[0]
+            if mode == "svg":
+                # 「存一份图片」要的是能直接发给别人的单文件：后端出 SVG，前端只管下载。
+                try:
+                    return self._json({"ok": True,
+                                       "svg": mindmap.render_svg(doc, form or None),
+                                       "form": (form or doc["form"])})
+                except Exception as e:
+                    return self._json({"ok": False, "msg": "导图没画出来：%s" % str(e)[:140]})
+            if mode == "md":
+                return self._json({"ok": True, "md": mindmap.to_markdown(doc)})
+            try:
+                laid = mindmap.layout(doc, form or None)
+            except Exception as e:
+                return self._json({"ok": False, "msg": "布局算不出来：%s" % str(e)[:140]})
+            return self._json({"ok": True, "book": book, "doc": doc, "layout": laid,
+                               "forms": [{"key": k, "name": n} for k, n in mindmap.FORMS],
+                               "limits": {"max_nodes": mindmap.MAX_NODES,
+                                          "max_depth": mindmap.MAX_DEPTH,
+                                          "max_links": mindmap.MAX_LINKS,
+                                          "max_text": mindmap.MAX_TEXT}})
 
         return self._send(404, "text/plain; charset=utf-8", "not found")
 
@@ -2901,6 +3540,110 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True,
                                    "body": book_notes.apply_template(tpl, use)})
             return self._json({"ok": False, "msg": "没说要干什么：存、删还是套"})
+
+        if u.path == "/api/board":
+            # 画板只有一条路：一切落在 <书目录>/boards/ 里，界面上画的东西随时能存回去。
+            book = str((body or {}).get("book") or "")
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书，画板没地方放"})
+            act = str((body or {}).get("act") or "")
+            if act == "new":
+                # id 由后端发。让前端自己拼时间戳会在同一秒新建两块时撞号 ——
+                # 撞了就是后画的那块把前一块覆盖掉，那种丢失用户根本看不见。
+                return self._json({"ok": True,
+                                   "board": board_mod.empty(
+                                       "b" + uuid.uuid4().hex[:12],
+                                       str((body or {}).get("title") or ""))})
+            if act == "save":
+                doc = (body or {}).get("doc")
+                if not isinstance(doc, dict):
+                    return self._json({"ok": False, "msg": "画板内容看起来不对，没有保存"})
+                res = board_mod.save_board(d, doc)
+                if res.get("ok"):
+                    res["boards"] = board_mod.list_boards(d)
+                return self._json(res)
+            if act == "delete":
+                res = board_mod.delete_board(d, str((body or {}).get("id") or ""),
+                                             purge=bool((body or {}).get("purge", True)))
+                if res.get("ok"):
+                    res["boards"] = board_mod.list_boards(d)
+                return self._json(res)
+            if act == "export":
+                # 收下浏览器导出的 SVG / PNG。类型由 board.save_export 自己验（看内容不声明），
+                # 所以这里不必再判一遍 —— 它拒绝的时候磁盘上不会留下半个文件。
+                return self._json(board_mod.save_export(
+                    d, str((body or {}).get("id") or ""),
+                    str((body or {}).get("fmt") or ""), (body or {}).get("data")))
+            if act == "md":
+                # 「并进笔记」：把这块板写成一条笔记条目的 Markdown 给前端。
+                # 图必须先导出来才谈得上进笔记，否则 notes.md 里就是一条点开是坏图的链接。
+                doc = board_mod.load_board(d, str((body or {}).get("id") or ""))
+                if doc is None:
+                    return self._json({"ok": False, "msg": "没有这块画板"})
+                md = board_mod.to_markdown(doc, base_dir=d)
+                # has_image 以磁盘为准，不认信封里的标记：那两面 flag 只有 list_boards 会补，
+                # load_board 回来的是原信封，照它报就会「图明明在，界面却说没有」。
+                folder = os.path.join(d, board_mod.BOARD_DIR)
+                has_image = any(os.path.exists(os.path.join(folder, doc["id"] + ext))
+                                for ext in (board_mod.PNG_EXT, board_mod.SVG_EXT))
+                return self._json({"ok": True, "md": md, "id": doc["id"],
+                                   "has_image": has_image})
+            return self._json({"ok": False, "msg": "没说要干什么：新建、存、删、导出还是转笔记"})
+
+        if u.path == "/api/mindmap":
+            book = str((body or {}).get("book") or "")
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书，图没地方放"})
+            act = str((body or {}).get("act") or "")
+            if act == "from_notes":
+                # 从这本书的笔记生成一棵树，只「给」不「存」：界面上确认了再走 save。
+                # 直接盖掉的话，用户手动画的那张会在点错一下之后没了 —— 这种丢失不该由后端决定。
+                cut = str((body or {}).get("cut") or "tag")
+                if cut not in ("tag", "chapter", "entry"):
+                    cut = "tag"
+                meta = book_meta(book)
+                try:
+                    tree = book_notes.note_tree(
+                        book_notes.load_notes(d), meta=meta,
+                        titles=book_notes.chapter_titles(d),
+                        book_label=meta.get("title") or book, cut=cut)
+                    doc = mindmap.from_note_tree(tree, meta.get("title") or book)
+                except Exception as e:
+                    return self._json({"ok": False, "msg": "笔记没能变成图：%s" % str(e)[:140]})
+                has = os.path.isfile(mindmap.path_of(d))
+                return self._json({"ok": True, "doc": doc,
+                                   "layout": mindmap.layout(doc),
+                                   "has_existing": has,
+                                   "msg": ("这本书已经有一张图了，换进去会盖掉它"
+                                           if has else "已从笔记生成，改完记得存")})
+            if act == "layout":
+                # 拖完一个框只想看新坐标，不想惊动盘上那份：布局是纯函数，在这里算完还给前端。
+                # 前端绝不自己再排一遍 —— 两套几何一漂，存回去的坐标和屏幕上看见的就是两回事。
+                doc = (body or {}).get("doc")
+                if not isinstance(doc, dict):
+                    return self._json({"ok": False, "msg": "这张图看起来不对，算不出布局"})
+                form = str((body or {}).get("form") or "")
+                try:
+                    return self._json({"ok": True, "layout": mindmap.layout(doc, form or None)})
+                except Exception as e:
+                    return self._json({"ok": False, "msg": "布局算不出来：%s" % str(e)[:140]})
+            doc = (body or {}).get("doc")
+            if not isinstance(doc, dict):
+                return self._json({"ok": False, "msg": "这张图看起来不对，没有保存"})
+            try:
+                res = mindmap.save_map(d, doc)
+                saved = mindmap.load_map(d)
+                res["doc"] = saved
+                res["layout"] = mindmap.layout(saved)
+            except Exception as e:
+                return self._json({"ok": False, "msg": "这张图存不下去：%s" % str(e)[:140]})
+            if not res.get("ok"):
+                res["msg"] = res.get("error") or "这张图没存进去"
+            else:
+                res["msg"] = "导图已存好（%d 个节点）" % res.get("nodes", 0)
+            return self._json(res)
 
         return self._send(404, "text/plain; charset=utf-8", "not found")
 

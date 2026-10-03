@@ -43,6 +43,9 @@ run() {  # run <名字> <命令…>
 # ── 静态：不需要浏览器，也不需要起服务 ──────────────────────────
 run "Python 语法" "$PY" -m compileall -q -x '(/\.venv/|/dist/|/cache/|/output/|/node_modules/|/安装包/)' .
 run "内联 JS 语法" "$PY" tests/check_inline_js.py
+# 语法过得了不代表点得动：这一条查「调一个从没写出来的函数」，
+# 那类 bug 在界面上的表现就是「按下去没反应」，浏览器不打开永远看不出来。
+run "内联 JS 引用体检" "$PY" tests/check_js_refs.py
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
@@ -55,6 +58,10 @@ run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.p
 run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
+# 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
+# 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
+run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
+run "画板（存得下 / 读得出 / 导得走 / 删得掉 / 不越界）" "$PY" tests/check_board.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
@@ -107,8 +114,19 @@ fresh_shelf; run "重新取书取证" "$PY" tests/check_refetch.py "$BASE"
 fresh_shelf; run "视口回归" "$PY" tests/check_viewports.py "$BASE"
 fresh_shelf; run "书架交互" "$PY" tests/check_shelf.py "$BASE"
 fresh_shelf; run "笔记编辑器" "$PY" tests/check_notes_editor.py "$BASE"
+fresh_shelf; run "脑图与画板" "$PY" tests/check_board_map_ui.py "$BASE"
 fresh_shelf; run "阅读器续读与大纲" "$PY" tests/check_reader_flow.py "$BASE"
 fresh_shelf; run "订阅与视频两屏" "$PY" tests/check_media_views.py "$BASE"
+# 转写工作台那一屏最容易出的事故是「戴着筛子保存」—— 界面只看得见筛出来的那几段，
+# 写盘用的却是整本。这条只有真机点得出来，所以这一套一半是 HTTP 契约、一半是 Playwright，
+# 两边都去磁盘上数段落。
+fresh_shelf; run "转写工作台（筛 / 存 / 重建 / 导出 / 真机）" "$PY" tests/check_video_workbench.py "$BASE"
+# MCP 那一层没有界面上的护栏：agent 只会「只发自己改的那几段」，而后端三条写口全是整本覆盖。
+# 这一套把 45 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
+# 护栏钉成可失败的检查 —— 它要 node，所以归真机段（本机没 node 时明确 SKIP，不装绿）。
+fresh_shelf; run "MCP 工具清单与三条新线" "$PY" tests/check_mcp_tools.py "$BASE"
+# 订阅那一屏自己起服务、自己铺夹具源（订源要真的订、真的抓），所以不吃上面那份沙盒。
+run "订阅阅读器全流程" "$PY" tests/check_feed_ui.py
 run "首启页" "$PY" tests/check_onboarding.py
 fresh_shelf; run "异常兜底" "$PY" tests/test_server_fallback.py
 

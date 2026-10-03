@@ -243,6 +243,26 @@ def main():
                   const ta = document.querySelector('#selpop .selnote textarea');
                   return ta ? ta.value : '';
                 }""") == "这一句是要点，回头写进卡片。")
+            # 草稿没存就滚一下：正文一滚原本会无条件把小条收走，写到一半的那句当场没了。
+            # 现在认「正在小条里输入/鼠标还压在小条上」= 别收（selPopBusy）。
+            page.evaluate("() => document.querySelector('#selpop .selnote textarea').focus()")
+            # 这时候正文来一发 scroll（宽窗是正文自己滚、窄窗是整页滚，两种都发一遍）。
+            # 要验的是「滚一下就把草稿收走」那个无条件 selPopHide，跟滚没滚得动无关。
+            page.evaluate("""() => {
+              const sc = document.querySelector('#rdScroll');
+              if (sc) { sc.scrollTop = sc.scrollTop + 220; sc.dispatchEvent(new Event('scroll')); }
+              (document.scrollingElement || document.documentElement)
+                .dispatchEvent(new Event('scroll'));
+            }""")
+            page.wait_for_timeout(400)
+            kept = page.evaluate("""() => {
+              const el = document.getElementById('selpop');
+              const ta = el && el.querySelector('.selnote textarea');
+              return {open: !!(el && el.classList.contains('show')),
+                      val: ta ? ta.value : ''};
+            }""")
+            chk("写想法：滚一下正文不会把写了一半的那句收走",
+                kept["open"] and kept["val"] == "这一句是要点，回头写进卡片。", kept)
             page.evaluate("() => selPopHide()")
         else:
             chk("写想法：小条都没开，后面几条存盘断言一并记失败", False, "no popup")
@@ -544,31 +564,34 @@ def main():
             (s2.get("counts") or {}).get("entries") == 2, s2.get("counts"))
 
         # ── 思维导图 ─────────────────────────────────────
+        # #153 把这一层从「只读一张 SVG」换成了可编辑画布：框是 div、边是 svg，
+        # 旧断言里的 ntMapImg / ntMapCut / 打开就自动落盘的 mindmap.svg 都不存在了。
+        # 加节点、连线、四种形态这些动作归 tests/check_board_map_ui.py 精查，
+        # 这里只守笔记栏这条入口：开得出画布、后端仍然出得了图、开一层不许动盘。
         settled()
+        map_files = lambda: sorted(p.name for p in BDir.glob("mindmap.*"))  # noqa: E731
+        before = map_files()
         page.evaluate("() => document.getElementById('ntMap').click()")
         page.wait_for_timeout(1500)
         ms = layer("ntMapLayer")
         chk("导图：浮层开出来了", ms and ms["open"] and ms["vis"], ms)
-        img = page.evaluate("""() => {
-          const i = document.getElementById('ntMapImg');
-          return {src: i.src || '', ok: i.complete && i.naturalWidth > 40,
-                  info: document.getElementById('ntMapInfo').textContent};
-        }""")
-        chk("导图：SVG 画出来了（blob 且真有尺寸）",
-            img["src"].startswith("blob:") and img["ok"], img)
-        chk("导图：顶上报了节点数", "节点" in img["info"], img["info"])
+        canvas = page.evaluate("""() => ({
+          forms: [...document.querySelectorAll('#mmForm button')].map(b => b.dataset.f),
+          box: !!document.getElementById('mmNodes'),
+          edges: !!document.getElementById('mmEdges'),
+          dl: !!document.getElementById('ntMapDl'),
+          info: document.getElementById('ntMapInfo').textContent,
+        })""")
+        chk("导图：开出来的是能编辑的那张画布（四种形态 + 框层 + 边层 + 存 SVG 的钮）",
+            len(canvas["forms"]) == 4 and canvas["box"] and canvas["edges"]
+            and canvas["dl"], canvas)
+        svg = get("/api/mindmap?book=" + BOOK + "&mode=svg")
+        chk("导图：后端那份 SVG 是能看的图（有头、画了东西、没 NaN）",
+            svg.get("ok") and "<svg" in (svg.get("svg") or "")
+            and "NaN" not in (svg.get("svg") or ""), str(svg)[:160])
         page.screenshot(path=SHOTS[2])
-        chk("导图：书文件夹里也存了一份", (BDir / "mindmap.svg").exists())
-        page.evaluate("() => document.querySelector('#ntMapCut button[data-v=chapter]').click()")
-        page.wait_for_timeout(1400)
-        img2 = page.evaluate("""() => {
-          const i = document.getElementById('ntMapImg');
-          return {src: i.src || '', ok: i.complete && i.naturalWidth > 40,
-                  on: document.querySelector('#ntMapCut button.on').dataset.v,
-                  info: document.getElementById('ntMapInfo').textContent};
-        }""")
-        chk("导图：切「按章节」重画了一张",
-            img2["on"] == "chapter" and img2["ok"] and img2["src"] != img["src"], img2)
+        chk("导图：光打开这一层不该往书文件夹里写东西（存不存由用户那一拍决定）",
+            map_files() == before, (before, map_files()))
         page.evaluate("() => document.getElementById('ntMapClose').click()")
         page.wait_for_timeout(220)
         chk("导图：关掉后浮层收干净",

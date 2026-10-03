@@ -153,20 +153,41 @@ with sync_playwright() as pw:
 
     # ── 视频转笔记那一屏 ──
     page.click('#nav button[data-v="video"]')
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1400)
     flush(page)
     chk("视频：pane 可见", page.evaluate(
         "() => { const p = document.querySelector('.vpane[data-pane=\"video\"]');"
         " return !!p && !p.hidden; }"))
-    for sel, what in (("#vTa", "输入框"), ("#vPlan", "识别"), ("#vStart", "开始转笔记"),
-                      ("#vCap", "能力灯"), ("#vProg", "进度条"), ("#vShelf", "转出来的书")):
+    for sel, what in (("#vTa", "链接输入框"), ("#vPlan", "识别"), ("#vStart", "开始转笔记"),
+                      ("#vCap", "能力灯"), ("#vProg", "进度条"), ("#vShelf", "转出来的书"),
+                      ("#vWrap", "两栏工作台"), ("#vPick", "看哪本"), ("#vQ", "关键词筛"),
+                      ("#vFrom", "起点"), ("#vTo", "终点"), ("#vRows", "段落容器"),
+                      ("#vSave", "保存转写"), ("#vRebuild", "重建章节"),
+                      ("#vExport", "导出"), ("#vCntT", "段落计数"), ("#vFoldNav", "收起左栏")):
         chk(f"视频：「{what}」在", page.locator(f'[data-pane="video"] {sel}').count() == 1)
     lights = page.evaluate(
         "() => [...document.querySelectorAll('#vCap .it')].map(e => e.className)")
     chk("视频：四盏灯都亮出来了（就绪/缺失各归各位）", len(lights) == 4, lights)
     chk("视频：每盏灯非 ok 即 no", all(("ok" in c) ^ ("no" in c) for c in lights), lights)
-    chk("视频：空态说清转完会多一本什么书", page.evaluate(
-        "() => (document.querySelector('#vShelf').innerText || '').includes('还没有转出来的书')"))
+    # 沙盒里 seeded 了一本转出来的书（tests/seed.py 的 video_SE_LECTURE），
+    # 所以这一栏不该再是空态；空态那条话在 check_video_workbench.py 里另有验法。
+    rows = page.evaluate("() => document.querySelectorAll('#vShelf .vtbook').length")
+    chk("视频：左栏把转出来的书列出来了（不再整栏空着）", rows >= 1, rows)
+    chk("视频：栏头报了本数", page.evaluate(
+        "(() => { const t = (document.querySelector('#vShelfHead').textContent || '');"
+        " return /一共 \\d+ 本/.test(t); })()"),
+        page.evaluate("() => document.querySelector('#vShelfHead').textContent"))
+    lamps = page.evaluate(
+        "() => [...document.querySelectorAll('#vShelf .vtbook .lt i')].map(e => e.textContent)")
+    chk("视频：每本书挂着三盏灯（时间戳 / 手改 / 导过几份）",
+        len(lamps) >= 3 and any('时间戳' in x for x in lamps)
+        and any('手改' in x for x in lamps) and any('导' in x for x in lamps), lamps)
+    chk("视频：没挑书时段落是空的、工具条按住了", page.evaluate(
+        "() => document.querySelectorAll('#vRows .vtrow').length === 0"
+        " && document.querySelector('#vSave').disabled"
+        " && document.querySelector('#vRebuild').disabled"))
+    chk("视频：没挑书时计数说「还没挑书」", page.evaluate(
+        "() => (document.querySelector('#vCntT').textContent || '').includes('还没挑书')"))
     chk("视频：没贴链接时提示贴链接", page.evaluate(
         "() => (document.querySelector('#vCnt').innerText || '').includes('把视频链接贴进来')"))
 
