@@ -147,9 +147,13 @@ with sync_playwright() as pw:
     # 居中是相对舞台量的，不是页面中线 —— 左边还有目录栏时两者差着一截。
     chk("叠卡：正面那张在舞台正中", front and abs(front["cx"] - front["sx"]) < 8, front)
     states = page.evaluate("""() => [...document.querySelectorAll('.sstage > .wcard')]
-        .map(c => ['s0','s1','s2','s3','sgone','saway'].find(k => c.classList.contains(k)) || '?')""")
-    chk("叠卡：只有正面一张能点", states.count("s0") == 1, states)
-    chk("叠卡：后面按距离排开", states[:4] == ["s0", "s1", "s2", "s3"], states[:4])
+        .map(c => ['s0','s1','s2','s3','b1','b2','b3','sgone','saway']
+          .find(k => c.classList.contains(k)) || '?')""")
+    chk("叠卡：只有正面一张能翻", states.count("s0") == 1, states)
+    chk("叠卡：右边按距离排开", states[:4] == ["s0", "s1", "s2", "s3"], states[:4])
+    # 正面就是第一本时，左手边没有「翻过去的」，那几张槽位必须空着 ——
+    # 留着半张卡会让人以为还能往后翻，而按 ← 其实什么都没发生。
+    chk("叠卡：最前面时左边不留幽灵", not any(s in states for s in ("b1", "b2", "b3", "sgone")), states)
     xs = [r["x"] for r in stack[:4]]
     chk("叠卡：越靠后越往右", all(b > a for a, b in zip(xs, xs[1:])), xs)
     pos = page.text_content("#stPos")
@@ -159,73 +163,121 @@ with sync_playwright() as pw:
     chk("叠卡：样式记在本机", page.evaluate("() => localStorage.getItem('guizang_shelf_mode_v1')") == "stack")
     page.screenshot(path=SHOTS[1])
 
-    # ── 4. 键盘 ← / → 翻书，带折叠动效 ───────────────────────
-    before = page.evaluate("() => [...document.querySelectorAll('.sstage > .wcard')].findIndex(c => c.classList.contains('s0'))")
+    # ── 4. 键盘 ← / → 翻书：翻过去之后左手边也要有书 ──────────
+    def front_idx():
+        return page.evaluate(
+            "() => [...document.querySelectorAll('.sstage > .wcard')]"
+            ".findIndex(c => c.classList.contains('s0'))")
+
+    before = front_idx()
     page.keyboard.press("ArrowRight")
     page.wait_for_timeout(120)
-    mid = page.evaluate("""() => {
-      const cs = [...document.querySelectorAll('.sstage > .wcard')];
-      const f = cs.findIndex(c => c.classList.contains('s0'));
-      const g = cs.find(c => c.classList.contains('sgone'));
-      return {at: f, goneX: g ? Math.round(g.getBoundingClientRect().x) : null,
-              tf: g ? getComputedStyle(g).transform : ''};
-    }""")
-    chk("→：翻到下一本", mid["at"] == before + 1, (before, mid))
-    # 折走那一下是 transition，headless 的时钟不推进就还停在起点；推到底再看。
+    chk("→：翻到下一本", front_idx() == before + 1, before)
+    # 折叠那一下是 transition，headless 的时钟不推进就还停在起点；推到底再看。
     flush()
+    # 用户报的正是这一步：翻过去之后左手边是空的（旧版把 d<0 全写成 opacity:0 的
+    # sgone），于是叠卡只能朝一个方向翻，往回只能靠 ← 或页头的箭头。
     gone = page.evaluate("""() => {
-      const g = document.querySelector('.sstage > .wcard.sgone');
+      const g = document.querySelector('.sstage > .wcard.b1');
       if (!g) return null;
       const st = document.querySelector('.sstage').getBoundingClientRect();
       const r = g.getBoundingClientRect();
-      return {x: Math.round(r.x + r.width / 2), left: Math.round(st.x),
-              tf: getComputedStyle(g).transform};
+      return {x: Math.round(r.x + r.width / 2), mid: Math.round(st.x + st.width / 2),
+              op: +getComputedStyle(g).opacity, pe: getComputedStyle(g).pointerEvents,
+              hid: g.getAttribute('aria-hidden'), tf: getComputedStyle(g).transform};
     }""")
-    chk("→：上一本折到左边去了", gone and gone["x"] < gone["left"], gone)
+    chk("→：刚翻走的那本摊在左手边", bool(gone) and gone["op"] > .5, gone)
+    chk("→：左边那张在舞台中线以左", bool(gone) and gone["x"] < gone["mid"], gone)
+    chk("→：左边那张能点、读屏也读得到",
+        bool(gone) and gone["pe"] == "auto" and gone["hid"] == "false", gone)
     chk("→：带旋转（折叠屏那一下）", bool(gone) and "matrix3d" in gone["tf"], gone)
-    page.keyboard.press("ArrowLeft")
+
+    page.keyboard.press("ArrowRight")
     page.wait_for_timeout(700)
-    back = page.evaluate("() => [...document.querySelectorAll('.sstage > .wcard')].findIndex(c => c.classList.contains('s0'))")
-    chk("←：翻回来", back == before, (before, back))
+    flush()
+    chk("→→：连着翻两本", front_idx() == before + 2, before)
+    # 左右对称：同一档距离的两张，到舞台中线的水平距离应该一样（±6px 内算对称）。
+    far = page.evaluate("""() => {
+      const st = document.querySelector('.sstage').getBoundingClientRect();
+      const m = st.x + st.width / 2;
+      const q = k => {
+        const c = document.querySelector('.sstage > .wcard.' + k);
+        if (!c) return null;
+        const r = c.getBoundingClientRect();
+        return {dx: Math.round(r.x + r.width / 2 - m), op: +getComputedStyle(c).opacity};
+      };
+      return {b1: q('b1'), s1: q('s1'), b2: q('b2'), s2: q('s2')};
+    }""")
+    chk("叠卡：两侧都有第二、第三张",
+        all(far[k] for k in ("b1", "s1", "b2", "s2")) and far["b2"]["op"] > .3, far)
+    chk("叠卡：左右镜像摊开",
+        all(far[k] and far[j] and abs(far[k]["dx"] + far[j]["dx"]) <= 6
+            for k, j in (("b1", "s1"), ("b2", "s2"))), far)
+    chk("叠卡：左右同样远近的档亮度一致",
+        all(far[k] and far[j] and abs(far[k]["op"] - far[j]["op"]) < .05
+            for k, j in (("b1", "s1"), ("b2", "s2"))), far)
+
+    # 上面为了量对称多翻了一本，回来也得翻两次才回到起点。
+    for _ in range(2):
+        page.keyboard.press("ArrowLeft")
+        page.wait_for_timeout(420)
+    chk("←：翻回来", front_idx() == before, (before, front_idx()))
     page.keyboard.press("ArrowLeft")
     page.wait_for_timeout(400)
-    chk("←：已经在最前面就不越界", page.evaluate(
-        "() => [...document.querySelectorAll('.sstage > .wcard')].findIndex(c => c.classList.contains('s0'))") == 0)
+    chk("←：已经在最前面就不越界", front_idx() == 0)
 
+    # 停在中间再看点击范围：光标在第 0 本时左边本来就没有卡，那样测不出「左侧能不能点」。
+    for _ in range(3):
+        page.keyboard.press("ArrowRight")
+        page.wait_for_timeout(320)
+    flush()
     pe = page.evaluate("""() => {
       const cs = [...document.querySelectorAll('.sstage > .wcard')];
-      const k = c => ['s0','s1','s2','s3','sgone','saway'].find(x => c.classList.contains(x));
+      const k = c => ['s0','s1','s2','s3','b1','b2','b3','sgone','saway'].find(x => c.classList.contains(x));
       const m = {};
       cs.forEach(c => { const s = k(c); if (m[s] === undefined) m[s] = getComputedStyle(c).pointerEvents; });
       return m;
     }""")
-    chk("叠卡：看得见的那几张都能点", all(pe.get(x) == "auto" for x in ["s0", "s1", "s2", "s3"]), pe)
-    chk("叠卡：看不见的那几张不接点击", pe.get("saway") != "auto", pe)
+    chk("叠卡：两侧摊开的都能点",
+        "s0" in pe and "b1" in pe and all(pe[x] == "auto" for x in pe
+                                          if x in ("s0", "s1", "s2", "s3", "b1", "b2", "b3")), pe)
+    chk("叠卡：看不见的那几张不接点击",
+        any(x in pe for x in ("sgone", "saway"))
+        and all(pe.get(x) != "auto" for x in ("sgone", "saway")), pe)
 
-    # 点扇形里靠右的那几张：直接跳到它，不必一下一下按。
-    # 扇形是层叠的，矩形几何中心往往压在后面那张的上面 —— 用 elementFromPoint
+    # 点扇形里两侧那几张：直接跳到它，不必一下一下按。
+    # 扇形是层叠的，矩形几何中心往往压在别的卡上面 —— 用 elementFromPoint
     # 在卡面上扫一个「确实归它」的点，否则测的是「点到了 s1」而不是「点到了 s2」。
-    def click_state(cls):
-        xy = page.evaluate("""(k) => {
+    # 往哪边扫由卡片在左还是在右决定：右半边那张要从外侧往里找，反了就一直落空。
+    def click_state(cls, outer_left=False):
+        xy = page.evaluate("""(a) => {
+          const [k, left] = a;
           const c = document.querySelector('.sstage > .wcard.' + k);
           if (!c) return null;
           const r = c.getBoundingClientRect();
           for (let fy = .18; fy <= .9; fy += .12)
-            for (let fx = .85; fx >= .15; fx -= .08) {
+            for (let i = 0; i < 10; i++) {
+              const fx = left ? .15 + i * .08 : .85 - i * .08;
               const x = Math.round(r.x + r.width * fx), y = Math.round(r.y + r.height * fy);
               const e = document.elementFromPoint(x, y);
               if (e && c.contains(e)) return [x, y];
             }
           return null;
-        }""", cls)
+        }""", [cls, outer_left])
         if not xy:
             return False
         page.mouse.click(xy[0], xy[1])
         page.wait_for_timeout(520)
         return True
 
-    chk("点右侧第二张：跳过去", click_state("s2") and page.evaluate(
-        "() => [...document.querySelectorAll('.sstage > .wcard')].findIndex(c => c.classList.contains('s0'))") == 2)
+    def idx_of(cls):
+        return page.evaluate("""(k) => [...document.querySelectorAll('.sstage > .wcard')]
+            .findIndex(c => c.classList.contains(k))""", cls)
+
+    tgt = idx_of("s2")
+    chk("点右侧那张：跳过去", click_state("s2") and front_idx() == tgt, (tgt, front_idx()))
+    tgt = idx_of("b1")
+    chk("点左侧那张：翻回去", click_state("b1", True) and front_idx() == tgt, (tgt, front_idx()))
 
     # 正面那张点封面：还是摊动作条（和瀑布一面同一套规矩）
     xy = page.evaluate("""() => {

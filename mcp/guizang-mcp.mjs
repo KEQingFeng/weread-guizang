@@ -158,6 +158,148 @@ async function postFeed(body, { ms = 120000 } = {}) {
   return req("/api/feed", { method: "POST", body, ms });
 }
 
+/** 书名 / 编号 → 本地书库里的一本书。
+ *  画板、思维导图、视频转写这三条线全都按本地目录名走（后端 safe_book_dir 只认
+ *  [A-Za-z0-9_-]+），所以这里必须先把书名换成 id，绝不能把书名原样发上去 ——
+ *  发「《原则》」后端只会回「没找到这本书」，用户看到的是工具报错而不是拼写问题。 */
+async function localBook(key) {
+  const s = await getState();
+  const b = pick(s.books || [], key);
+  if (!b) {
+    throw new Error(`本地书架上没有匹配「${String(key || "").trim() || "（没给书名）"}」的书。先用 shelf_list 看有哪些书。`);
+  }
+  return b;
+}
+
+/** 秒 → 字幕式时间码。给 agent 看的，用来知道这一句在视频的哪一秒。 */
+function cue(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return "--:--";
+  const s = Math.floor(n), p = x => String(x).padStart(2, "0");
+  return [p(Math.floor(s / 3600)), p(Math.floor(s % 3600 / 60)), p(s % 60)].join(":");
+}
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 读一份 JSON，但把「404 也带着人话」那种响应收下。
+ *  req() 见到非 2xx 直接抛「HTTP 404 /api/board?…」，而后端在 404 的信封里写的
+ *  是「没有这块画板」—— 那才是用户该看见的一句，别让状态码把它盖掉。 */
+async function reqSoft(path, { ms = 30000 } = {}) {
+  const r = await fetch(API + path, { signal: AbortSignal.timeout(ms) }).catch(() => null);
+  if (!r) return { ok: false, msg: "本机服务没应答（归藏是不是没开着？）" };
+  try {
+    return await r.json();
+  } catch {
+    return { ok: false, msg: `服务回了个看不懂的响应（HTTP ${r.status}）` };
+  }
+}
+
+function countNodes(nodes) {
+  let n = 0;
+  (function walk(list) {
+    for (const x of list || []) { n++; walk(x.children); }
+  })(nodes || []);
+  return n;
+}
+
+/** 导图树 → 缩进大纲。一张图最多 400 个节点，全列也就几百行，但一次工具回复塞进
+ *  上千行会把别的内容挤出上下文，所以留个天花板：超了只给前若干行并说清还剩多少。 */
+function outlineTree(nodes, maxLines = 220) {
+  const lines = [];
+  let total = 0;
+  (function walk(list, depth) {
+    for (const x of list || []) {
+      total++;
+      if (lines.length >= maxLines) return;
+      const t = String(x.text || "").trim() || "（空框）";
+      lines.push(`${"  ".repeat(depth)}- ${t}${x.fold ? "（折着）" : ""}${x.note ? "　※有备注" : ""}`);
+      walk(x.children, depth + 1);
+    }
+  })(nodes || [], 0);
+  if (total > lines.length) lines.push(`……还有 ${total - lines.length} 个框没列出来（用 as=json 能拿到全部）。`);
+  return lines;
+}
+
+const CUT_NAME = { tag: "按标签分叉", chapter: "按章节分叉", entry: "按笔记条目分叉" };
+
+/** 只改几段的存法：把整本读回来、在内存里改、再整本发回去。
+ *
+ *  后端 save_transcript 的语义是「整本覆盖」—— 那对界面是对的（编辑器手上就拿着整本），
+ *  对 agent 却是个坑：它手上只有自己改的那两句，照语义发回去，整本几千段就抹成两段了。
+ *  所以这条工具把读-改-写放在这里做完，调用方只描述改动。
+ *  对不上的 id 只报不猜：改错一段比一段都不改更糟。 */
+async function patchTranscript(bookId, { edits, drop, add }, notes) {
+  // 一屏 1000 段、最多 25 屏：后端的单页上限是 1200，而一本转写最多 2 万段 ——
+  // 取这两个数的下界附近，保证「读不全就写坏」这件事在这里不可能发生。
+  const PAGE = 1000, MAX_TRIPS = 25;
+  const rows = [];
+  for (let guard = 0; guard < MAX_TRIPS; guard++) {
+    const qs = new URLSearchParams({ mode: "transcript", book: bookId,
+      offset: String(rows.length), limit: String(PAGE) });
+    const d = await req(`/api/video?${qs}`, { ms: 60000 });
+    if (!d.ok) throw new Error(d.msg || "读不出整本转写，这次没动盘上那一份");
+    const t = d.transcript || {};
+    const page = t.segments || [];
+    rows.push(...page);
+    if (!t.has_more || !page.length) break;      // 空页再要一次还是空，原地打转没有意义
+  }
+  if (!rows.length) throw new Error("这本书一段转写都读不出来：先确认它有转写（video_books 里会写「没有转写文件」）");
+
+  const killed = new Set((drop || []).map(x => String(x && x.id !== undefined && x.id !== null ? x.id : x)));
+  let left = rows.filter(x => !killed.has(String(x.id)));
+  const gone = rows.length - left.length;
+  if (killed.size && !gone) notes.push("要删的那些 id 在这本里都没找到，一段也没删");
+
+  const byId = new Map(left.map(x => [String(x.id), x]));
+  const miss = [];
+  let changed = 0;
+  for (const e of (edits || [])) {
+    const hit = e ? byId.get(String(e.id)) : null;
+    if (!hit) { miss.push(String(e && e.id)); continue; }
+    if (e.text !== undefined && e.text !== null) hit.text = String(e.text);
+    if (e.speaker !== undefined && e.speaker !== null) hit.speaker = String(e.speaker);
+    changed++;
+  }
+  for (const a of (add || [])) {
+    if (!a || !String(a.text || "").trim()) continue;
+    const seg = { id: "n" + Math.random().toString(36).slice(2, 9),
+                  text: String(a.text), speaker: String(a.speaker || "").trim() };
+    const st = Number(a.start), en = Number(a.end);
+    if (Number.isFinite(st) && st >= 0) seg.start = st;
+    if (Number.isFinite(en) && en >= 0) seg.end = en;
+    const anchor = a.after ? left.findIndex(x => String(x.id) === String(a.after)) : -1;
+    if (a.after && anchor < 0) miss.push(`插入锚点 ${String(a.after)}`);
+    const at = anchor >= 0 ? anchor + 1 : left.length;
+    left.splice(at, 0, seg);
+    if (seg.start === undefined) {
+      // 没给时间就地从邻居推一个（界面「拆段」用的也是这个算法）：空着的话这一句没有时间戳，
+      // 导出字幕会被挤到 00:00，按时间筛段也筛不到它 —— 有错的数比没有数更难看。
+      // 两头贴死（前一段的结束 == 后一段的开始，中间没有缝）时就落在边界那一秒上，
+      // 不要 +1：加了就会越过右边那段，屏幕上会出现「插进来的那句排在后面」的顺序错乱。
+      const pe = Number(left[at - 1] && left[at - 1].end);
+      const ns = Number(left[at + 1] && left[at + 1].start);
+      if (Number.isFinite(pe) && Number.isFinite(ns) && ns > pe) seg.start = Math.round((pe + ns) / 2);
+      else if (Number.isFinite(pe)) seg.start = pe;
+      else if (Number.isFinite(ns)) seg.start = ns;
+      else notes.push(`新加的「${seg.text.slice(0, 12)}」没有时间戳（前后两段也没有）`);
+    }
+  }
+  if (changed) notes.push(`改了 ${changed} 段`);
+  if (gone) notes.push(`删了 ${gone} 段`);
+  const added = (add || []).filter(a => a && String(a.text || "").trim()).length;
+  if (added) notes.push(`加了 ${added} 段`);
+  if (miss.length) notes.push(`这些 id 没找到，已跳过：${miss.slice(0, 8).join("、")}${miss.length > 8 ? ` 等 ${miss.length} 处` : ""}`);
+  if (!left.length) {
+    throw new Error("改完整本就一段不剩了，这种情况不写盘：把转写清空请重转一次，或在界面里逐段删。");
+  }
+  return left;
+}
+
 /* ── 工具实现 ───────────────────────────── */
 let shelfCache = {at: 0, books: []};
 async function shelfBooks() {
@@ -741,6 +883,354 @@ const tools = {
     out.push("隔一会儿用 app_status / task_log 看进度；跑完可以在书架里找到这本。");
     return out.join("\n");
   },
+
+  /* ── 视频转写工作台（界面上那一屏的能力，这里给到 agent） ────────── */
+
+  async video_books() {
+    const d = await req("/api/video?mode=books", { ms: 60000 });
+    const books = d.books || [];
+    if (!books.length) return "本地还没有「视频转出来」的书。用 video_plan 认链接、video_to_shelf 开跑，跑完再来回来看。";
+    const out = [`视频转出来的书 ${books.length} 本（最近动过的排前面）：`];
+    for (const b of books) {
+      out.push(`- 《${b.title}》  [id: ${b.id}]`);
+      const l1 = [];
+      if (b.site) l1.push(b.site);
+      if (b.duration) l1.push(hrs(b.duration));
+      l1.push(`${b.segments || 0} 段`);
+      l1.push(`${b.chapters || 0} 节`);
+      if (b.engine) l1.push(b.engine);
+      if (b.words) l1.push(fmtChars(b.words));
+      out.push(`  ${l1.join(" · ")}`);
+      const l2 = [b.edited ? "转写改过" : "转写没改过",
+        (b.exports || []).length ? `导出过 ${(b.exports || []).length} 份` : "还没导出",
+        b.has_json ? "有带时间戳的转写" : (b.has_txt ? "只有纯文本那份" : "没有转写文件")];
+      if (b.ai_error) l2.push(`AI 那步没成（${String(b.ai_error).slice(0, 40)}）`);
+      out.push(`  ${l2.join(" · ")}${b.updated_at ? " · " + fmtWhen(b.updated_at) : ""}`);
+    }
+    out.push("", "改转写：video_transcript 读、video_transcript_save 存；存完要 video_rebuild，章节正文才跟着新转写走。");
+    return out.join("\n");
+  },
+
+  async video_transcript({ book, q, from, to, offset = 0, limit = 60 }) {
+    const b = await localBook(book);
+    const qs = new URLSearchParams({
+      mode: "transcript", book: b.id,
+      offset: String(Math.max(0, Math.floor(Number(offset) || 0))),
+      limit: String(Math.max(1, Math.min(Math.floor(Number(limit) || 60), 240))),
+    });
+    if (q) qs.set("q", String(q));
+    if (from) qs.set("from", String(from));
+    if (to) qs.set("to", String(to));
+    const d = await req(`/api/video?${qs}`, { ms: 60000 });
+    if (!d.ok) throw new Error(d.msg || "这本的转写没读到");
+    const t = d.transcript || {};
+    const rows = t.segments || [];
+    const head = [`《${t.title || b.title}》的转写`,
+      `整本 ${t.total || 0} 段${(t.matched || 0) !== (t.total || 0) ? `，筛出 ${t.matched} 段` : ""}`
+      + `；这次从第 ${(t.offset || 0) + 1} 段起给了 ${rows.length} 段`,
+      `${t.source === "json" ? "带时间戳的那份（transcript.json）" : "纯文本那份（transcript.txt，没有时间戳）"}`
+      + `${t.engine ? ` · 引擎 ${t.engine}` : ""}${t.language ? ` / ${t.language}` : ""}`
+      + `${t.duration ? ` · 全片 ${hrs(t.duration)}` : ""}${t.edited ? " · 有人改过" : ""}`];
+    if (!rows.length) {
+      head.push("", "这一屏一段都没有。可能是筛得太狠（q / from / to），也可能这本书确实没有转写。");
+      return head.join("\n");
+    }
+    head.push("");
+    for (const s of rows) {
+      head.push(`- [${cue(s.start)}]${s.speaker ? ` ${s.speaker}：` : " "}${String(s.text || "")}  [id: ${s.id}]`);
+    }
+    if (t.has_more) head.push("", `后面还有：再调一次 video_transcript，offset 传 ${(t.offset || 0) + rows.length}。`);
+    head.push("", "要改就调 video_transcript_save：只传改的那几段的 id 和新文字，不必把整本抄一遍。");
+    return head.join("\n");
+  },
+
+  async video_transcript_save({ book, segments, edits, drop, add }) {
+    const b = await localBook(book);
+    const patch = [edits, drop, add].some(x => Array.isArray(x) && x.length);
+    const whole = Array.isArray(segments) && segments.length > 0;
+    if (patch && whole) throw new Error("segments（整本覆盖）与 edits/drop/add（只改几段）只能选一样：两个都给就说不清哪份算数。");
+    if (!patch && !whole) throw new Error("没给要存的内容：用 edits/drop/add 说清改了哪几段，或用 segments 整本覆盖（空列表一律不接，防的就是把整本抹掉）。");
+    const notes = [];
+    const rows = whole ? segments : await patchTranscript(b.id, { edits, drop, add }, notes);
+    const r = await req("/api/video", { method: "POST",
+      body: { act: "save_transcript", book: b.id, segments: rows } }, { ms: 90000 });
+    if (!r.ok) throw new Error(r.msg || "转写没存进去");
+    const out = [r.msg || "转写已存好"];
+    if (notes.length) out.push(`这次做了：${notes.join("；")}。`);
+    out.push("存好的只是那一份带时间戳的转写，章节正文还是旧的 —— 正文要跟着改，接着调 video_rebuild。");
+    return out.join("\n");
+  },
+
+  async video_rebuild({ book }) {
+    const b = await localBook(book);
+    const r = await req("/api/video", { method: "POST", body: { act: "rebuild", book: b.id } }, { ms: 180000 });
+    if (!r.ok) throw new Error(r.msg || "章节没能按转写重建");
+    const g = r.rebuilt || {};
+    const out = [r.msg || "章节已重建"];
+    if (g.chapters) out.push(`重铺出 ${g.chapters} 节；写之前旧的那批文件挪进了 ${g.backup || "书目录里的备份"}，不满意可以挪回来。`);
+    out.push("你的划线和笔记条目一个字都不会改（它们存在 notes.json 里，重建只是拿它重导一份 notes.md）；");
+    out.push("但笔记是按正文文字对位的，你改过的那些句子附近的定位可能挪 —— 这是改写内容的正常代价。");
+    return out.join("\n");
+  },
+
+  async video_export({ book, fmt = "srt" }) {
+    const b = await localBook(book);
+    const f = String(fmt || "srt").trim().toLowerCase().replace(/^\./, "");
+    const r = await req("/api/video", { method: "POST", body: { act: "export", book: b.id, fmt: f } }, { ms: 120000 });
+    if (!r.ok) throw new Error(r.msg || "导出没成");
+    const e = r.export || {};
+    const out = [`导好了：${e.name || "（没拿到文件名）"} · ${fmtBytes(e.bytes)} · ${e.segments || 0} 段`];
+    if (!e.timed && (f === "srt" || f === "vtt")) {
+      out.push("提醒：这本的转写没有时间戳，字幕里每一条都会挤在 00:00 —— 要字幕得先重转一次，只想留文字就导 txt 或 md。");
+    }
+    // downloads 挂在 export 那份信封里（路由把整个结果塞进 "export"），不在最外层：
+    // 读错了地方就会「明明导好了两份，回话却说一份都没有」。
+    const dl = e.downloads || r.downloads || [];
+    out.push(`文件落在这本书的 exports/ 里，目前共 ${dl.length} 份导出物`
+      + `${dl.length ? `（${dl.slice(-4).map(x => x.name).join("、")}）` : ""}；界面上「导出」那一栏能直接下载。`);
+    return out.join("\n");
+  },
+
+  /* ── 笔记思维导图 ─────────────────────────────────────────── */
+
+  async map_show({ book, as = "text", form }) {
+    const b = await localBook(book);
+    const mode = String(as || "text").trim().toLowerCase();
+    const qs = new URLSearchParams({ book: b.id });
+    if (form) qs.set("form", String(form));
+    if (mode === "md" || mode === "svg") qs.set("mode", mode);
+    const d = await req(`/api/mindmap?${qs}`, { ms: 60000 });
+    if (!d.ok) throw new Error(d.msg || "这张图没读出来");
+    if (mode === "md") {
+      const md = String(d.md || "").trim();
+      return md ? md + "\n\n（这份 Markdown 可以直接贴进笔记；界面上「导图」那一栏导出时也用它。）"
+               : "这张图还是空的，只导出一个标题。";
+    }
+    if (mode === "svg") {
+      // 一大段 XML 贴回对话里对谁都没用：agent 看不见像素，用户也 copy 不动。
+      // 只报大小和「去哪儿拿它」，真要图片请在界面上点「存为图片」落成文件。
+      const len = String(d.svg || "").length;
+      return [`导图画出来了：形态「${d.form || ""}」，${len} 个字符的 SVG。`,
+        "这份是即时算的，没有落成文件；界面上「思维导图」那一栏点「存为图片」才会写到书目录里。",
+        "要看结构请用 as=text（缩进大纲）或 as=json（含每个框的 id 与坐标，能原样拿去改）。"].join("\n");
+    }
+    const doc = d.doc || {};
+    if (mode === "json") return JSON.stringify(doc, null, 2);
+    const forms = d.forms || [];
+    const nameOf = k => (forms.find(x => x.key === k) || {}).name || k;
+    // 传了 form 时后端只按它临时排一遍，盘上存的那个形态没变 —— 这里若照 doc.form 报，
+    // 用户点了「换辐射图看看」却被告知「形态：鱼骨图」，看起来像那个参数根本没生效。
+    const asked = form ? String(form) : "";
+    const shown = asked && asked !== doc.form
+      ? `形态：${nameOf(asked)}（这只是临时排布，盘上存的还是「${nameOf(doc.form)}」；要固定下来用 map_save 传 form）`
+      : `形态：${nameOf(doc.form)}`;
+    const out = [doc.title && doc.title !== b.title
+      ? `《${b.title}》的思维导图 · 图名「${doc.title}」`
+      : `《${b.title}》的思维导图`,
+      shown,
+      `（可换：${forms.map(x => `${x.key}·${x.name}`).join(" / ") || "tree·括号图 / radial·辐射图 / fishbone·鱼骨图 / concept·概念图"}）`,
+      `节点：${countNodes(doc.nodes)} 个${doc.dropped ? ` · 曾被裁掉 ${doc.dropped} 个（超出单图上限）` : ""}`];
+    if (!doc.nodes || !doc.nodes.length) {
+      out.push("", "这张图还是空的。用 map_from_notes 从这本书的笔记生成一棵树，或用 map_save 直接写入结构。");
+      return out.join("\n");
+    }
+    out.push("", ...outlineTree(doc.nodes));
+    out.push("", "换形态不改变内容，只改排布：map_show 传 form=radial / fishbone / concept 再看看。");
+    return out.join("\n");
+  },
+
+  async map_from_notes({ book, cut = "tag" }) {
+    const b = await localBook(book);
+    const d = await req("/api/mindmap", { method: "POST",
+      body: { act: "from_notes", book: b.id, cut: String(cut || "tag") } }, { ms: 90000 });
+    if (!d.ok) throw new Error(d.msg || "笔记没能变成图");
+    const doc = d.doc || {};
+    const out = [d.has_existing
+      ? `已经从笔记生成一张新图（${CUT_NAME[String(cut)] || "按标签分叉"}，${countNodes(doc.nodes)} 个节点）—— 还没存盘，这本书原来那张还在。`
+      : `已经从这本书的笔记生成一张图（${CUT_NAME[String(cut)] || "按标签分叉"}，${countNodes(doc.nodes)} 个节点）—— 还没存盘。`];
+    if (!countNodes(doc.nodes)) {
+      out.push("生成出来是空的：这本书大概还没有笔记条目。先在阅读时记几条，或换一种切法。");
+      return out.join("\n");
+    }
+    out.push("", ...outlineTree(doc.nodes));
+    out.push("", d.has_existing
+      ? "看满意了再存：map_save 传同样的书名 + 这份 nodes（一存就会盖掉原来那张）。"
+      : "看满意了再存：map_save 传同样的书名 + 这份 nodes。");
+    out.push("不满意就不存 —— 只是看一眼的话，盘上的东西一点没动。");
+    return out.join("\n");
+  },
+
+  async map_save({ book, title, form, nodes }) {
+    const b = await localBook(book);
+    const doc = {};
+    const given = Array.isArray(nodes) && nodes.length;
+    if (given) {
+      doc.nodes = nodes;
+      doc.links = [];
+      doc.title = String(title || b.title || "");
+    } else {
+      // 没给 nodes 就只改标题 / 形态，绝不顺手交一张空图出去：这个接口是整本覆盖，
+      // 空 nodes 会把用户手点出来的那张清干净 —— 丢一次图，用户就再也不信这个工具了。
+      const cur = await req(`/api/mindmap?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+      if (!cur.ok) throw new Error(cur.msg || "先读不到这本书现有的导图，这次没动盘");
+      Object.assign(doc, cur.doc || {});
+      if (title) doc.title = String(title);
+    }
+    if (form) doc.form = String(form);
+    const r = await req("/api/mindmap", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 90000 });
+    if (!r.ok) throw new Error(r.msg || "这张图没存进去");
+    const out = [r.msg || `导图已存好（${r.nodes || 0} 个节点）`];
+    if (r.dropped) out.push(`注意：有 ${r.dropped} 个节点被裁掉了 —— 一张图的上限是 400 个框、8 层深。`);
+    if (!given) out.push("这次只改了标题 / 形态，节点内容原样留着。");
+    out.push(`存的位置：书目录里的 mindmap.json。界面上打开这本书的「思维导图」就是它，形态随时可换。`);
+    return out.join("\n");
+  },
+
+  /* ── 画板（边看书边涂鸦，涂鸦当笔记存） ──────────────────────── */
+
+  async board_list({ book }) {
+    const b = await localBook(book);
+    const d = await req(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+    if (!d.ok) throw new Error(d.msg || "这本书的画板没读到");
+    const rows = d.boards || [];
+    const head = [`《${b.title}》的画板：${d.count || rows.length} / ${d.max_boards || "?"} 块`,
+      `文件都在：${d.dir || ""}`];
+    if (!rows.length) {
+      head.push("", "一块板都还没有。board_new 建一块（可选题名和纸面），或者让用户在阅读界面右栏「画板」上直接画。");
+      return head.join("\n");
+    }
+    head.push("");
+    for (const x of rows) {
+      head.push(`- ${x.title || "（未命名）"}  [id: ${x.id}]`);
+      const l = [`纸面 ${x.paper}`, fmtBytes(x.bytes)];
+      l.push(x.has_png ? "有 PNG" : x.has_svg ? "有 SVG" : "还没导出过图");
+      if (x.caption) l.push(`说明「${String(x.caption).slice(0, 30)}」`);
+      head.push(`  ${l.join(" · ")}${x.updated ? " · " + x.updated : ""}`);
+    }
+    head.push("", "看板上画了什么：board_show；想把它并进笔记：board_show as=md。");
+    return head.join("\n");
+  },
+
+  async board_show({ book, id, as = "info" }) {
+    const b = await localBook(book);
+    const bid = String(id || "").trim();
+    if (!bid) throw new Error("请给出画板 id（board_list 里每块都写着）");
+    const mode = String(as || "info").trim().toLowerCase();
+    if (mode === "md") {
+      const r = await req("/api/board", { method: "POST", body: { act: "md", book: b.id, id: bid } }, { ms: 60000 });
+      if (!r.ok) throw new Error(r.msg || "这块板转不成笔记");
+      return [String(r.md || "").trim(), "", r.has_image
+        ? "（图导出过，笔记里那条链接点开就是它。）"
+        : "（这块板还没导出过图片：笔记里那条图片链接会点不开。要让它有图，得在界面上打开这块板点「导出图片」—— 画布内容本身生成不出图。）"].join("\n");
+    }
+    const d = await reqSoft(`/api/board?${new URLSearchParams({ book: b.id, id: bid })}`);
+    if (!d.ok || !d.board) {
+      // 后端 404 信封里那句「没有这块画板」本身没错，但对 agent 不够用：它手上只有一个 id，
+      // 分不清是这个 id 抄错了还是这本书根本没有板。把 id 原样报回去并指路 board_list。
+      throw new Error(`这本书里没有 id 为 ${bid} 的画板${d.msg ? `（${d.msg}）` : ""} —— 先 board_list 看看这本书到底有哪些板。`);
+    }
+    const doc = d.board || {};
+    if (mode === "canvas") return JSON.stringify(doc.canvas || { objects: [] }, null, 2);
+    const objs = (doc.canvas && doc.canvas.objects) || [];
+    const s = await getState();
+    const out = [`画板「${doc.title || "（未命名）"}」  [id: ${doc.id}]`,
+      `纸面：${doc.paper}${doc.caption ? ` · 说明「${doc.caption}」` : ""}`,
+      `最后编辑：${doc.updated || "?"}${doc.created ? ` · 建于 ${doc.created}` : ""} · 画布 ${fmtBytes(doc.bytes)}`,
+      `文件：${join(s.out || "", b.id, "boards", doc.id + ".json")}`];
+    if (!objs.length) {
+      out.push("", "画布是空的 —— 这块板建出来了还没画。界面上阅读右栏「画板」可以画；board_save 能改标题 / 说明 / 纸面。");
+      return out.join("\n");
+    }
+    const byType = new Map();
+    for (const o of objs) {
+      const k = String(o.type || "未知");
+      byType.set(k, (byType.get(k) || 0) + 1);
+    }
+    out.push("", `上面有 ${objs.length} 个对象：${[...byType].map(([k, v]) => `${k} ×${v}`).join("、")}`);
+    const texts = objs.filter(o => typeof o.text === "string" && o.text.trim())
+      .map(o => o.text.trim());
+    if (texts.length) {
+      out.push(`其中写了字的 ${texts.length} 处：`);
+      for (const t of texts.slice(0, 12)) out.push(`- ${t.length > 60 ? t.slice(0, 60) + "…" : t}`);
+      if (texts.length > 12) out.push(`……还有 ${texts.length - 12} 处（as=canvas 能拿到全部）。`);
+    } else {
+      out.push("这些对象里没有文字，全是笔画 / 形状 —— 想看清画的是什么，得在界面上打开这块板。");
+    }
+    out.push("", "要原样拿走画布（比如照着改一笔）用 as=canvas；要并进笔记用 as=md。");
+    return out.join("\n");
+  },
+
+  async board_new({ book, title, paper }) {
+    const b = await localBook(book);
+    const list = await req(`/api/board?${new URLSearchParams({ book: b.id })}`, { ms: 30000 });
+    if (!list.ok) throw new Error(list.msg || "这本书的画板目录没读到，先确认书名对不对");
+    const papers = list.papers || [];
+    const want = paper ? String(paper).trim().toLowerCase() : "";
+    if (want && !papers.includes(want)) {
+      throw new Error(`纸面只认 ${papers.join(" / ")}，「${paper}」不会用 —— 这次一块板也没建，免得留一块跟你想的不一样。`);
+    }
+    const created = await req("/api/board", { method: "POST",
+      body: { act: "new", book: b.id, title: String(title || "") } }, { ms: 30000 });
+    if (!created.ok) throw new Error(created.msg || "新建画板没成");
+    const doc = created.board || {};
+    if (want && want !== doc.paper) {
+      doc.paper = want;
+      const saved = await req("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 30000 });
+      if (!saved.ok) return `画板建好了 [id: ${doc.id}]，但纸面没改成「${want}」：${saved.msg || "保存没成"}`;
+    }
+    return [`新建了一块画板：「${doc.title || "（未命名）"}」  [id: ${doc.id}]`,
+      `纸面 ${doc.paper}，画布还是空的。`,
+      "界面上阅读右栏「画板」选中它就能画；board_save 可以改标题 / 说明 / 纸面。"].join("\n");
+  },
+
+  async board_save({ book, id, title, caption, paper, canvas }) {
+    const b = await localBook(book);
+    const bid = String(id || "").trim();
+    if (!bid) throw new Error("请给出画板 id（board_list 里每块都写着）");
+    // 先读回现有那一份再动笔：存盘是整块覆盖，只传个标题就会把用户画的那一叠笔画抹平。
+    const cur = await reqSoft(`/api/board?${new URLSearchParams({ book: b.id, id: bid })}`);
+    if (!cur.ok || !cur.board) {
+      throw new Error(`这本书里没有 id 为 ${bid} 的画板${cur.msg ? `（${cur.msg}）` : ""} —— 要新建请用 board_new，别在这里存一块不存在的。`);
+    }
+    const doc = { ...cur.board };
+    if (title !== undefined) doc.title = String(title);
+    if (caption !== undefined) doc.caption = String(caption);
+    if (paper !== undefined) doc.paper = String(paper);
+    let replaced = false;
+    if (canvas !== undefined) {
+      if (!canvas || typeof canvas !== "object" || Array.isArray(canvas)) {
+        throw new Error("canvas 得是一个对象（fabric 那份画布 JSON）。不想动画面就别传这个参数。");
+      }
+      doc.canvas = canvas;
+      replaced = true;
+    }
+    const r = await req("/api/board", { method: "POST", body: { act: "save", book: b.id, doc } }, { ms: 60000 });
+    if (!r.ok) throw new Error(r.msg || "这块板没存进去");
+    const out = [r.msg || "画板已存好", `画板 ${r.id} · 画布 ${fmtBytes(r.bytes)}`];
+    const objs = (doc.canvas && doc.canvas.objects) || [];
+    if (replaced) {
+      out.push(`这次是整块画布覆盖，现在上面有 ${objs.length} 个对象。`);
+      if (!objs.length) out.push("注意：传进来的画布是空的 —— 这块板上的东西这次没了。只想改标题 / 说明的话，别带 canvas。");
+    } else {
+      out.push(`画布原样没动（上面还是 ${objs.length} 个对象）—— 这次只改了标题 / 说明 / 纸面。`);
+    }
+    out.push("导出图（PNG/SVG）只能由界面那侧生成：board_show as=md 会告诉你图有没有备好。");
+    return out.join("\n");
+  },
+
+  async board_delete({ book, id, purge = true }) {
+    const b = await localBook(book);
+    const bid = String(id || "").trim();
+    if (!bid) throw new Error("请给出要删的画板 id（board_list 里每块都写着）");
+    const r = await req("/api/board", { method: "POST",
+      body: { act: "delete", book: b.id, id: bid, purge: !!purge } }, { ms: 30000 });
+    if (!r.ok) throw new Error(r.msg || "这块板没删掉");
+    const out = [r.msg || "画板已删掉", `这本书还剩 ${(r.boards || []).length} 块板。`];
+    out.push(purge ? "画布 JSON 和它的 PNG / SVG 导出物一起清了。"
+      : "只收了画布 JSON，导出图留在原处 —— 要连图一起清就再删一次带 purge=true。");
+    out.push("删掉的画布找不回来（.prev 那份留档只保上一次保存的内容）。");
+    return out.join("\n");
+  },
 };
 
 const TOOL_DEFS = [
@@ -790,7 +1280,7 @@ const TOOL_DEFS = [
   },
   {
     name: "folder_create",
-    description: "在书架上新建一个文件夹，用于给书归类。",
+    description: "在本地书架上新建一个文件夹，用来给已取回的书归类（不动微信读书那边的书架）。名字重名时会告诉你已存在；建完用 book_move 把书移进去。",
     inputSchema: {
       type: "object",
       properties: { name: { type: "string", description: "文件夹名" } },
@@ -1058,6 +1548,208 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "video_books",
+    description: "列出本地所有「由视频转出来」的书，含每本的转写段数、节数、转写引擎、改过没有、导出过几份、有没有 AI 摘要。想改某支视频的转写，先用它拿到书的 id。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "video_transcript",
+    description: "读一本视频书的转写（逐段、带时间与说话人）。可按关键词筛、按时间区间筛，分页读：返回每段都带 id，改完拿这个 id 去 video_transcript_save。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id（video_books 里有）" },
+        q: { type: "string", description: "只看含这个词的段（也认说话人名）" },
+        from: { type: "string", description: "起点时间，如 1:23 或 83（秒）" },
+        to: { type: "string", description: "终点时间，同上" },
+        offset: { type: "number", description: "从第几段开始，默认 0" },
+        limit: { type: "number", description: "这次要几段，默认 60，最多 240（免得一次灌爆上下文）" },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "video_transcript_save",
+    description: "把改动写回一本书的转写。推荐用 edits/drop/add 只描述改动（工具自己读整本、在内存里改、再整本发回去，所以不会把你没看的段落弄丢）；segments 是整本覆盖的低级用法，两者不能同时给。存完记得 video_rebuild，章节正文才会跟着改。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        edits: {
+          type: "array", description: "要改的那些段",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "段 id（video_transcript 里每段都标着）" },
+              text: { type: "string", description: "新的正文；不传就是不改正文" },
+              speaker: { type: "string", description: "新的说话人；不传就是不改" },
+            },
+            required: ["id"],
+          },
+        },
+        drop: { type: "array", items: { type: "string" }, description: "要整段删掉的段 id" },
+        add: {
+          type: "array", description: "要新加的段（比如把一句拆成两句）",
+          items: {
+            type: "object",
+            properties: {
+              after: { type: "string", description: "插在哪一段后面，传那段的 id；不传就接在末尾" },
+              text: { type: "string", description: "这一段的正文" },
+              speaker: { type: "string", description: "说话人，可留空" },
+              start: { type: "number", description: "起始秒数；不给就从前后邻居推一个" },
+              end: { type: "number", description: "结束秒数" },
+            },
+            required: ["text"],
+          },
+        },
+        segments: {
+          type: "array", description: "整本覆盖用的全量段落列表（谨慎：这份会替换掉整本转写）",
+          items: { type: "object" },
+        },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "video_rebuild",
+    description: "按现在这份转写重建一本视频书的章节正文与合并稿（旧的章节文件先挪进备份）。转写改过就必须走这一步，正文才会跟着变；划线与笔记条目不动。",
+    inputSchema: {
+      type: "object",
+      properties: { book: { type: "string", description: "书名或 id" } },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "video_export",
+    description: "把一本视频书的转写导出成字幕或文本文件，落在该书目录的 exports/ 里。格式认 srt / vtt / txt / md / json。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        fmt: { type: "string", description: "srt（默认）/ vtt / txt / md / json" },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "map_show",
+    description: "看一本书的思维导图。默认给缩进大纲（最省上下文）；as=md 要一份能贴进笔记的 Markdown，as=json 要含每个框 id 与坐标的完整信封（照着改就能存回去），as=svg 只报大小（大段 XML 贴回对话没意义）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        as: { type: "string", description: "text（默认）/ md / json / svg" },
+        form: { type: "string", description: "临时换一种排布看：tree / radial / fishbone / concept" },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "map_from_notes",
+    description: "把一本书的笔记（划线、想法、章节）自动组织成一棵导图树并展示出来 —— 只「给」不「存」，确认满意后再用 map_save 落盘，所以点错了也不会盖掉用户手画的图。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        cut: { type: "string", description: "怎么分叉：tag（按标签，默认）/ chapter（按章节）/ entry（按每条笔记）" },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "map_save",
+    description: "保存一本书的思维导图。给 nodes 就是整张图替换（nodes 是嵌套树，每框 {text, children:[...]}）；不给就只改标题 / 形态，现有节点原样留着。上限：400 个框、8 层深。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        title: { type: "string", description: "图的标题，默认用书名" },
+        form: { type: "string", description: "形态：tree / radial / fishbone / concept" },
+        nodes: {
+          type: "array", description: "节点树；每个框是 {text, children:[...]}，也可以带 id / note / color",
+          items: { type: "object" },
+        },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "board_list",
+    description: "列出一本书名下的画板（涂鸦笔记）：每块的标题、id、纸面、大小、有没有导出过图片，以及画板文件所在目录。",
+    inputSchema: {
+      type: "object",
+      properties: { book: { type: "string", description: "书名或 id" } },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "board_show",
+    description: "看一块画板。默认给「上面有什么」的摘要（对象数量与其中的文字内容），as=md 给一份并进笔记用的 Markdown，as=canvas 给原始画布 JSON。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        id: { type: "string", description: "画板 id（board_list 里每块都标着）" },
+        as: { type: "string", description: "info（默认）/ md / canvas" },
+      },
+      required: ["book", "id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "board_new",
+    description: "在某一本书名下新建一块空白画板。纸面可选 plain / grid / dots / lines / dark（以本机实际支持的清单为准，写错了会直接告诉你可选项，不会建出一块不对的板）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        title: { type: "string", description: "这块板的名字" },
+        paper: { type: "string", description: "纸面样式，可留空用默认" },
+      },
+      required: ["book"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "board_save",
+    description: "改一块画板。只传 title / caption / paper 时画布原样不动（工具会先读回现有那块再改）；canvas 是整块画布覆盖，除非你确实要重写画面，否则别传它。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        id: { type: "string", description: "画板 id" },
+        title: { type: "string", description: "新标题" },
+        caption: { type: "string", description: "这块板的一句话说明（会跟着进笔记）" },
+        paper: { type: "string", description: "纸面样式" },
+        canvas: { type: "object", description: "整块画布 JSON（谨慎：这是覆盖）" },
+      },
+      required: ["book", "id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "board_delete",
+    description: "删掉一块画板（不可恢复）。purge=true（默认）连导出图一起清；false 只收画布、留着导出的 PNG/SVG。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书名或 id" },
+        id: { type: "string", description: "要删的画板 id" },
+        purge: { type: "boolean", description: "要不要连导出图一起删，默认要" },
+      },
+      required: ["book", "id"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /* ── 协议 ───────────────────────────────── */
@@ -1065,7 +1757,7 @@ function send(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 
-const serverInfo = { name: "guizang", version: "1.2.0" };
+const serverInfo = { name: "guizang", version: "1.3.0" };
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async line => {

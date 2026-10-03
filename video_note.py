@@ -25,9 +25,19 @@ stage 分组、按 pct 画进度条：
 任何一次 LLM 调用失败都不算整条线失败：转写照存、书照进书架，只是 AI 那部分缺席，
 回来的结果里带 ai_error 说明原因。音频下不来或转写不出东西才是真的失败（抛异常）。
 
+转写落三份文件：transcript.json（带时间戳的段落，编辑改的是它）、transcript.txt
+（纯文本视图）、merged.md（整本书一份 Markdown）。围绕它们另有一组给界面调的函数：
+load_transcript 读（老书只有 txt 就从 txt 兜底，时间戳给空）、save_transcript 原子写回、
+rebuild_book 按改后的转写重建章节与笔记（旧文件先整体挪进 .bak-时间戳/，可回退）、
+export_transcript 导成 srt / vtt / txt / md / json。
+
+跑挂了不扔过程产物：临时目录按「视频编号 + 第几 P」定名，重跑时已经下好的音频、
+已经转好的分片和整份转写都直接复用（opts 的 resume 给 False 就从头重做）。
+
 不 import ui_server：LLM 三件套（url / key / model）由调用方从 agent_cfg() 取了传进来。
 """
 
+import hashlib
 import json
 import math
 import os
@@ -80,6 +90,20 @@ MINDMAP_TYPES = ("root", "theme", "topic", "leaf")
 MAX_TRANSCRIPT_CHARS = 400000
 LLM_INPUT_LIMIT = 24000                  # 单次喂给 LLM 的转写节选上限（字符）
 
+# 转写产物的三份文件：transcript.json 是带时间戳的那一份真相（编辑器改的就是它），
+# transcript.txt 是它的纯文本视图（老书只有这一份，读的时候拿它兜底），
+# summary.json 里还留着章节表，重建章节时按它来切。
+TRANS_FILE = "transcript.json"
+TRANS_TXT = "transcript.txt"
+SUMMARY_FILE = "summary.json"
+# 导出物放进一个子目录：不跟 transcript.txt / transcript.json 抢名字（那两个另有用途），
+# 而且是纯派生物，删了随时能再生成。
+EXPORT_DIR = "exports"
+EXPORT_EXT = {"srt": "srt", "vtt": "vtt", "txt": "txt", "md": "md", "json": "json"}
+TRANS_SCHEMA = 1
+MAX_SEGMENTS = 20000                     # 段数上限：正常视频用不满，防传进来的数据跑飞
+MAX_SEG_CHARS = 4000                     # 单段文字上限（跟笔记划线的量级一致）
+
 _BVID = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
 _YT_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
 
@@ -97,6 +121,90 @@ def _now():
 def _clip(text, limit):
     s = "" if text is None else str(text)
     return s[:limit]
+
+
+def _sec(value):
+    """秒数收敛成 float：脏值 / None / 负数 / -0.0 / 无穷都当 0 处理。
+
+    为什么单独一个函数：时间戳从三条路来（ASR 给的 float、LLM 给的 int 秒、用户在
+    编辑器里手打的字符串），任何一条给了怪值都不能把导出或落盘带崩，也不能让
+    `-0.0` 混进时间轴 —— 那玩意格式化出来是 `-00:00:00,000`，字幕播放器直接拒收。
+    """
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(out) or out <= 0:      # <= 0 顺手把 -0.0 也归零
+        return 0.0
+    return out
+
+
+def _maybe_sec(value):
+    """同上，但允许「没有时间」：老书从 transcript.txt 兜底出来的段落就是 None。"""
+    if value is None or value == "":
+        return None
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return None
+    return _sec(value)
+
+
+def parse_stamp(value):
+    """把「1:23」「0:05:30」「90」「90.5」这一类时间收成秒；收不住回 None。
+
+    为什么要有它：工作台筛转写时，人会在框里打 mm:ss，也可能直接打秒数。
+    None 的意思是「这一侧不设条件」，不是 0 —— 把打错的「1:2a」当成 0 秒，
+    筛出来的是整本书，那比报一句「没看懂这个时间」更坏。
+    """
+    s = str(value if value is not None else "").strip()
+    if not s:
+        return None
+    if ":" in s:
+        parts = [p.strip() for p in s.split(":")]
+        if len(parts) > 3 or not all(parts):
+            return None
+        try:
+            nums = [float(p) for p in parts]
+        except ValueError:
+            return None
+        if any(not math.isfinite(n) or n < 0 for n in nums):
+            return None
+        total = 0.0
+        for n in nums:
+            total = total * 60 + n
+        return total if math.isfinite(total) else None
+    try:
+        n = float(s)
+    except ValueError:
+        return None
+    return n if math.isfinite(n) and n >= 0 else None
+
+
+def _stamp(value):
+    """秒 → HH:MM:SS（导图锚点、md 导出的时间戳用）。"""
+    total = int(_sec(value))
+    return "%02d:%02d:%02d" % (total // 3600, (total % 3600) // 60, total % 60)
+
+
+def _cue_time(value, sep=","):
+    """秒 → 字幕时间码：SRT 用 HH:MM:SS,mmm，VTT 用 HH:MM:SS.mmm。
+
+    毫秒必须是整数（两家规范都写死 3 位），所以先四舍五入成总毫秒再拆，不拿
+    浮点格式化去凑 —— 那样偶尔会甩出 6 位小数。
+    """
+    total = int(round(_sec(value) * 1000.0))
+    hours, rest = divmod(total, 3600000)
+    minutes, rest = divmod(rest, 60000)
+    seconds, millis = divmod(rest, 1000)
+    return "%02d:%02d:%02d%s%03d" % (hours, minutes, seconds, sep, millis)
+
+
+def _join_text(segments):
+    """段落 → 纯文本视图（transcript.txt 的内容）。"""
+    return "\n".join(str((s or {}).get("text") or "").strip()
+                     for s in (segments or [])
+                     if str((s or {}).get("text") or "").strip())
 
 
 def _say(progress, stage, pct, note):
@@ -360,21 +468,26 @@ def download_audio(url, task_dir, progress=None, should_stop=None):
 
 # ─────────────────────────── 计划 ───────────────────────────
 
-def plan(url):
+def plan(url, page=None):
     """认链接 + 只取元信息（不下载）。返回平台、vid、标题、作者、时长、封面、分 P 表。
 
     认不出的链接抛 ValueError，话说成用户能懂的样子 —— 他粘过来的可能是错的链接，
     也可能粘的是 B 站首页，得让他知道该粘什么。
+
+    page：显式指定取第几 P（界面上选了哪一 P 就传哪一 P）。链接自带的 p= 只在没显式
+    指定时才生效 —— 用户点的那一 P 比地址栏里可能过期的参数更有权威。
     """
     raw = (url or "").strip()
     if not raw:
         raise ValueError("还没粘链接呢，把 B 站或 YouTube 的视频地址发过来")
-    platform, vid, normalized, page = normalize_url(raw)
+    platform, vid, normalized, parsed_page = normalize_url(raw)
     if not platform:
         raise ValueError("这个链接归藏还不认识，现在只收 B 站和 YouTube 的视频。"
                          "B 站粘 BV 号也行（比如 BV1xx411c7mD）。")
     if not vid and "b23.tv" not in normalized:
         raise ValueError("这个链接里没找到视频编号，换视频页上那条完整地址再试")
+    want = _as_int(page) or parsed_page
+    want = max(1, want) if want else None
 
     info = probe_meta(normalized)
     entries = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
@@ -397,21 +510,46 @@ def plan(url):
         first = entries[0]
         if str(first.get("webpage_url") or "").strip():
             # 多 P：真正要下的是用户点的那一 P（page 缺省就是第一 P）
-            pick = (page or 1) - 1
-            target = entries[pick] if 0 <= pick < len(entries) else entries[0]
-            normalized = (target.get("webpage_url") or normalized).strip()
+            pick = min(max((want or 1) - 1, 0), len(entries) - 1)
+            target = entries[pick]
+            normalized = _page_url((target.get("webpage_url") or normalized).strip(),
+                                   want or 1)
+            want = pick + 1
             title = str(target.get("title") or title).strip()
             duration = _as_int(target.get("duration")) or duration
             cover = str(target.get("thumbnail") or cover).strip()
     else:
-        pages.append({"i": page or 1, "title": title, "vid": vid,
+        # 单 P（或 yt-dlp 没给出 entries）：这一 P 的信息就是整支视频的，地址补 p=
+        normalized = _page_url(normalized, want) if want else normalized
+        pages.append({"i": want or 1, "title": title, "vid": vid,
                       "url": normalized, "duration": duration or 0})
 
     if not title:
         title = vid or "未命名视频"
     return {"platform": platform, "vid": vid, "url": normalized, "title": title,
             "uploader": uploader, "duration": duration, "cover": cover,
-            "pages": pages, "count": len(pages)}
+            "pages": pages, "count": len(pages), "page": want or 1}
+
+
+def _page_url(url, page):
+    """给地址补上 p=N：已有的 p 先摘掉，免得留下两个互相打架的参数。
+
+    为什么绕这一圈而不是让 yt-dlp 自己按 p 取：多 P 时选中的那一 P 的地址本来就在
+    entries 里（已带 p=），但单 P 的链接（裸 BV 号）没有 —— 不补这一步，「取第 3 P」
+    这个参数在最常见的粘贴场景下会静默失效，用户拿到的永远是第一 P。
+    """
+    if not page:
+        return url
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return url
+    query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query)
+             if k.lower() != "p"]
+    query.append(("p", str(int(page))))
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path,
+                                    urllib.parse.urlencode(query), parts.fragment))
+
 
 
 def _as_int(value):
@@ -503,10 +641,14 @@ def _pack_result(result):
     return {"text": text, "segments": segments}
 
 
-def transcribe(audio_path, asr_cfg, progress=None, should_stop=None):
-    """音频 → 文字。返回 {"text", "segments", "engine"}。
+def transcribe(audio_path, asr_cfg, progress=None, should_stop=None, resume=False):
+    """音频 → 文字。返回 {"text", "segments", "engine", "language"}。
 
     这里只是分发：真正干活的是下面三个函数，自测套件把 transcribe 整个换掉就行。
+
+    resume=True 时，云转写的分片结果会落盘复用（见 _part_cache），重跑不再传已经转
+    好的那些段；本地引擎（mlx / faster）一次调用吃整段音频，没有分片可跳，续跑靠
+    run() 那份转写暂存。
     """
     asr_cfg = asr_cfg or {}
     engine = pick_engine(asr_cfg.get("engine"), asr_cfg)
@@ -522,8 +664,9 @@ def transcribe(audio_path, asr_cfg, progress=None, should_stop=None):
         out = _transcribe_faster(audio_path, model, lang, progress)
     else:
         out = _transcribe_cloud(audio_path, asr_cfg.get("cloud") or {}, model, lang,
-                                progress, should_stop)
+                                progress, should_stop, resume=resume)
     out["engine"] = engine
+    out["language"] = lang
     if not out.get("text"):
         raise ValueError("这段音频里没转出文字，换一集或者换个人声清楚的视频再试")
     _say(progress, "asr", 75, "转写完成，共 %d 字" % len(out["text"]))
@@ -650,7 +793,26 @@ def _silence_split(audio_path, work_dir, seconds=600):
                   if n.startswith("part-") and n.endswith(".mp3"))
 
 
-def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop):
+def _part_cache_path(part_path):
+    """分片转写结果的暂存文件名：贴在分片旁边，删临时目录时一起删干净。"""
+    return part_path + ".asr.json"
+
+
+def _part_cached(part_path, model, lang):
+    """这一片上次转过了吗。模型或语言换了就不算 —— 拿旧结果续跑会把两种口径混在一起。"""
+    doc = _read_json(_part_cache_path(part_path))
+    if not isinstance(doc, dict) or not str(doc.get("text") or "").strip():
+        return None
+    if str(doc.get("model") or "") != str(model or ""):
+        return None
+    if str(doc.get("language") or "") != str(lang or ""):
+        return None
+    return {"text": str(doc.get("text") or ""),
+            "segments": doc.get("segments") if isinstance(doc.get("segments"), list) else []}
+
+
+def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop,
+                      resume=False):
     endpoint = _transcriptions_url(cloud.get("url"))
     if not endpoint:
         raise ValueError("云转写的地址要写成 http:// 或 https:// 开头")
@@ -665,9 +827,22 @@ def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop):
     for i, part in enumerate(parts, start=1):
         if should_stop and callable(should_stop) and should_stop():
             raise Aborted("已经停下来了")
-        _say(progress, "asr", 50 + int(20.0 * (i - 1) / max(len(parts), 1)),
-             "正在上传第 %d/%d 段" % (i, len(parts)))
-        payload = _post_audio(endpoint, key, name, lang, part)
+        cached = _part_cached(part, name, lang) if resume else None
+        if cached is not None:
+            # 断点续跑：这一片上次已经转好了，直接复用 —— 一段一段传一次要几十秒，
+            # 重跑不该把已经付过的钱再付一遍、等的时间再等一遍。
+            _say(progress, "asr", 50 + int(20.0 * i / max(len(parts), 1)),
+                 "第 %d/%d 段沿用上次的转写" % (i, len(parts)))
+            payload = cached
+        else:
+            _say(progress, "asr", 50 + int(20.0 * (i - 1) / max(len(parts), 1)),
+                 "正在上传第 %d/%d 段" % (i, len(parts)))
+            payload = _post_audio(endpoint, key, name, lang, part)
+            _write_json(_part_cache_path(part),
+                        {"model": name, "language": lang,
+                         "text": str(payload.get("text") or "").strip(),
+                         "segments": _pack_result(payload)["segments"],
+                         "saved_at": _now()})
         pieces.append(str(payload.get("text") or "").strip())
         for seg in (payload.get("segments") or []):
             if not isinstance(seg, dict):
@@ -1207,8 +1382,7 @@ PLATFORM_LABEL = {"bilibili": "B 站", "youtube": "YouTube"}
 
 
 def _mmss(seconds):
-    total = max(0, int(seconds or 0))
-    return "%02d:%02d:%02d" % (total // 3600, (total % 3600) // 60, total % 60)
+    return _stamp(seconds)
 
 
 def _provenance(plan_info, asr_engine):
@@ -1266,11 +1440,80 @@ def _chapter_bodies(transcript, segments, chapters):
     return body
 
 
+def _chapter_docs(bodies, extras):
+    """[(章名, 正文)] → 每章一份完整 Markdown（来源那几行只进第一章）。
+
+    落盘和重建共用这一份拼法：合并稿和分章文件必须长得一样，两处各写一套的话，
+    重建出来的书会和当初落盘的那本悄悄分叉。
+    """
+    out = []
+    for index, (chapter_title, body) in enumerate(bodies):
+        lines = ["# %s" % (chapter_title or ("第 %d 章" % (index + 1))), ""]
+        if index == 0 and extras:
+            lines.append("\n".join(extras).strip())
+            lines.append("")
+        if body:
+            lines.append(body)
+            lines.append("")
+        out.append("\n".join(lines).strip() + "\n")
+    return out
+
+
+def _norm_seg(seg):
+    """一段转写收敛成能安全落盘的样子：时间收成浮秒或空，文字裁长，认不出的字段留着。"""
+    seg = seg if isinstance(seg, dict) else {}
+    rest = {k: v for k, v in seg.items() if k not in ("start", "end", "text", "speaker")}
+    ordered = {"start": _maybe_sec(seg.get("start")),
+               "end": _maybe_sec(seg.get("end")),
+               "text": _clip(seg.get("text"), MAX_SEG_CHARS).strip()}
+    speaker = str(seg.get("speaker") or "").strip()
+    if speaker:
+        ordered["speaker"] = speaker[:40]
+    ordered.update(rest)      # 剩下的字段排在后面，前四个位置稳定
+    return ordered
+
+
+def _transcript_doc(spoken, asr_cfg, plan_info):
+    """转写结果 → transcript.json 那份文档。
+
+    为什么要单开这个文件：摘要、笔记、导图都是派生物，只有这份带时间戳的段落是
+    「用户会去改的那一份」—— 点时间轴跳到那一句、编辑器改完存回去，都得有个稳定的
+    落点；transcript.txt 那份是纯文本视图，没地方放时间。
+    """
+    segments = [_norm_seg(s) for s in (spoken.get("segments") or [])][:MAX_SEGMENTS]
+    duration = _maybe_sec(spoken.get("duration"))
+    if duration is None:
+        duration = _maybe_sec(plan_info.get("duration"))
+    if duration is None:
+        duration = _maybe_sec(segments[-1].get("end") if segments else None)
+    return {"schema": TRANS_SCHEMA,
+            "engine": str(spoken.get("engine") or
+                          (asr_cfg or {}).get("engine") or "auto"),
+            "language": str(spoken.get("language") or
+                            (asr_cfg or {}).get("language") or DEFAULT_LANGUAGE),
+            "duration": duration if duration is not None else 0.0,
+            "title": str(plan_info.get("title") or ""),
+            "vid": str(plan_info.get("vid") or ""),
+            "page": _as_int(plan_info.get("page")) or 1,
+            "segments": segments,
+            "generated_at": _now(),
+            "updated_at": int(time.time())}
+
+
 def _write_json(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
+
+def _read_json(path):
+    """读一份 JSON：缺文件或读坏了都回 None，怎么兜底由调用方决定。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _write_text(path, text):
@@ -1360,6 +1603,72 @@ def _ai_bundle(cfg, title, transcript, segments, progress):
     return import_result
 
 
+def _task_key(plan_info, page=None):
+    """一次视频一个临时目录，而且目录名稳定 —— 断点续跑靠的就是「重跑时还找得到上次那些产物」。
+
+    以前用随机名：跑完固然干净，中途挂了也一并删干净，等于下好的音频和转好的分片
+    全扔了，重跑从头再来。名字认 vid + 分 P：同一集重跑撞上同一个目录，不同集不串。
+    """
+    vid = str(plan_info.get("vid") or "").strip()
+    platform = str(plan_info.get("platform") or "").strip()
+    if not vid:      # b23.tv 这类短链在认链接阶段还没有编号，拿地址哈希顶上
+        vid = hashlib.md5(str(plan_info.get("url") or "").encode("utf-8")).hexdigest()[:12]
+    tail = "_p%s" % int(page) if page else ""
+    return re.sub(r"[^0-9A-Za-z_\-]", "", "%s_%s" % (platform, vid))[:60] + tail
+
+
+def _existing_audio(task_dir):
+    """临时目录里已经下好的音频（没有就空串）。认 audio.* 那份，.part 不算数。"""
+    if not os.path.isdir(task_dir):
+        return ""
+    hits = [os.path.join(task_dir, n) for n in sorted(os.listdir(task_dir))
+            if n.startswith("audio.") and not n.endswith((".part", ".tmp"))]
+    return hits[0] if hits else ""
+
+
+def _stage_transcript(task_dir, spoken, asr_cfg):
+    """转写一成功就暂存一份，别等落盘。
+
+    为什么这么早存：AI 那三步是最容易挂的一环（没配、超时、回烂 JSON），挂在这儿时
+    已经花掉的时间最贵 —— 转写先落进临时目录，后面怎么失败都丢不了，重跑也不用再转一遍。
+    """
+    _write_json(os.path.join(task_dir, "transcript.json"),
+                {"text": spoken.get("text") or "",
+                 "segments": spoken.get("segments") or [],
+                 "engine": spoken.get("engine") or "",
+                 "language": _asr_lang(spoken, asr_cfg),
+                 "duration": spoken.get("duration"),
+                 "model": _asr_model(asr_cfg),
+                 "saved_at": _now()})
+
+
+def _asr_lang(spoken, asr_cfg):
+    """这次转写用的语言：转写结果没带就认配置，配置也没有就认默认值。"""
+    return str(spoken.get("language") or (asr_cfg or {}).get("language")
+               or DEFAULT_LANGUAGE)
+
+
+def _asr_model(asr_cfg):
+    return str((asr_cfg or {}).get("model") or "")
+
+
+def _staged_transcript(task_dir, asr_cfg):
+    """上次转好的那份能不能直接用：模型、语言对不上就不算（拿旧结果续会把两种口径混一起）。"""
+    doc = _read_json(os.path.join(task_dir, "transcript.json"))
+    if not isinstance(doc, dict) or not str(doc.get("text") or "").strip():
+        return None
+    if str(doc.get("model") or "") != _asr_model(asr_cfg):
+        return None
+    if str(doc.get("language") or "") != _asr_lang({}, asr_cfg):
+        return None
+    if not isinstance(doc.get("segments"), list):
+        return None
+    return {"text": str(doc.get("text") or ""), "segments": doc["segments"],
+            "engine": str(doc.get("engine") or ""),
+            "language": str(doc.get("language") or ""),
+            "duration": _maybe_sec(doc.get("duration"))}
+
+
 def run(url, out_dir, opts, progress):
     """整条流水线：认链接 → 下音频 → 转写 → 三次 LLM → 落成一本书。
 
@@ -1367,32 +1676,55 @@ def run(url, out_dir, opts, progress):
       asr   {"engine": "auto"|"mlx"|"faster"|"cloud", "model": str,
              "cloud": {"url", "key", "model"}, "language": "zh"}
       llm   {"url", "key", "model"}      —— 由调用方从 agent_cfg() 取
+      page  取第几 P（B 站多 P 用；不给就认链接里的 p=，再不给就是第一 P）
+      resume  默认 True：沿用上次已经下好的音频、已经转好的分片与转写；
+              给 False 就从头重做（换了引擎、想重转一遍时用）
       should_stop  可调用对象，阶段之间查一次；要求停就抛 Aborted
 
-    progress(stage, pct, note) 的取值表见模块开头。返回值见 README 式说明：
-      {book, transcript_path, note_path, mindmap_path, chapters, words,
-       asr_engine, elapsed, ai_error}
+    progress(stage, pct, note) 的取值表见模块开头。返回值：
+      {book, transcript_path, transcript_json, merged_path, note_path, mindmap_path,
+       chapters, words, segments, duration, language, asr_engine, elapsed, ai_error,
+       resume_dir}
     ai_error 非空表示 AI 那部分缺席（原因在里头），书本身照常可用。
+    中途挂了（含中止）时临时目录不删，下次重跑同一条链接会接着用；跑成功了才清干净
+    （用户要的是这本书，不是那段音轨），这时 resume_dir 给空串。
     """
     opts = opts or {}
     started = time.time()
     asr_cfg = dict(opts.get("asr") or {})
     asr_cfg.setdefault("language", (opts.get("language") or "").strip() or DEFAULT_LANGUAGE)
     llm_cfg = dict(opts.get("llm") or {})
+    resume = opts.get("resume")
+    resume = True if resume is None else bool(resume)
 
-    plan_info = plan(url)
+    plan_info = plan(url, opts.get("page"))
     _say(progress, "plan", 5, "认出来了：%s" % _clip(plan_info["title"], 40))
     _check_stop(opts)
 
-    task_dir = os.path.join(TMP_ROOT, uuid.uuid4().hex[:10])
+    task_dir = os.path.join(TMP_ROOT, _task_key(plan_info, plan_info.get("page")))
+    if not resume:
+        stale = os.path.join(task_dir, "transcript.json")
+        if os.path.isfile(stale):
+            os.remove(stale)          # 明确要求重转：暂存那份就别再拿出来了
+    finished = False
     try:
-        _say(progress, "download", 5, "正在取音频")
-        audio = download_audio(plan_info["url"], task_dir, progress,
-                               should_stop=opts.get("should_stop"))
+        audio = _existing_audio(task_dir) if resume else ""
+        if audio:
+            _say(progress, "download", 45, "沿用上回下好的音频，不用再下一遍")
+        else:
+            _say(progress, "download", 5, "正在取音频")
+            audio = download_audio(plan_info["url"], task_dir, progress,
+                                   should_stop=opts.get("should_stop"))
         _check_stop(opts)
 
-        spoken = transcribe(audio, asr_cfg, progress,
-                            should_stop=opts.get("should_stop"))
+        spoken = _staged_transcript(task_dir, asr_cfg) if resume else None
+        if spoken:
+            _say(progress, "asr", 75, "沿用上回转好的 %d 段，不用再转一遍"
+                 % len(spoken["segments"]))
+        else:
+            spoken = transcribe(audio, asr_cfg, progress,
+                                should_stop=opts.get("should_stop"), resume=resume)
+            _stage_transcript(task_dir, spoken, asr_cfg)
         _check_stop(opts)
 
         bundle = _ai_bundle(llm_cfg, plan_info["title"], spoken["text"],
@@ -1405,18 +1737,24 @@ def run(url, out_dir, opts, progress):
         _say(progress, "save", 95, "正在落成一本书")
         book = _save_book(out_dir, plan_info, spoken, summary, bundle.get("note") or "",
                          mindmap, asr_cfg, ai_error)
+        finished = True
     finally:
-        # 音频和切段都是过程产物，不留 —— 占地方，而且用户要的是这本书不是那段音轨。
-        shutil.rmtree(task_dir, ignore_errors=True)
+        if finished:
+            shutil.rmtree(task_dir, ignore_errors=True)
 
     _say(progress, "save", 100, "《%s》进书架了" % _clip(book.get("title"), 30))
     _say(progress, "done", 100, "完成")
     return {"book": book["meta"], "transcript_path": book["transcript_path"],
+            "transcript_json": book["transcript_json"],
+            "merged_path": book["merged_path"],
             "note_path": book["note_path"], "mindmap_path": book["mindmap_path"],
             "chapters": book["meta"].get("chapters") or 0,
             "words": book["meta"].get("words") or 0,
+            "segments": book["meta"].get("segments") or 0,
+            "duration": _sec(book["meta"].get("duration")),
+            "language": book["meta"].get("language") or "",
             "asr_engine": spoken["engine"], "elapsed": round(time.time() - started, 1),
-            "ai_error": ai_error}
+            "ai_error": ai_error, "resume_dir": ""}
 
 
 def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_cfg,
@@ -1436,17 +1774,7 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
     if ai_error:
         extras += ["", "> AI 那部分没生成全：%s" % ai_error]
 
-    lines = []
-    for index, (chapter_title, body) in enumerate(bodies):
-        lines.append("# %s" % (chapter_title or ("第 %d 章" % (index + 1))))
-        lines.append("")
-        if index == 0:
-            lines.append("\n".join(extras).strip())
-            lines.append("")
-        if body:
-            lines.append(body)
-            lines.append("")
-    body_md = "\n".join(lines).strip() + "\n"
+    body_md = "\n".join(_chapter_docs(bodies, extras)).strip() + "\n"
 
     name = re.sub(r'[\\/:*?"<>|]', "", title)[:60] or "video"
     info = book_import.import_book(
@@ -1456,8 +1784,13 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
         book_id_prefix="video", source="video")
 
     book_dir = info["dir"]
-    _write_text(os.path.join(book_dir, "transcript.txt"), spoken["text"] + "\n")
-    _write_json(os.path.join(book_dir, "summary.json"),
+    _write_text(os.path.join(book_dir, TRANS_TXT), spoken["text"] + "\n")
+    # 合并稿也落一份：一本书一个文件的整本 Markdown，导出、比对、重建都从这里走
+    _write_text(os.path.join(book_dir, "merged.md"), body_md)
+    # 带时间戳的那份段落单独落一个文件：编辑器改转写、点时间轴跳到那一句，都读它
+    _write_json(os.path.join(book_dir, TRANS_FILE),
+                _transcript_doc(spoken, asr_cfg, plan_info))
+    _write_json(os.path.join(book_dir, SUMMARY_FILE),
                 {"summary": summary, "segments": spoken["segments"],
                  "asr_engine": spoken["engine"], "asr": {
                      "engine": asr_cfg.get("engine") or "auto",
@@ -1465,6 +1798,7 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
                  "ai_error": ai_error, "generated_at": _now()})
 
     words = len(re.sub(r"\s", "", spoken["text"]))
+    picked = _picked_page(plan_info)
     meta = _read_meta(book_dir)
     meta.update({
         "source": "video", "format": "video", "url": plan_info.get("url") or "",
@@ -1474,8 +1808,13 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
         "uploader": plan_info.get("uploader") or "",
         "duration": plan_info.get("duration") or 0,
         "pages": len(plan_info.get("pages") or []) or 1,
+        # 选中那一 P 自己的名字和时长：多 P 的书在书架上得说清这是第几 P
+        "page": picked["i"], "page_title": picked["title"],
+        "page_duration": picked["duration"],
         "cover": plan_info.get("cover") or "",
         "asr_engine": spoken["engine"], "words": words, "chars": words,
+        "language": spoken.get("language") or asr_cfg.get("language") or DEFAULT_LANGUAGE,
+        "segments": len(spoken.get("segments") or []), "transcript_edited": False,
         "ai_error": ai_error, "video_at": _now(),
     })
     _write_json(os.path.join(book_dir, "meta.json"), meta)
@@ -1495,10 +1834,33 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
     pub.update({"title": title, "author": meta.get("author") or "",
                 "meta": {**meta, "id": info.get("id"), "dir": book_dir,
                          "label": info.get("label")},
-                "transcript_path": os.path.join(book_dir, "transcript.txt"),
+                "transcript_path": os.path.join(book_dir, TRANS_TXT),
+                "transcript_json": os.path.join(book_dir, TRANS_FILE),
+                "merged_path": os.path.join(book_dir, "merged.md"),
+                "segments": len(spoken.get("segments") or []),
+                "duration": _sec(meta.get("duration")),
+                "language": meta.get("language") or "",
+                "book_dir": book_dir,
                 "note_path": exported.get("path") or "",
                 "mindmap_path": mindmap_path, "mindmap_svg": svg_path})
     return pub
+
+
+def _picked_page(plan_info):
+    """这一本书取的是第几 P，以及那一 P 的标题与时长。
+
+    单 P 视频也走这条路：pages 里就一条，返回的正是整支视频的标题和时长，
+    所以调用方不用分两种情况处理。
+    """
+    pages = [p for p in (plan_info.get("pages") or []) if isinstance(p, dict)]
+    want = _as_int(plan_info.get("page")) or 1
+    hit = next((p for p in pages if _as_int(p.get("i")) == want), None)
+    if hit is None:
+        hit = pages[0] if pages else {}
+    return {"i": _as_int(hit.get("i")) or want,
+            "title": str(hit.get("title") or plan_info.get("title") or ""),
+            "duration": _as_int(hit.get("duration")) or _as_int(plan_info.get("duration")) or 0}
+
 
 
 def _read_meta(book_dir):
@@ -1509,6 +1871,365 @@ def _read_meta(book_dir):
     except Exception:
         return {}
     return meta if isinstance(meta, dict) else {}
+
+
+# ───────────────────────── 转写：读 / 改 / 重建 / 导出 ─────────────────────────
+
+def _safe_file(title):
+    """书名 → 能安全落盘的文件名（跟 _save_book 裁标题的规矩一致）。"""
+    return re.sub(r'[\\/:*?"<>|]', "", str(title or "").strip())[:60] or "transcript"
+
+
+def _txt_segments(path):
+    """只有 transcript.txt 的老书：一行一段，时间戳给空。读不到返回 None。"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    return [{"start": None, "end": None, "text": line.strip()}
+            for line in raw.splitlines() if line.strip()]
+
+
+def load_transcript(book_dir, keyword="", start=None, end=None):
+    """读一本书的转写，收成同一种形状（带 source 说明是从哪份文件来的）。
+
+    transcript.json 在就读它（source="json"，有时间戳）；不在就从 transcript.txt 兜底
+    （source="txt"，时间戳是空，不抛）—— 升级之前转的那批书也得打得开、改得动。
+
+    keyword / start / end 是筛段：关键词不分大小写，也认说话人；时间按「这段和这个区间
+    有交集」算。没时间戳的段落在带时间条件时会被滤掉 —— 它没法证明自己落在区间里，
+    留着比假装它算数更诚实。
+    """
+    book_dir = book_dir or ""
+    meta = _read_meta(book_dir)
+    doc = _read_json(os.path.join(book_dir, TRANS_FILE))
+    if isinstance(doc, dict) and isinstance(doc.get("segments"), list):
+        source = "json"
+        segments = [_norm_seg(s) for s in doc["segments"]
+                    if isinstance(s, dict) and str(s.get("text") or "").strip()]
+        engine = str(doc.get("engine") or meta.get("asr_engine") or "")
+        language = str(doc.get("language") or meta.get("language") or "")
+        duration = _maybe_sec(doc.get("duration"))
+        if duration is None:
+            duration = _maybe_sec(meta.get("duration"))
+        edited = bool(doc.get("edited"))
+        path = os.path.join(book_dir, TRANS_FILE)
+    else:
+        source = "txt"
+        txt = _txt_segments(os.path.join(book_dir, TRANS_TXT))
+        if txt is None:
+            raise ValueError("这本书里没有转写文件（%s 和 %s 都不在），"
+                             "编辑器打不开一份不存在的转写" % (TRANS_FILE, TRANS_TXT))
+        segments = txt
+        engine = str(meta.get("asr_engine") or "")
+        language = str(meta.get("language") or "")
+        duration = _maybe_sec(meta.get("duration"))
+        edited = False
+        path = os.path.join(book_dir, TRANS_TXT)
+
+    # 每段都得有 id，编辑器才知道「我改的是哪一段」：老书写盘时没记 id，这里按位置现场
+    # 补一个（用户一保存就固定进 transcript.json）。不补的话前端只能按下标对位，而删一段、
+    # 插一段之后下标全会挪 —— 挪了还对不上，就是用户手打的字静默跑到别的段上去了。
+    for i, seg in enumerate(segments):
+        if not str(seg.get("id") or "").strip():
+            seg["id"] = "s%05d" % i
+
+    rows = segments
+    key = str(keyword or "").strip().lower()
+    if key:
+        rows = [s for s in rows if key in str(s.get("text") or "").lower()
+                or key in str(s.get("speaker") or "").lower()]
+    if start is not None or end is not None:
+        low = _sec(start)
+        high = _sec(end) if end not in (None, "") else float("inf")
+        hits = []
+        for s in rows:
+            if s.get("start") is None:
+                continue
+            begin = _sec(s.get("start"))
+            finish = max(begin, _sec(s.get("end")))
+            if begin <= high and finish >= low:
+                hits.append(s)
+        rows = hits
+
+    return {"book_dir": book_dir, "path": path, "source": source, "engine": engine,
+            "language": language, "duration": duration, "edited": edited,
+            "timed": any(s.get("start") is not None for s in segments),
+            "title": str((doc if isinstance(doc, dict) else {}).get("title")
+                         or meta.get("title") or ""),
+            "total": len(segments), "matched": len(rows),
+            "segments": rows, "text": _join_text(segments)}
+
+
+def save_transcript(book_dir, segments, engine=None, language=None, duration=None,
+                    sync_txt=True):
+    """编辑器保存转写：原子写、认不出的字段原样留着、纯文本那份跟着一起同步。
+
+    为什么原子写：这是用户在编辑器里手打的内容，写到一半断电留下半截 JSON，
+    下一次读就是坏档 —— 比丢一次保存严重得多。
+    为什么同步 transcript.txt：两份是同一个转写的两个视图，只更新一份的话，
+    重建章节时用的文字和用户在纯文本里看到的就对不上了。
+    """
+    if not os.path.isdir(book_dir or ""):
+        raise ValueError("没有这本书的目录，转写没处存")
+    if not isinstance(segments, (list, tuple)):
+        raise ValueError("转写段落得是一个列表")
+    if not len(segments):
+        raise ValueError("一段都没给，这次不写盘：这份接口是整本覆盖，"
+                         "接个空列表就等于把用户的转写清空了")
+    path = os.path.join(book_dir, TRANS_FILE)
+    doc = _read_json(path)
+    doc = doc if isinstance(doc, dict) else {}
+    # 旧段落按 id 找得着就认 id，找不到就按位置对：拆段合段之后位置是会挪，
+    # 所以只在来段没写 id 时才退回位置对齐 —— 前端给每段带上 id 就不会串。
+    old = [s for s in (doc.get("segments") or []) if isinstance(s, dict)]
+    by_id = {}
+    for item in old:
+        oid = str(item.get("id") or "")
+        if oid:
+            by_id[oid] = item
+    kept = []
+    for index, seg in enumerate(segments[:MAX_SEGMENTS]):
+        if not isinstance(seg, dict):
+            continue
+        sid = str(seg.get("id") or "")
+        base = by_id.get(sid) or (old[index] if index < len(old) else {})
+        merged = {**base, **seg}
+        # after 是编辑器「这一新段插在哪一段后面」的内部锚点，插完就没用了。它得吃掉：
+        # 别处都原样留字段是为了不丢用户的字，而这个字段留在 transcript.json 里，
+        # 下一次读还会带出来，导出的 JSON 里就多出一串谁也不认的编号。
+        merged.pop("after", None)
+        kept.append(_norm_seg(merged))
+
+    doc.update({"schema": TRANS_SCHEMA, "segments": kept, "edited": True,
+                "edited_at": _now(), "updated_at": int(time.time())})
+    if engine is not None:
+        doc["engine"] = str(engine)
+    if language is not None:
+        doc["language"] = str(language)
+    if duration is not None:
+        doc["duration"] = _sec(duration)
+    _write_json(path, doc)
+    if sync_txt:
+        _write_text(os.path.join(book_dir, TRANS_TXT), _join_text(kept) + "\n")
+    # 「手改」那盏灯看的是 meta.json 里的 transcript_edited —— 列一本书不该为了它把几十兆的
+    # transcript.json 整份读进来。改动已经落盘了，meta 不跟着记一笔，界面会一直说「还是语音
+    # 识别的原样」，用户明明改过字。
+    meta = _read_meta(book_dir)
+    if meta:
+        meta.update({"transcript_edited": True, "edited_at": _now(),
+                     "updated_at": int(time.time())})
+        _write_json(os.path.join(book_dir, "meta.json"), meta)
+    text = _join_text(kept)
+    return {"path": path, "segments": len(kept),
+            "words": len(re.sub(r"\s", "", text)), "timed": bool(
+                any(s.get("start") is not None for s in kept)),
+            "rebuild_needed": True, "msg": "转写存好了，章节要跟着改就再调一次重建"}
+
+
+def _backup_dir(book_dir):
+    """给重建腾一个带时间戳的备份目录（同一秒里连着重建两次也不撞车）。"""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(book_dir, ".bak-" + stamp)
+    n = 1
+    while os.path.exists(path):
+        n += 1
+        path = os.path.join(book_dir, ".bak-%s-%d" % (stamp, n))
+    os.makedirs(path)
+    return path
+
+
+def _restore_backup(book_dir, backup, moved):
+    """重建写挂了就原样挪回去，别留一本半新半旧的书。"""
+    for name in reversed(moved):
+        src = os.path.join(backup, name)
+        dst = os.path.join(book_dir, name)
+        try:
+            if os.path.isdir(dst):
+                shutil.rmtree(dst, ignore_errors=True)
+            elif os.path.exists(dst):
+                os.remove(dst)
+            shutil.move(src, dst)
+        except Exception:
+            pass                      # 兜底也救不了就让它留着，至少备份是完整的
+
+
+def rebuild_book(book_dir):
+    """按改过的转写重建这本书：分章文件、合并稿、notes.md 都跟着新转写走。
+
+    为什么要备份到 .bak-时间戳/：章节文件是用户读过、也可能自己动过手的东西，
+    静默覆盖等于把他那些改动丢了。所以旧文件是整个「挪」进备份目录（不是覆盖掉），
+    要回退把里面的东西挪回来就行。notes.json 里用户的划线和笔记条目一个字不改，
+    只是拿它重新导出 notes.md。
+
+    只认摘要里那批章节表（summary.json）：重建不叫 LLM，章节名沿用上一版，
+    改的是正文归属 —— 想重新分章就再跑一次 AI（这条线本来就允许 AI 缺席）。
+    """
+    if not os.path.isdir(book_dir or ""):
+        raise ValueError("没有这本书的目录，重建不了")
+    trans = load_transcript(book_dir)
+    segments = trans["segments"]
+    text = _join_text(segments)
+    if not text.strip():
+        raise ValueError("转写是空的，重建出来只会是一本空书")
+
+    doc = _read_json(os.path.join(book_dir, SUMMARY_FILE))
+    summary = (doc or {}).get("summary") if isinstance(doc, dict) else None
+    summary = summary if isinstance(summary, dict) else {}
+    chapters = summary.get("chapters") or []
+    meta = _read_meta(book_dir)
+    # 没时间戳的老书按字数均分（拿 None 时间戳去切章会让每一段都落进第一章）
+    bodies = _chapter_bodies(text, segments if trans["timed"] else None, chapters)
+    source = {"title": meta.get("page_title") or meta.get("title") or "视频笔记",
+              "platform": meta.get("platform") or "", "url": meta.get("url") or "",
+              "uploader": meta.get("uploader") or "",
+              "duration": trans.get("duration") if trans.get("duration") is not None
+              else meta.get("duration")}
+    extras = [_provenance(source, trans.get("engine") or meta.get("asr_engine") or "")]
+    if summary.get("overview"):
+        extras += [""] + _summary_block(summary)
+    if meta.get("ai_error"):
+        extras += ["", "> AI 那部分没生成全：%s" % meta["ai_error"]]
+    extras += ["", "> 转写已于 %s 手工修订，全文与各章按修订后的转写重建" % _now()]
+
+    parts = _chapter_docs(bodies, extras)
+    merged = "\n".join(parts).strip() + "\n"
+    names = [bodies[i][0] or ("第 %d 章" % (i + 1)) for i in range(len(bodies))]
+
+    # 先把要写的东西全算出来，再动旧文件：中间出错的话书还是原来那本
+    backup, moved = _backup_dir(book_dir), []
+    ch_dir = os.path.join(book_dir, "chapters")
+    for name in ("chapters", TRANS_TXT, "_catalog.json", "meta.json", "notes.md"):
+        src = os.path.join(book_dir, name)
+        if os.path.exists(src):
+            shutil.move(src, os.path.join(backup, name))
+            moved.append(name)
+    for name in (TRANS_FILE, SUMMARY_FILE, "notes.json"):
+        src = os.path.join(book_dir, name)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(backup, name))    # 这三份不重写，留个参照
+    try:
+        os.makedirs(ch_dir, exist_ok=True)
+        for index, part in enumerate(parts):
+            _write_text(os.path.join(ch_dir, "%04d.md" % index), part)
+        _write_json(os.path.join(book_dir, "_catalog.json"), names)
+        _write_text(os.path.join(book_dir, TRANS_TXT), text + "\n")
+        _write_text(os.path.join(book_dir, "merged.md"), merged)
+
+        total = len(parts)
+        prog = _read_json(os.path.join(book_dir, "_progress.json"))
+        prog = prog if isinstance(prog, dict) else {}
+        _write_json(os.path.join(book_dir, "_progress.json"),
+                    {"at": min(_as_int(prog.get("at")) or total, total), "max": total})
+
+        words = len(re.sub(r"\s", "", text))
+        # 这里不碰 transcript_edited：重建章节和「用户改过字」是两件事，刚转完直接重建的书
+        # 也走这条路，替它立一盏「手改」灯就是撒谎。
+        meta.update({"words": words, "chars": words, "segments": len(segments),
+                     "rebuilt_at": _now(),
+                     "chapters": total, "updated_at": int(time.time())})
+        if trans.get("engine"):
+            meta["asr_engine"] = trans["engine"]
+        if trans.get("language"):
+            meta["language"] = trans["language"]
+        if trans.get("duration") is not None:
+            meta["duration"] = trans["duration"]
+        _write_json(os.path.join(book_dir, "meta.json"), meta)
+
+        saved = book_notes.load_notes(book_dir)
+        out = book_notes.export_notes(book_dir, saved, meta=meta,
+                                      titles=book_notes.chapter_titles(book_dir),
+                                      book_label=source["title"])
+    except Exception:
+        _restore_backup(book_dir, backup, moved)
+        raise
+    return {"ok": True, "book_dir": book_dir, "chapters": total, "words": words,
+            "backup": backup, "moved": moved, "merged_path": os.path.join(book_dir, "merged.md"),
+            "transcript_path": os.path.join(book_dir, TRANS_TXT),
+            "notes_path": out.get("path") or "", "msg": "重建好了，旧文件在备份目录里"}
+
+
+def _cue_doc(segments, sep):
+    """段落 → 字幕正文：空段跳过、序号连续，时间码用 sep 分隔秒与毫秒。
+
+    序号只在真要写出一条时才自增 —— 空段占号会让字幕编号跳着走，播放器能忍，
+    但对时间轴的人忍不了。
+    """
+    out, index = [], 0
+    for seg in segments:
+        text = " ".join(str(seg.get("text") or "").split())      # 段内换行压成空格
+        if not text:
+            continue
+        index += 1
+        begin = _sec(seg.get("start"))
+        finish = max(begin, _sec(seg.get("end")))
+        speaker = str(seg.get("speaker") or "").strip()
+        if speaker:
+            # 说话人：VTT 用它认得的语音标记，SRT 没标准就用方括号摆在前头
+            text = ("<v %s>%s</v>" % (speaker, text)) if sep == "." else "[%s] %s" % (
+                speaker, text)
+        out.append("%d\n%s --> %s\n%s\n" % (index, _cue_time(begin, sep),
+                                           _cue_time(finish, sep), text))
+    return "\n".join(out)
+
+
+def export_transcript(book_dir, fmt="srt", out_path=""):
+    """转写导出成字幕 / 纯文本 / Markdown / JSON，落盘并返回能直接下载的信息。
+
+    默认落在书目录下的 exports/ 里（跟书走，拷走这本书就拷走了它的导出物），
+    而不是 transcript.txt 那种有正用的文件 —— 那些名字另有职责，覆盖了就出事。
+    """
+    fmt = str(fmt or "srt").strip().lower().lstrip(".")
+    if fmt not in EXPORT_EXT:
+        raise ValueError("导出格式只认 %s，别的还不会" % " / ".join(sorted(EXPORT_EXT)))
+    trans = load_transcript(book_dir)
+    meta = _read_meta(book_dir)
+    title = (meta.get("page_title") or meta.get("title") or trans.get("title")
+             or "转写")
+    segments = [s for s in trans["segments"] if str(s.get("text") or "").strip()]
+    timed = bool(trans["timed"])
+
+    if fmt == "srt":
+        body = _cue_doc(segments, ",")
+    elif fmt == "vtt":
+        body = "WEBVTT\n\n" + _cue_doc(segments, ".")
+    elif fmt == "txt":
+        body = _join_text(segments) + "\n"
+    elif fmt == "md":
+        lines = ["# %s　·　转写" % title,
+                 "> %d 段　·　%s　·　导出于 %s" % (
+                     len(segments), trans.get("engine") or "转写引擎未记", _now()), ""]
+        for seg in segments:
+            stamp = "**[%s]** " % _stamp(seg["start"]) if (
+                timed and seg.get("start") is not None) else ""
+            speaker = "%s：" % seg["speaker"] if str(seg.get("speaker") or "").strip() else ""
+            lines.append("%s%s%s" % (stamp, speaker, str(seg.get("text") or "").strip()))
+            lines.append("")
+        body = "\n".join(lines).rstrip() + "\n"
+    else:
+        body = json.dumps({"schema": TRANS_SCHEMA, "source": trans["source"],
+                           "engine": trans.get("engine") or "",
+                           "language": trans.get("language") or "",
+                           "duration": trans.get("duration"),
+                           "title": title, "timed": timed,
+                           "segments": segments, "text": trans["text"]},
+                          ensure_ascii=False, indent=2) + "\n"
+
+    if not out_path:
+        target = os.path.join(book_dir, EXPORT_DIR,
+                              "%s.%s" % (_safe_file(title), EXPORT_EXT[fmt]))
+    else:
+        target = out_path
+    holder = os.path.dirname(os.path.abspath(target))
+    os.makedirs(holder, exist_ok=True)
+    path = os.path.abspath(target)
+    _write_text(path, body)
+    return {"ok": True, "format": fmt, "path": path, "name": os.path.basename(path),
+            "bytes": len(body.encode("utf-8")),
+            "chars": len(re.sub(r"\s", "", body)), "segments": len(segments),
+            "timed": timed, "source": trans["source"], "book_dir": book_dir}
+
 
 
 if __name__ == "__main__":
@@ -1532,8 +2253,8 @@ if __name__ == "__main__":
             opts = {}
 
         # 中止：ui_server 的 stop_task 发的是 SIGTERM。这里把它接住转成「请求停止」，
-        # 让流水线在阶段之间自己收尾（音频本来就只在临时目录里，删掉即可），
-        # 而不是被就地打死、留下一本半截的书。
+        # 让流水线在阶段之间自己收尾（下好的音频和转好的分片留在临时目录里，
+        # 下次重跑同一条链接会接着用），而不是被就地打死、留下一本半截的书。
         stop = {"v": False}
 
         def _ask_stop(*_):
@@ -1555,17 +2276,30 @@ if __name__ == "__main__":
             res = run(target, root, {
                 "asr": opts.get("asr") or {},
                 "language": opts.get("language") or "",
+                "page": opts.get("page"),
+                "resume": opts.get("resume"),
                 "llm": {"url": url_cfg, "key": key_cfg, "model": model_cfg},
                 "should_stop": lambda: stop["v"],
             }, echo)
             book = res.get("book") or {}
+            # 前端做转写编辑器要的东西都在这：段数、时长、语言、三份文件的路径 ——
+            # 拿到就能直接开编辑器和下载按钮，不用再回读盘。
             payload = {"ok": True, "book_id": book.get("id", ""),
                        "title": book.get("title", ""), "words": res.get("words", 0),
                        "chapters": res.get("chapters", 0),
                        "asr_engine": res.get("asr_engine", ""),
                        "mindmap": bool(res.get("mindmap_path")),
                        "ai_error": res.get("ai_error", ""),
-                       "elapsed": res.get("elapsed", 0)}
+                       "elapsed": res.get("elapsed", 0),
+                       "segments": res.get("segments", 0),
+                       "duration": res.get("duration", 0),
+                       "language": res.get("language", ""),
+                       "page": book.get("page") or 1,
+                       "pages": book.get("pages") or 1,
+                       "book_dir": book.get("dir", ""),
+                       "transcript_path": res.get("transcript_path", ""),
+                       "transcript_json": res.get("transcript_json", ""),
+                       "merged_path": res.get("merged_path", "")}
         except Aborted:
             payload = {"ok": False, "aborted": True, "msg": "已中止"}
         except Exception as e:

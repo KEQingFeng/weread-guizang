@@ -49,6 +49,8 @@ APP_FILES=(
   video_note.py
   ffmpeg_tool.py
   sync.py
+  board.py
+  mindmap.py
   requirements.txt
 )
 APP_DIRS=(
