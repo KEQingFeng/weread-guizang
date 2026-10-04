@@ -35,7 +35,7 @@ async def probe(pg):
             overflowX: de.scrollWidth > de.clientWidth + 1,
             overflowing: over.slice(0, 5),
             side: box('.side'), main: box('main'), card: box(shown + '.wcard'),
-            chead: box(shown + '.chead'), dock: box('#dock'), views: box('#views'),
+            chead: box(shown + '.chead'), live: box('#live'), views: box('#views'),
             cards: document.querySelectorAll(shown + '.wcard').length,
             panesShown: document.querySelectorAll('.vpane:not([hidden])').length,
             bodyBg: cs('body') ? cs('body').backgroundColor : null,

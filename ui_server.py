@@ -48,17 +48,19 @@ import flomo_notes
 import media_setup
 import mindmap
 import person
+import readplan
 import sync as cloudsync
 import video_note
 import web_parse
 import writer as writer_mod
+import zlib_client as zlib
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -117,6 +119,10 @@ READSTAT_PATH = os.path.join(CACHE_DIR, "readstat.json")
 # 学习时长 + 写作时长那两本账（个人主界面两张热力图的数源），和阅读时长分开放：
 # 口径不同、清零各清各的，合成一个文件反而容易一删删掉三笔。
 ACTIVITY_PATH = os.path.join(CACHE_DIR, "activity.json")
+# 每本书的阅读计划：定过的目标、读到哪、今日 / 本周的账、读完的档案，都在这儿。
+# 它是「计划」不是「书的正文」，所以放缓存里跟 readstat / activity 并排；删了书还在，
+# 只是这本书的节奏要重新定一次。
+PLAN_PATH = os.path.join(CACHE_DIR, "readplan.json")
 # 个人主界面的头像：跟壁纸一样存成文件，不进 localStorage（照片几 MB，那边只有 5MB）。
 AVATAR_PATH = os.path.join(CACHE_DIR, "avatar.bin")
 UI_PATH = os.path.join(REPO, "ui.html")
@@ -682,6 +688,93 @@ def activity_clear(kind=None):
     return True, msg
 
 
+# ---------- 每本书的阅读计划 ----------
+#
+# 页数怎么由字数折算、进度为什么只增不减、读完那一刻怎么留档 —— 全在 readplan.py，
+# 那一层是纯逻辑，脱开服务就能单测。这一层只管两件事：
+#   1. 把这本账从磁盘读出来 / 写回去（一把锁，理由和 _READSTAT_LOCK 一样：界面按
+#      心跳式地上报读到哪，两个上报并发进来就是「读—改—写」互相覆盖）。
+#   2. 把「这本书有多少页」从 book_outline 现算出来喂给它 —— 于是计划里的页数永远
+#      跟磁盘上的书对得上，不靠谁记得去更新。
+
+_PLAN_LOCK = threading.RLock()
+
+
+def load_plan():
+    try:
+        with open(PLAN_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        raw = {}
+    return readplan.load(raw)
+
+
+def save_plan(d):
+    with _WRITE_LOCK:
+        _write_json(PLAN_PATH, d)
+
+
+def plan_tick(fn):
+    """读—改—写整段在一把锁里，返回 fn 的返回值（前端按心跳上报，会并发）。"""
+    with _PLAN_LOCK:
+        store = load_plan()
+        out = fn(store)
+        save_plan(store)
+        return out
+
+
+def plan_chapters(book_id):
+    """给 readplan 用的书目录：只取各章字符数。书不在本地返回 None。"""
+    out = book_outline(book_id)
+    return (out.get("chapters") or None) if out else None
+
+
+def plan_view(book_id):
+    """读出这本书计划的样子。总页数现算；书不在本地就用存下来的页数兜底。
+
+    还没定计划时也把总页数带上：界面要拿它写「全书 300 页，按每天 20 页约 15 天读完」，
+    否则用户只能盲填一个目标。
+    """
+    ch = plan_chapters(book_id)
+    total = readplan.total_pages(ch) if ch else None
+    v = readplan.view(load_plan(), book_id, total=total)
+    if not v.get("has") and total:
+        v["pages"] = total
+    return v
+
+
+def plan_do(body):
+    """POST /api/plan 一个口三个动作：定 / 记进度 / 结束。都回最新的读数。"""
+    body = body or {}
+    act = body.get("act") or "get"
+    book = str(body.get("book") or "").strip()
+    if not safe_book_dir(book):
+        return {"ok": False, "msg": "没认出是哪本书"}
+    if act == "clear":
+        plan_tick(lambda s: readplan.clear_plan(s, book))
+        return {"ok": True, "msg": "这本的计划已结束", "data": {"has": False}}
+    if act == "set":
+        ch = plan_chapters(book) or []
+        if not ch:
+            return {"ok": False, "msg": "这本书还没有可读的章节，先取回来或导进来"}
+        title = meta_title(book)
+        total = readplan.total_pages(ch)
+        period = body.get("period") if body.get("period") in readplan.KINDS else "daily"
+        amount = body.get("pages")
+        target = body.get("target") if isinstance(body.get("target"), str) else ""
+        p = plan_tick(lambda s: readplan.put_plan(s, book, title, total, period, amount,
+                                                  target=target))
+        return {"ok": True, "msg": "计划定好了", "data": plan_view(book),
+                "target": p.get("target") or ""}
+    if act == "pos":
+        ch = plan_chapters(book)
+        if ch is None:
+            return {"ok": False, "msg": "这本书还没有可读的章节"}
+        plan_tick(lambda s: readplan.record_pos(s, book, ch, body.get("at"), body.get("frac")))
+        return {"ok": True, "data": plan_view(book)}
+    return {"ok": True, "data": plan_view(book)}
+
+
 # ---------- 个人主界面：头像、名字、简介 ----------
 #
 # 三项都只落在这台机器上：cache/avatar.bin + config.json 里那几个键。
@@ -809,12 +902,11 @@ def nav_view():
     mode = cfg.get("sidebar_mode")
     return {"items": items,
             "sidebar": mode if mode in SIDEBAR_MODES else "open",
-            "hover": bool(cfg.get("sidebar_hover", True)),
             # 重启后落在哪一屏：第一格可见的入口，全关掉那种情况兜回书架
             "home": visible[0] if visible else "shelf"}
 
 
-def save_nav(order=None, hidden=None, sidebar=None, hover=None):
+def save_nav(order=None, hidden=None, sidebar=None):
     cfg = load_cfg()
     if order is not None:
         want = [x for x in (order if isinstance(order, list) else []) if x in NAV_IDS]
@@ -827,8 +919,6 @@ def save_nav(order=None, hidden=None, sidebar=None, hover=None):
         cfg["nav_hidden"] = [x for x in NAV_IDS if x in keep]
     if sidebar in SIDEBAR_MODES:
         cfg["sidebar_mode"] = sidebar
-    if hover is not None:
-        cfg["sidebar_hover"] = bool(hover)
     save_cfg(cfg)
     return True, "已保存"
 
@@ -3223,6 +3313,87 @@ def _feed_tags(body, key="tags"):
     return [str(x).strip() for x in v if str(x).strip()][:12]
 
 
+def zlib_do(body):
+    """POST /api/zlib —— Z-Library 这一路：查状态 / 登录 / 登出 / 搜书 / 下载入库。
+
+    密码只在这一趟请求的内存里过一手（zlib_client 落盘的只有换回来的 remix 令牌，
+    回给界面的也只有后四位）。下载成功后走 `book_import` 收进「本地书架」—— 和用户
+    自己拖文件进来是同一条路，所以阅读器、导出、文件管理器定位这些现成能力一行不改。
+
+    代理由 zlib_client 自己接（本机现有那套），这里不管 —— 它在国内是必需品，不是选项。
+    """
+    b = body or {}
+    mode = str(b.get("mode") or "").strip()
+
+    def _num(v, dflt):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return dflt
+
+    try:
+        if mode == "status":
+            st = zlib.status(DATA_DIR)
+            st["downloads_left"] = zlib.downloads_left(DATA_DIR)  # 问不到回 None，界面就不显示
+            return {"ok": True, "zlib": st}
+
+        if mode == "login":
+            dom = str(b.get("domain") or "").strip() or None
+            if b.get("userid") or b.get("userkey"):
+                st = zlib.login_with_token(DATA_DIR, b.get("userid"), b.get("userkey"), domain=dom)
+            else:
+                st = zlib.login(DATA_DIR, str(b.get("email") or "").strip(),
+                                b.get("password") or "", domain=dom)
+            log("Z-Library 已登录")
+            return {"ok": True, "zlib": st, "msg": "已登录 Z-Library"}
+
+        if mode == "logout":
+            zlib.clear_cred(DATA_DIR)
+            log("Z-Library 已退出登录")
+            return {"ok": True, "zlib": zlib.status(DATA_DIR), "msg": "已退出 Z-Library"}
+
+        if mode == "domain":
+            # 只改「下次往哪个域名打」，不动令牌 —— 换域名后原来的令牌多半还有效。
+            st = zlib.set_domain(DATA_DIR, str(b.get("domain") or "").strip())
+            log("Z-Library 镜像域名改为 %s" % st.get("domain"))
+            return {"ok": True, "zlib": st, "msg": "已保存域名"}
+
+        if mode == "search":
+            ext = b.get("extensions")
+            if isinstance(ext, str):
+                ext = [x for x in re.split(r"[,，\s]+", ext) if x]
+            if not isinstance(ext, list) or not ext:
+                ext = list(zlib.KEEP_EXT)     # 缺省只列阅读器收得下的，免得点了下载却打不开
+            d = zlib.search(DATA_DIR, str(b.get("q") or "").strip(),
+                            page=_num(b.get("page"), 1), limit=_num(b.get("limit"), 20),
+                            extensions=ext)
+            return {"ok": True, **d}
+
+        if mode == "download":
+            book = b.get("book")
+            if not isinstance(book, dict):
+                return {"ok": False, "msg": "没有指明要下哪本书"}
+            name, blob = zlib.download(DATA_DIR, book)
+            info = book_import.import_book(
+                module_dir("local"), name, blob,
+                title=str(book.get("title") or "").strip(),
+                author=str(book.get("author") or "").strip(),
+                book_id_prefix="zlib", source="local", cover_dir=COVER_DIR)
+            log("Z-Library 下载入库：%s（%s，%d 章）"
+                % (info["title"], info["label"], info["chapters"]))
+            return {"ok": True, "book": info,
+                    "msg": "已下载《%s》并收进本地书架" % info["title"]}
+
+        return {"ok": False, "msg": "不认识这个动作"}
+    except zlib.ZlibError as e:              # 这一路的错误都带人话，原样递出去
+        return {"ok": False, "msg": str(e)}
+    except ValueError as e:                  # 收书那一层认不出格式 / 空文件之类
+        return {"ok": False, "msg": str(e)}
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "msg": "没做成：%s" % str(e)[:160]}
+
+
 def feed_do(body):
     """POST /api/feed —— 订阅管理 + 阅读动作。界面里的每个按钮都对应这里一个 act。"""
     act = str((body or {}).get("act") or "").strip()
@@ -4084,6 +4255,9 @@ class Handler(BaseHTTPRequestHandler):
                 "video": {"available": video_avail(),
                           "asr": (load_cfg().get("asr_engine") or "auto"),
                           "lang": (load_cfg().get("asr_lang") or "")},
+                # Z-Library 这一路：状态是纯本地的（读凭据文件，不发一次请求），
+                # 所以能塞进每 2.6s 一次的轮询里。余量（下载次数）要联网，走 /api/zlib。
+                "zlib": zlib.status(DATA_DIR),
             })
 
         if path == "/api/feed":
@@ -4121,6 +4295,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/readstat":
             return self._json(readstat_summary())
+
+        if path == "/api/plan":
+            # 不给 book 就是「所有在进行的计划」（个人页那类汇总用得着）；给了就只讲这一本。
+            bid = q.get("book", [""])[0]
+            if bid:
+                return self._json({"ok": True, "data": plan_view(bid)})
+            return self._json({"ok": True,
+                               "data": readplan.list_active(load_plan(),
+                                                            now=int(time.time()))})
 
         if path == "/api/activity":
             # 两张热力图的整包（含日历格子）。进个人主界面才取，不在轮询里带 ——
@@ -4759,6 +4942,11 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = readstat_clear()
             return self._json({"ok": ok, "msg": msg})
 
+        if u.path == "/api/plan":
+            # 定 / 记进度 / 结束，一个口三个动作；每次回最新读数，前端据此就地更新，
+            # 不必再回头问一次（读到哪是按心跳上报的，一回一答最省）。
+            return self._json(plan_do(body))
+
         if u.path == "/api/activity/tick":
             # 心跳。回的是「真正计入的秒数」不是 ok：单次夹 300 秒、单日封顶 12 小时，
             # 页面拿这个数更新自己的读数，屏幕上的数字和账本里的数才会永远对得上。
@@ -4795,8 +4983,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/nav":
             ok, msg = save_nav(order=(body or {}).get("order"),
                                hidden=(body or {}).get("hidden"),
-                               sidebar=(body or {}).get("sidebar"),
-                               hover=(body or {}).get("hover"))
+                               sidebar=(body or {}).get("sidebar"))
             return self._json({"ok": ok, "msg": msg, "nav": nav_view()})
 
         if u.path == "/api/writer":
@@ -4962,6 +5149,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/video":
             return self._json(video_do(body))
+
+        if u.path == "/api/zlib":
+            # Z-Library 这一路（登录 / 搜书 / 下载入库）。下载那一步是唯一的写盘动作，
+            # 落进「本地书架」，和用户自己拖文件进来走同一条导入路。
+            return self._json(zlib_do(body))
 
         if u.path == "/api/mynotes":
             # 存这本书的笔记。落盘后把「服务端认得的版本」回给前端 —— id 和时间戳

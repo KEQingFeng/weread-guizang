@@ -7,10 +7,11 @@ nav_hidden），页面不再抄一份；`ui_server.NAV_ITEMS` 那张表就是入
 
   · **页面与名册逐条对得上** —— 名册里每一个 id 在页面上都有一颗图标、都能切过去；
     页面上多出来的图标没有，名册里漏掉的也没有（少一颗就是「某一格凭空消失」）。
-  · **接口守得住边界** —— 排序、显隐、侧边栏待法、悬停开关都是 POST 回来的；
+  · **接口守得住边界** —— 排序、显隐、侧边栏待法都是 POST 回来的；
     全关掉要挡住（不然主界面没东西可点）；个人简介里的尖括号要洗干净再落盘。
   · **真机上点得动** —— 侧边栏默认摊开、点头像进个人主界面、两张热力图各 371 格、
-    长按拖拽能换顺序、靠左缘待法下指针靠边会「弹」出来再自动收回、悬停即切换。
+    长按拖拽能换顺序、靠左缘待法下指针靠边会「弹」出来再自动收回；切页只认点击
+    （悬停即切换那条已按用户要求砍掉，指针扫过或停住都不许把整屏换走）。
 
 真机那一段跑完会把改过的顺序与待法还原，不给后面的套件留脏状态。
 
@@ -101,9 +102,9 @@ chk("状态包：导航项十二颗、带 id / 名字 / 分组 / 显隐",
     len(items))
 chk("状态包：默认顺序就是名册的顺序", [x["id"] for x in items] == NAV_IDS,
     [x["id"] for x in items])
-chk("状态包：待法给的是合法档，悬停开关是布尔",
-    NAV.get("sidebar") in ui_server.SIDEBAR_MODES and isinstance(NAV.get("hover"), bool),
-    (NAV.get("sidebar"), NAV.get("hover")))
+chk("状态包：待法给的是合法档，导航里不再有悬停开关这一项",
+    NAV.get("sidebar") in ui_server.SIDEBAR_MODES and "hover" not in NAV,
+    (NAV.get("sidebar"), sorted(NAV.keys())))
 chk("状态包：重启后落点是第一格可见入口（默认就是书架）", NAV.get("home") == "shelf",
     NAV.get("home"))
 
@@ -150,10 +151,10 @@ chk("待法：切到「靠左缘滑出」后状态包认这个档",
     nav_of(get("/api/state")).get("sidebar") == "edge")
 post("/api/nav", {"sidebar": "open"})
 chk("待法：切回「常驻」", nav_of(get("/api/state")).get("sidebar") == "open")
+# 悬停切换已下架：再把 hover 递上去，接口不该记它、状态包里也不许再冒出来。
 post("/api/nav", {"hover": False})
-chk("悬停开关：关掉后状态包认", nav_of(get("/api/state")).get("hover") is False)
-post("/api/nav", {"hover": True})
-chk("悬停开关：开回来", nav_of(get("/api/state")).get("hover") is True)
+chk("悬停开关已下架：递上去也不认，状态包里不会有 hover",
+    "hover" not in nav_of(get("/api/state")))
 
 # 头像：沙盒里没有，就该是 404 而不是一张破图。
 chk("头像：没上传时接口回 404（不是一个空壳 200）", http_status("/api/avatar") == 404)
@@ -229,19 +230,16 @@ with sync_playwright() as pw:
     else:
         chk("真机：能拿到两颗粒子的位置（拖拽可测）", False, (sb, cb))
 
-    # 悬停即切换：指针停在某一格够久就切过去，不必点。
+    # 切页只认「点」：悬停即切换那条已按用户要求砍掉。指针停在一格上再多也不许跳。
     page.hover('#nav button[data-v="notes"]')
-    page.wait_for_timeout(450)
-    on_notes = page.eval_on_selector('#nav button[data-v="notes"]',
-                                     "b => b.classList.contains('on')")
-    chk("真机：指针停在一格上就切过去了（悬停即切换，不用点击）", on_notes)
-    page.hover('#nav button[data-v="shelf"]')
-    page.wait_for_timeout(450)
+    page.wait_for_timeout(500)
+    chk("真机：指针停在一格上不再切页（悬停即切换已砍掉）",
+        not page.eval_on_selector('#nav button[data-v="notes"]', "b => b.classList.contains('on')"),
+        page.eval_on_selector('#nav button.on', "b => b.dataset.v"))
 
-    # 悬停切换只认「指针真的动了」。改窗口大小、窄屏断点重排会让另一格滑到原地不动的
-    # 指针底下，浏览器这时会补一个 pointerover —— 那不是用户把指针挪过去，照切就会在
-    # 改大小的当口把界面跳到别的一屏（订阅那一套真机就是在 720px 那一档这么栽的）。
-    # 直接合成那个事件来钉这条规矩：只补 pointerover、不给 pointermove，页面必须纹丝不动。
+    # 浏览器补的 pointerover 同样不算「真点」。改窗口大小、窄屏断点重排会让另一格滑到
+    # 原地不动的指针底下，浏览器这时会补一个 pointerover —— 那不是用户把指针挪过去。
+    # 无论悬停切不切换，这条都得纹丝不动：直接合成那个事件来钉。
     page.evaluate("""() => {
       const b = document.querySelector('#nav button[data-v="pick"]');
       const r = b.getBoundingClientRect();
@@ -252,6 +250,14 @@ with sync_playwright() as pw:
     chk("真机：只补一个 pointerover（指针没真的动）不许切页",
         not page.eval_on_selector('#nav button[data-v="pick"]', "b => b.classList.contains('on')"),
         page.eval_on_selector('#nav button[data-v="pick"]', "b => b.className"))
+
+    # 真点一下才是切页：点「笔记」这一格，页面要过去。
+    page.click('#nav button[data-v="notes"]')
+    page.wait_for_timeout(700)
+    chk("真机：点一下目标才切页（点「笔记」就切过去了）",
+        page.eval_on_selector('#nav button[data-v="notes"]', "b => b.classList.contains('on')"))
+    page.click('#nav button[data-v="shelf"]')       # 还原到书架，别给后面的步骤留脏
+    page.wait_for_timeout(700)
 
     # 点头像进个人主界面。
     page.click("#mebtn")
@@ -283,7 +289,9 @@ with sync_playwright() as pw:
     chk("真机：侧边栏待法两颗（常驻 / 靠左缘滑出）都在",
         page.locator('#navSideSeg button[data-s="open"]').count() == 1
         and page.locator('#navSideSeg button[data-s="edge"]').count() == 1)
-    chk("真机：悬停切换有一颗开关", page.locator("#navHover").count() == 1)
+    chk("真机：设置里不再有悬停切换那颗开关（那条交互已下架）",
+        page.locator("#navHover").count() == 0,
+        page.locator("#navHover").count())
 
     # 靠左缘待法：指针靠到窗口左缘要「弹」出来，移回内容区再自动收回。
     # 设置弹窗那张遮罩是铺满全屏的（z-index 54），压着左缘感应带 —— 要测就得先把它关掉，

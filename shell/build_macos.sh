@@ -48,11 +48,13 @@ APP_FILES=(
   clip_article.py
   web_parse.py
   feed.py
+  zlib_client.py
   video_note.py
   flomo_notes.py
   writer.py
   activity.py
   person.py
+  readplan.py
   ffmpeg_tool.py
   media_setup.py
   cleanup.py

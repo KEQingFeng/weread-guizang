@@ -41,8 +41,9 @@ MODULE_OF = {v: k for k, v in MODULES}
 ORDER = [m for m, _ in MODULES]
 
 # 目录名前缀：meta 坏了、还没有 meta 时，靠前缀认这本书属于哪一路
+# （zlib_ 是 Z-Library 下回来的：它落进「本地书架」，所以归 local，不是新开一格）
 PREFIX_OF = {"clip_": "clip", "feed_": "feed", "video_": "video",
-             "imp_": "local", "flomo_": "flomo", "write_": "write"}
+             "imp_": "local", "flomo_": "flomo", "write_": "write", "zlib_": "local"}
 
 # 书号只允许这些字符（与 ui_server.safe_book_dir 同一道闸，两边都把一次不算多）
 ID_RE = re.compile(r"[A-Za-z0-9_\-]+\Z")
