@@ -185,6 +185,32 @@
   .live.good b{background:var(--mint)}
   .live.bad{color:var(--err); background:rgba(200,85,74,.12)}
   .live.bad b{background:var(--err)}
+  /* 界面比本机后端新时的那条提示。为什么要它：界面每次请求都从磁盘现读，
+     后端的路由表却是进程起来那一刻装进内存的 —— 代码更新了而旧进程还挂着，
+     新功能就一律 404。这条只讲「哪儿不匹配」和「一键换掉」，不让人去猜服务起没起。 */
+  .swapbar{
+    position:sticky; top:8px; z-index:60; display:none; align-items:center; gap:12px;
+    width:min(900px, calc(100% - 32px)); margin:0 auto; padding:9px 14px;
+    font-size:12.5px; line-height:1.55; color:var(--ink);
+    background:var(--glass); border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow);
+  }
+  .swapbar.show{display:flex; animation:swapin .26s cubic-bezier(.22,.68,.24,1)}
+  @keyframes swapin{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:none}}
+  .swapbar span{min-width:0}
+  .swapbar em{font-style:normal; color:var(--ink-3)}
+  .swapbar .swapgo{
+    margin-left:auto; flex:none; height:26px; padding:0 12px; border-radius:999px;
+    border:1px solid var(--line); background:var(--accent-soft); color:var(--accent);
+    font-size:12px; cursor:pointer;
+  }
+  .swapbar .swapgo:hover{background:var(--accent); color:#fff}
+  .swapbar .swapgo[disabled]{opacity:.55; cursor:default}
+  .swapbar .swapx{
+    flex:none; height:26px; padding:0 8px; border:0; border-radius:8px;
+    background:none; color:var(--ink-3); cursor:pointer; font-size:12px; line-height:1;
+  }
+  .swapbar .swapx:hover{background:rgba(127,140,160,.16); color:var(--ink)}
   @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 
   /* ── 设置弹窗 ──────────────────────────
@@ -2821,6 +2847,12 @@
   <div class="live" id="live"><b></b><span id="liveText">静候</span></div>
 </header>
 
+<div class="swapbar" id="swapbar" role="status" aria-live="polite">
+  <span id="swaptext"></span>
+  <button class="swapgo" id="swapgo" title="让本机后端换成和界面同一份代码">换新后端</button>
+  <button class="swapx" id="swapx" title="这次先不管，界面照常能用老功能">先不管</button>
+</div>
+
 <div class="popmask" id="popmask"></div>
 
 <div class="pop glass" id="pop" role="dialog" aria-modal="true" aria-label="设置">
@@ -4201,6 +4233,130 @@ function paintProgress() {
 let localStamp = '';
 let sideFootStamp = '';
 
+/* ── 界面与后端配不配得上 ─────────────────────────── */
+/* 界面每次请求都从磁盘现读，后端的路由表却是进程起来那一刻装进内存的 ——
+   代码更新了而旧进程还挂着，新功能一律 404。2026-10-04 用户报的三条
+   「画板 / 思维导图 / flomo 导入后端没启动」全是这一条：端口上跑着 0.9.8，
+   界面写着 1.0.1，而文案却说什么「本机服务没在跑」，把人带去查一件本来没事的事。
+   GUIZANG_PAGE 是这份界面写给哪版后端看的；ui_server.py 改完没跟着改版本号的情况，
+   靠 404 兜住（后端认不得这条接口 = 它比界面旧）。 */
+const GUIZANG_PAGE = "1.0.3";
+const GZ = {back: "", code: "", stale: false, hid: false, swapping: false, why: ""};
+
+function gzStale(what) {
+  return '本机后端是 ' + (GZ.back || '更老的一版') + '，界面是 ' + GUIZANG_PAGE +
+    '：' + (what || '这个功能') + '它那边还没有。点「换新后端」就补上了。';
+}
+
+function gzSwapShow(text) {
+  if (GZ.hid || !text) return;
+  // GZ.why 是「用户点了换新后端、后端给了原因」那句话（起不来 / 在跑任务不打断 /
+  // 不认这一键）。它比通用的「哪儿不匹配」有用，得留在横幅上直到用户自己点掉 ——
+  // 否则 2.6 秒后下一次轮询就把刚看到的答案盖回去了。
+  if (GZ.why) return;
+  const bar = document.getElementById('swapbar');
+  const span = document.getElementById('swaptext');
+  if (!bar || !span) return;
+  if (span.textContent !== text) span.textContent = text;
+  bar.classList.add('show');
+}
+
+/** 点「换新后端」：让本机那个旧进程退掉、换成和界面同一份代码，页面自己刷新。
+    旧后端没有 /api/restart 这条接口（404 正好被我们认出来），那就只能给手动路径。 */
+async function gzSwapGo() {
+  if (GZ.swapping) return;
+  GZ.why = "";                     // 新一轮尝试：上一条原因得让位给这一条
+  const btn = document.getElementById('swapgo');
+  const span = document.getElementById('swaptext');
+  if (btn) btn.disabled = true;
+  const oldCode = GZ.code;
+  let d = null;
+  let net = false;
+  try {
+    const r = await fetch('/api/restart', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                           body: '{}'});
+    d = await r.json().catch(() => null);
+  } catch (e) { net = true; }   /* 连旧进程都答不上来：走下面的「连不上」那句 */
+  if (d && d.ok) {
+    GZ.swapping = true;
+    if (span) span.textContent = '正在换成新后端，好了这一页自己会刷新（在跑的任务会中断）。';
+    gzWaitBack(oldCode);
+    return;
+  }
+  // 三种没换成，话得分别是三句：
+  //   后端回了原因（ok:false / 500）→ 用它那句。「新后端起不来」「旧的那个正在跑任务，
+  //     不打断它」这类原因只有它自己知道，硬套「不认这一键」会把该做的事藏起来；
+  //   后端答不上话（404 那句干巴巴的 not found）→ 它确实比界面旧，给手动路径；
+  //   连不上（异常）→ 说连不上，别让人去点一个已经不在了的按钮。
+  let why;
+  if (d && d.msg) why = String(d.msg);
+  else if (net) why = '连不上本机服务，换不了：确认归藏还在跑，再点一次「换新后端」。';
+  else why = '这个后端不认「换新后端」这一键。请退出归藏（或关掉那个跑着的窗口）'
+    + '，再打开一次 —— 重开后就是新代码了。';
+  // 走 gzSwapShow 而不是直接改文案：那句原因要占住横幅，直到用户点「先不管」
+  // 或版本对上了才让位（见 GZ.why）。先说话、再立牌 —— 顺序反了会被自己拦住。
+  gzSwapShow(why);
+  GZ.why = why;
+  if (btn) btn.disabled = false;
+}
+
+/** 等新后端上来：认到一个和刚才不同的代码指纹就刷新页面，30 秒还没来就把话说清。 */
+function gzWaitBack(oldCode, tries) {
+  const n = tries || 0;
+  if (n > 42) {
+    const btn = document.getElementById('swapgo');
+    const giveUp = '新后端没上来。退出归藏再打开一次，还不行就看 /tmp/guizang_server.log 最后几行。';
+    GZ.swapping = false;
+    gzSwapShow(giveUp);
+    GZ.why = giveUp;                       // 轮询不能把这句盖回「哪儿不匹配」
+    if (btn) { btn.disabled = false; btn.textContent = '再试一次'; }
+    return;
+  }
+  setTimeout(async () => {
+    let s = null;
+    try { s = await (await fetch('/api/state', {cache: 'no-store'})).json(); } catch (e) { /* 还在换 */ }
+    if (s && (s.code !== oldCode || s.version !== GZ.back || !oldCode)) { location.reload(); return; }
+    gzWaitBack(oldCode, n + 1);
+  }, 700);
+}
+
+/** 一次本机请求：连不上 / 后端比界面旧 / 后端回了话，三种情况分开说。
+    永远回一个对象、不抛异常 —— 调用处原来那些 `catch(() => null)` 把三种揉成
+    一种，于是只能说一句假话。 */
+async function gzApi(path, body, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || 20000);
+  const opt = body === undefined
+    ? {cache: 'no-store', signal: ctl.signal}
+    : {method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify(body), signal: ctl.signal};
+  let r;
+  try {
+    r = await fetch(path, opt);
+  } catch (e) {
+    clearTimeout(timer);
+    if (GZ.stale) { const t = gzStale(); gzSwapShow(t); return {ok: false, gz: 'stale', msg: t}; }
+    return {ok: false, gz: 'down', msg: '连不上本机服务：归藏可能没在跑，或者这一问它答得太久'};
+  }
+  clearTimeout(timer);
+  const text = await r.text();
+  let d = null;
+  try { d = JSON.parse(text); } catch (_) { d = null; }
+  if (!r.ok && !(d && d.msg)) {
+    // 404 有两种意思：这条接口这台后端没有（后端旧），或者这个资源确实不在（比如没封面）。
+    // 后端回了人话就用它那句；只剩一句干巴巴的 Not Found，才按「接口没有」处理。
+    if (r.status === 404 || r.status === 405) {
+      const t = GZ.stale ? gzStale()
+        : '本机后端认不得这条接口（' + path + '），多半比界面旧 —— 点「换新后端」试试。';
+      gzSwapShow(t);
+      return {ok: false, gz: 'stale', msg: t};
+    }
+    return {ok: false, gz: 'http', msg: '后端回了 ' + r.status + '：' + (text || '').slice(0, 60)};
+  }
+  if (d && typeof d === 'object') return d;
+  return {ok: false, gz: 'bad', msg: '后端回的不是看得懂的话（HTTP ' + r.status + '）'};
+}
+
 async function drawState(force) {
   let s;
   try { s = await (await fetch('/api/state')).json(); }
@@ -4208,6 +4364,20 @@ async function drawState(force) {
     $('#live').className = 'live bad';
     $('#liveText').textContent = '连接已断开';
     return;
+  }
+
+  // 后端报上来的版本 / 代码指纹：后面每一次失败都要靠这两个值判断
+  // 到底是「服务没跑」还是「跑的是旧代码」，这两句话的解法完全不同。
+  GZ.back = String(s.version || '');
+  GZ.code = String(s.code || '');
+  GZ.stale = !!GZ.back && GZ.back !== GUIZANG_PAGE;
+  if (GZ.stale && !GZ.swapping) gzSwapShow(gzStale('新功能'));
+  else if (!GZ.swapping && !GZ.stale) {
+    // 对上了就把话收回去：轮询一直在跑，不能让用户看到一条早就过了期的提醒。
+    // 那句「为什么没换成」的原因也一起作废 —— 后端已经是新的了。
+    GZ.why = "";
+    const bar = document.getElementById('swapbar');
+    if (bar) bar.classList.remove('show');
   }
 
   const t = s.task || {};
@@ -4425,6 +4595,17 @@ $('#popx').onclick = () => setPop(false);
 popmask.onclick = () => setPop(false);
 gear.onclick = e => { e.stopPropagation(); setPop(!pop.classList.contains('open')); };
 pop.onclick = e => e.stopPropagation();
+/* 「界面新、后端旧」那条横幅的两颗按钮。横幅是静态标记，一次绑定就够。
+   「先不管」只把话咽回去（GZ.hid），不改判定 —— 下一次请求仍然会认出旧后端，
+   但不再拿同一条提示烦人。 */
+$('#swapgo').onclick = e => { e.stopPropagation(); gzSwapGo(); };
+$('#swapx').onclick = e => {
+  e.stopPropagation();
+  GZ.hid = true;
+  GZ.why = "";                     // 连同「为什么没换成」一起咽回去，别再占着横幅
+  const bar = document.getElementById('swapbar');
+  if (bar) bar.classList.remove('show');
+};
 // 点界面任意别处：收掉设置弹层，也收掉摊开的书架卡（用户要求不必再点「收起」）。
 // 右上角那颗 ⋯ 是例外：它要看「现在翻开的是哪一篇」才能决定菜单讲这一篇还是讲这一格，
 // 而这条监听在冒泡阶段排在 ⋯ 的委托前面 —— 先替它把卡收了，菜单就只会讲「这一格」，
@@ -8271,17 +8452,12 @@ const FM_PAGE = 120;
 const FM_WD = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
 async function flomoGet(qs) {
-  try { return await (await fetch('/api/flomo/notes?' + qs)).json(); }
-  catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+  return gzApi('/api/flomo/notes?' + qs, undefined, 20000);
 }
 
 async function flomoPost(body) {
-  try {
-    return await (await fetch('/api/flomo/notes', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body || {}),
-    })).json();
-  } catch (e) { return {ok: false, msg: '后端没应答：程序还开着吗？'}; }
+  // 导入那一下要整包 base64 上去（几百条加图能有几 MB），闸给宽一点。
+  return gzApi('/api/flomo/notes', body || {}, 90000);
 }
 
 /** 一句回执：成功就把结果交给 onOk，失败只把后端那句人话端出来。「收成一本 / 忘掉这一条
@@ -8290,7 +8466,7 @@ function fmRun(pr, onOk) {
   pr.then(r => {
     whisper((r && r.msg) || (r && r.ok ? '好了' : '这事没成'));
     if (r && r.ok && onOk) onOk(r);
-  }).catch(() => whisper('后端没应答：程序还开着吗？'));
+  });
 }
 
 /** 卡头那个时间：导出里带几点几分就精确到分，只有日期就只给日期。 */
@@ -9436,6 +9612,10 @@ async function vtSave() {
   const delta = merged.segs.length - all.length;
   VT.edits.clear(); VT.gone.clear(); VT.extra = []; VT.trash = []; VT.editing = null;
   VIDEO.rowsSig = '';
+  // 改动一清掉就得立刻刷一次工具条：按钮那颗「待存」高亮和计数写在这里，不写在
+  // vtRefresh 里。少这一句，回执都说「存好了 8 段」了，按钮还红着标「待存 3 处」——
+  // 快机器上下一帧就盖过去了看不出来，机器忙的时候能多挂半秒，而用户看到的正是那半秒。
+  vtTools();
   vtStat('存好了 ' + merged.segs.length + ' 段'
     + (delta ? '（比原来' + (delta > 0 ? '多 ' : '少 ') + Math.abs(delta) + ' 段）' : '')
     + (merged.dropped ? '，改空 / 删掉的 ' + merged.dropped + ' 段没写进去' : '')
@@ -10096,10 +10276,9 @@ async function importToFlomo(title) {
     return [it.text, '', `《${title}》`, tag].filter(Boolean).join('\n');
   });
   whisper(`正在导入 ${items.length} 条…`);
-  const r = await (await fetch('/api/flomo', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({items}),
-  })).json();
+  // 原来这里裸 fetch + .json()：后端是旧进程时回的是 404 的 HTML，抛出去没人接，
+  // 用户看到的就是「点了没反应」—— 正是这一轮报的那类毛病。
+  const r = await gzApi('/api/flomo', {items}, 60000);
   whisper(r.msg || (r.ok ? '已导入' : '导入失败'));
 }
 
@@ -12375,11 +12554,20 @@ async function ntTplOpen() {
 }
 const NT_TPL = {items: []};
 /** 模板列表永远以上一次的 GET 为准：删/存之后重问一次，比自己改数组更不容易和盘上对不上。 */
+/** 一句话把这一栏为什么空说清。用 textContent 而不是拼 innerHTML：
+ *  后端回的那句里可能带尖括号（HTTP 错误正文就是这样），拼进 HTML 会把话变成标签。 */
+function ntEmpty(box, text) {
+  if (!box) return;
+  box.replaceChildren();
+  const s = document.createElement('div');
+  s.className = 'ntempty';
+  s.textContent = text || '没读出来';
+  box.appendChild(s);
+}
 async function ntTplRefresh() {
   const box = document.getElementById('ntTplList');
-  let d;
-  try { d = await (await fetch('/api/note_tpl')).json(); }
-  catch (e) { box.innerHTML = '<div class="ntempty">模板没读出来，本机服务没在跑？</div>'; return; }
+  const d = await gzApi('/api/note_tpl', undefined, 12000);
+  if (!d.ok) { ntEmpty(box, d.msg || '模板没读出来'); return; }
   NT_TPL.items = d.items || [];
   ntTplPaint();
 }
@@ -12560,13 +12748,13 @@ const MM_TIP_IDLE = '点一下选中 · 双击改名 · Tab 加下一层 · 回�
 function mmInfo(t) { const e = document.getElementById('ntMapInfo'); if (e) e.textContent = t || ''; }
 function mmTip(t) { const e = document.getElementById('mmTip'); if (e) e.textContent = t || MM_TIP_IDLE; }
 function mmGet(qs) {
-  return fetch('/api/mindmap?book=' + encodeURIComponent(MM.book) + (qs || '')).then(r => r.json());
+  // 走 gzApi：连不上 / 后端比界面旧 / 后端回了话，三种失败各有各的说法。
+  // 原来这里直接 .json()，一旦后端是旧进程（404 回的是 HTML）就抛在调用处，
+  // 只剩一句假的「本机服务没在跑」。
+  return gzApi('/api/mindmap?book=' + encodeURIComponent(MM.book) + (qs || ''), undefined, 15000);
 }
 function mmPost(body) {
-  return fetch('/api/mindmap', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(Object.assign({book: MM.book}, body)),
-  }).then(r => r.json());
+  return gzApi('/api/mindmap', Object.assign({book: MM.book}, body), 20000);
 }
 function mmMap() {
   // 一次遍历把「按 id 找节点」「找父节点」「框」都备好：400 个节点以内这点开销不算什么，
@@ -12597,9 +12785,7 @@ function mmTouch(msg) {
 async function mmLoad() {
   MM.book = NT.book;
   mmInfo('正在读这张图…');
-  let d;
-  try { d = await mmGet(''); }
-  catch (e) { mmInfo('图没读出来：本机服务没在跑'); return; }
+  const d = await mmGet('');
   if (!d.ok) { mmInfo(d.msg || '图没读出来'); return; }
   MM.doc = d.doc; MM.lay = d.layout; MM.form = d.layout.form;
   MM.sel = ''; MM.link = false; MM.pick = ''; MM.undo = []; MM.redo = []; MM.dirty = false;
@@ -12878,8 +13064,7 @@ function ntMapSaveFile() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       whisper('SVG 存好了，也能在书文件夹里找到');
-    })
-    .catch(() => whisper('图没导出来：本机服务没在跑'));
+    });
 }
 
 /* 舞台上的指针活：拖拽只在概念图里生效（那一种形态的意义就是让用户自己摆位置），
@@ -13048,10 +13233,8 @@ const BD_UNDO_MAX = 30;
 
 function bdInfo(t) { const e = document.getElementById('bdInfo'); if (e) e.textContent = t || ''; }
 function bdPost(body) {
-  return fetch('/api/board', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(Object.assign({book: BD.book}, body)),
-  }).then(r => r.json());
+  // 导图那一下要传整张 PNG 的 base64（2 倍图能有几 MB），20 秒的默认闸不够用。
+  return gzApi('/api/board', Object.assign({book: BD.book}, body), 45000);
 }
 async function bdOpen() {
   if (!NT.book) { whisper('先打开一本书'); return; }
@@ -13066,9 +13249,7 @@ async function bdOpen() {
   await bdRefresh();
 }
 async function bdRefresh() {
-  let d;
-  try { d = await (await fetch('/api/board?book=' + encodeURIComponent(BD.book))).json(); }
-  catch (e) { bdInfo('画板没读出来：本机服务没在跑'); return; }
+  const d = await gzApi('/api/board?book=' + encodeURIComponent(BD.book), undefined, 15000);
   if (!d.ok) { bdInfo(d.msg || '画板没读出来'); return; }
   BD.boards = d.boards || [];
   bdTools();
@@ -13232,8 +13413,7 @@ async function bdSave() {
   BD.env.canvas = BD.fc.toJSON();
   BD.env.paper = BD.paper;
   const id = BD.id;
-  const d = await bdPost({act: 'save', doc: BD.env}).catch(() => null);
-  if (!d) { bdInfo('这一笔没存上：本机服务没在跑'); return; }
+  const d = await bdPost({act: 'save', doc: BD.env});
   if (BD.id !== id) return;
   if (!d.ok) { bdInfo(d.msg || '没存上'); return; }
   if (d.boards) BD.boards = d.boards;
@@ -13241,9 +13421,9 @@ async function bdSave() {
   bdInfo(d.msg + ' · 存在这本书的 boards/ 里');
 }
 async function bdPick(id) {
-  const d = await (await fetch('/api/board?book=' + encodeURIComponent(BD.book) +
-                              '&id=' + encodeURIComponent(id))).json().catch(() => null);
-  if (!d || !d.ok) { bdInfo((d && d.msg) || '这块板没读出来'); return; }
+  const d = await gzApi('/api/board?book=' + encodeURIComponent(BD.book) +
+                        '&id=' + encodeURIComponent(id), undefined, 15000);
+  if (!d.ok) { bdInfo(d.msg || '这块板没读出来'); return; }
   BD.id = id; BD.env = d.board; BD.undo = []; BD.redo = [];
   bdSetPaper(d.board.paper || 'plain', true);
   BD.loading = true;
@@ -13370,11 +13550,11 @@ async function bdExport(fmt) {
   if (BD.timer) await bdSave();
   const data = fmt === 'svg' ? BD.fc.toSVG()
     : BD.fc.toDataURL({format: 'png', multiplier: 2});
-  const d = await bdPost({act: 'export', id: BD.id, fmt: fmt, data: data}).catch(() => null);
-  if (!d || !d.ok) { bdInfo((d && d.msg) || '图没导出来'); whisper((d && d.msg) || '图没导出来'); return d || {ok: false}; }
+  const d = await bdPost({act: 'export', id: BD.id, fmt: fmt, data: data});
+  if (!d.ok) { bdInfo(d.msg || '图没导出来'); whisper(d.msg || '图没导出来'); return d; }
   if (d.boards) BD.boards = d.boards;
-  const again = await (await fetch('/api/board?book=' + encodeURIComponent(BD.book))).json().catch(() => null);
-  if (again && again.ok) BD.boards = again.boards || BD.boards;
+  const again = await gzApi('/api/board?book=' + encodeURIComponent(BD.book), undefined, 15000);
+  if (again.ok) BD.boards = again.boards || BD.boards;
   bdPaintList();
   bdInfo(fmt === 'png' ? 'PNG 存好了（2 倍清晰）· 就在这本书的 boards/ 里'
                        : 'SVG 存好了 · 就在这本书的 boards/ 里');
@@ -13505,13 +13685,7 @@ async function ntExportNotes() {
   ntStatus('正在导出…', 'busy');
   if (NT.timer) { clearTimeout(NT.timer); NT.timer = 0; }
   await ntSave();
-  let d;
-  try {
-    d = await (await fetch('/api/mynotes/export', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({book: NT.book}),
-    })).json();
-  } catch (e) { ntStatus('导出没做成：本机服务没在跑', 'bad'); return; }
+  const d = await gzApi('/api/mynotes/export', {book: NT.book}, 30000);
   if (!d.ok) { ntStatus(d.msg || '导出没做成', 'bad'); whisper(d.msg || '导出没做成'); return; }
   ntStatus('已导出 notes.md（' + d.chars + ' 字）· 就在这本书的文件夹里');
   whisper('notes.md 导出好了');
@@ -13862,15 +14036,11 @@ async function aiSumMap() {
   SUM.mapBusy = true;
   sumTools();
   sumInfo('正在让 AI 画这张图（整篇读一遍，比小结慢一点）…');
-  let d;
-  try {
-    d = await (await fetch('/api/ai/mindmap', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({book: SUM.book, chapter: SUM.chapter})})).json();
-  } catch (e) { d = null; }
+  // 这一问要给足时间：AI 读整篇可能一分多钟，闸拉太早会把「其实正在画」说成「没在跑」。
+  const d = await gzApi('/api/ai/mindmap', {book: SUM.book, chapter: SUM.chapter}, 180000);
   SUM.mapBusy = false;
   sumTools();
-  if (!d || !d.ok) { sumInfo((d && d.msg) || '图没画出来：本机服务没在跑'); return; }
+  if (!d.ok) { sumInfo(d.msg || '图没画出来'); return; }
   sumInfo(d.msg + ' · 已经存进这本书的文件夹');
   await aiSumShowMap();
 }

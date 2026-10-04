@@ -5,6 +5,7 @@
 // 设计要点：取书是分钟级甚至小时级的长任务，MCP 调用不能阻塞等它跑完。
 // 所以 book_fetch 立即返回，进度用 app_status / task_log 轮询。
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, openSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -81,13 +82,42 @@ async function req(path, opts = {}, more = {}) {
   return path.startsWith("/api/") ? r.json() : r.text();
 }
 
-async function alive() {
+/** 端口上应答的那个后端是谁：{version, code, running}；没人答腔回 null。
+ *  以前这里只有 alive()「有没有答腔」—— 旧后端照样答，于是被当成「服务在跑」，
+ *  新功能一律 HTTP 404。认人要比认「在不在」更有用。 */
+async function identity() {
   try {
-    await req("/api/state", { ms: 1500 });
-    return true;
+    const s = await req("/api/state", { ms: 1500 });
+    return {
+      version: String(s.version || ""),
+      code: String(s.code || ""),
+      running: !!(s.task && s.task.running),
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** 磁盘上这份 ui_server.py 的指纹：sha1(整个文件字节) 前 12 位。
+ *  算法必须和 platform_compat.code_fingerprint 完全一致，两边各算各的比对才有意义 ——
+ *  `node mcp/guizang-mcp.mjs --identity` 就是给门禁跑这一句的（真机套件里逐项对）。
+ *  为什么非要指纹而不是版本号：源码直接跑的人改完代码常不跟着改版本号，
+ *  旧进程和新代码写着同一个号，谁也不认谁是旧的。 */
+function diskCode() {
+  try {
+    return createHash("sha1").update(readFileSync(join(REPO, "ui_server.py"))).digest("hex").slice(0, 12);
+  } catch {
+    return "";
+  }
+}
+
+/** 一句人话：端口上那个后端比适配器旧时该干什么。
+ *  原来这里只看「有没有答腔」，于是旧后端把 8770 供着、适配器认下它，
+ *  新功能一律 HTTP 404 —— 用户报的「画板 / 导图 / flomo 导入后端没启动」是这一条。 */
+function staleNote(who) {
+  return `本机后端是 ${who.version || "更老的一版"}，比归藏界面和适配器（读的是磁盘上这份代码）旧：`
+    + "在界面顶部点「换新后端」，或退出归藏再打开一次。"
+    + (who.running ? "它手上还有任务在跑，等跑完再换，别打断。" : "");
 }
 
 /** 只把日志里的「出事那几行」挑出来。
@@ -106,7 +136,13 @@ function errorTail(file) {
 
 let booting = null;
 async function ensureServer() {
-  if (await alive()) return true;
+  const mine = diskCode();
+  const who = await identity();
+  // 答腔了、而且就是磁盘上这份代码：直接用。读不到自己那份（源码目录被挪了）也别多事。
+  if (who && (!mine || who.code === mine)) return true;
+  // 答腔了、但是旧的、还正在跑任务：绝不打断，把「等跑完再换新后端」说清。
+  // 这里要是照样起第二个，就变成两个进程写同一个数据目录 —— 用户要的是单实例。
+  if (who && who.running) throw new Error(staleNote(who));
   if (!booting) {
     booting = (async () => {
       if (!existsSync(join(REPO, "ui_server.py"))) {
@@ -114,15 +150,20 @@ async function ensureServer() {
       }
       const log = join(tmpdir(), "guizang-mcp-server.log");
       const fd = openSync(log, "w");
-      const child = spawn(PY, ["ui_server.py", "--port", String(PORT)], {
+      // who 非空 = 端口上挂着一个闲着的旧后端：带 --takeover，让新进程把那个端口接过来，
+      // 而不是往后挪到 8771 —— 挪了以后浏览器和别的适配器还是只认 8770，又回到老问题。
+      const args = ["ui_server.py", "--port", String(PORT)];
+      if (who) args.push("--takeover");
+      const child = spawn(PY, args, {
         cwd: REPO, detached: true, stdio: ["ignore", fd, fd], windowsHide: true,
       });
       child.unref();
       let died = null;
       child.on("exit", code => { died = code; });
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 60; i++) {
         await new Promise(r => setTimeout(r, 500));
-        if (await alive()) return true;
+        const now = await identity();
+        if (now && (!mine || now.code === mine)) return true;
         // 进程都退了还探什么：早点说清是哪儿不行，别让人干等 15 秒
         if (died !== null) {
           const why = errorTail(log);
@@ -131,6 +172,9 @@ async function ensureServer() {
             + "。可在项目目录里跑一次 " + PY + " ui_server.py 看完整输出。");
         }
       }
+      // 转一圈还没换成新代码：旧进程多半停不掉（或者被人手动守着），说清是哪一个
+      const now = await identity();
+      if (now) throw new Error(staleNote(now));
       throw new Error("归藏服务启动超时。请在项目目录里手动运行：" + PY + " ui_server.py --port " + PORT);
     })().finally(() => { booting = null; });
   }
@@ -153,12 +197,20 @@ async function api(path, opts = {}, more = {}) {
   try {
     return await req(path, opts, more);
   } catch (e) {
-    // 半路服务被关了（用户退了 app）：让它重来一次，只补一次，不循环自救
+    // 半路服务被关了（用户退了 app）：让它重来一次，只补一次，不循环自救。
+    // 补的时候 ensureServer 可能抛出一句有内容的话（端口上是个闲着的旧后端、
+    // 或者它手上还有任务在跑所以没敢动）。那句得原样传出去 —— 拿「服务没应答」
+    // 盖住它，用户就会去重启一个本来就好的服务，真正的问题反而没人说。
     lastAliveAt = 0;
+    const why = e instanceof Error ? e.message : String(e);
     let back = false;
-    try { back = await ensureServer(); } catch { back = false; }
+    try {
+      back = await ensureServer();
+    } catch (re) {
+      throw new Error(`${re instanceof Error ? re.message : String(re)}（本次请求 ${path}：${why}）`);
+    }
     if (!back) {
-      throw new Error(`归藏服务没应答（${apiBase()}）：${e instanceof Error ? e.message : e}`);
+      throw new Error(`归藏服务没应答（${apiBase()}）：${why}`);
     }
     return req(path, opts, more);
   }
@@ -1938,7 +1990,24 @@ function send(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 
-const serverInfo = { name: "guizang", version: "1.4.0" };
+const serverInfo = { name: "guizang", version: "1.5.0" };
+
+/** 自检：`node mcp/guizang-mcp.mjs --identity` 打一行 JSON 就退，不接 stdin、不起服务。
+ *  门禁拿它跟 Python 那边的 code_fingerprint 对一遍 —— 两边各写各的哈希，
+ *  一个字节不一样就会把「同一份代码」判成「旧后端」，那是最难查的一类毛病。 */
+if (process.argv.slice(2).includes("--identity")) {
+  const code = diskCode();
+  const state = await identity();
+  process.stdout.write(JSON.stringify({
+    adapter: serverInfo.version,
+    repo: REPO.replace(homedir(), "~"),
+    port: PORT,
+    disk_code: code,
+    running_code: state?.code || "",
+    running_version: state?.version || "",
+    same: !code || !state?.code ? null : code === state.code,
+  }) + "\n", () => process.exit(0));
+}
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async line => {
