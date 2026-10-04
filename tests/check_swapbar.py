@@ -9,7 +9,7 @@
 该干什么、点了「先不管」就别再烦人。
 
 这里只改后端「答的话」，不改它的行为：
-  · /api/state 的 version/code 是拦下来改写的（沙盒后端自己跑的就是 1.0.5，问不出 0.9.8）；
+  · /api/state 的 version/code 是拦下来改写的（沙盒后端自己跑的就是当前版本，问不出 0.9.8）；
   · /api/restart 的三种回执（换成 / 回了原因 / 压根没这条接口 / 连不上）也是造的。
 真的换班（旧进程退、接班人绑同一个端口、任务在跑就不动、不是归藏就不碰）
 归 tests/test_backend_identity.py —— 那份端到端起真进程，这一份管的是话说得对不对。
@@ -51,7 +51,12 @@ EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➯️⬀-⯿]")
 LIE = "本机服务没在跑"          # 这句只许留在注释里，界面不能说（后端在跑，只是旧）
 OLD_VER = "0.9.8"
 OLD_CODE = "0ldc0de0ldc0deadbeef"
-PAGE_VER = "1.0.5"              # 与 ui.html 的 GUIZANG_PAGE 对齐；对不上由静态门禁兜
+# 界面自己写的版本号从 ui.html 现读，这里不再留第二份会漂的副本（2026-10-05 就栽过一次：
+# 版本升到 1.0.6，这份却还写着 1.0.5，四条断言一起红）。它与 ui_server.py 的 VERSION 是否
+# 相等，另由静态门禁 check_route_pair.py 守着 —— 两处各守一件事，谁也不该越界替对方把关。
+_page = (REPO / "ui.html").read_text(encoding="utf-8")
+_m = re.search(r'const\s+GUIZANG_PAGE\s*=\s*"([^"]+)"', _page)
+PAGE_VER = _m.group(1) if _m else "0.0.0"
 SANDBOX = tempfile.mkdtemp(prefix="gz-swapbar-")
 atexit.register(lambda: shutil.rmtree(SANDBOX, ignore_errors=True))
 

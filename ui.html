@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<!-- 页签图标就是侧边栏那枚「开卷」的记号。内联成 data URI：单文件界面不引外部资源，
+     也省掉浏览器自动去要 /favicon.ico 那一下 —— 后端没那么个路由，会回 404，
+     控制台里就常年挂一条红字。自带底色（强调蓝）是为了在浅色页签栏和深色页签栏上都看得清。 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232f7ff0'/%3E%3Cg%20transform='translate(6%206)'%20fill='none'%20stroke='%23fff'%20stroke-width='2.1'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10%204.6C8.4%203.4%206.3%203.1%203.6%203.4v11.3c2.7-.3%204.8%200%206.4%201.2%201.6-1.2%203.7-1.5%206.4-1.2V3.4c-2.7-.3-4.8%200-6.4%201.2z'/%3E%3Cpath%20d='M10%204.6v11.3'/%3E%3C/g%3E%3C/svg%3E">
 <script>
   // 尽早定下主题，避免刷新时先闪一下浅色
   try {
@@ -20,8 +24,9 @@
     --line:rgba(20,24,32,.075);
     --line-2:rgba(20,24,32,.13);
     --glass-rgb:255,255,255;
-    --frost:.68;                    /* 磨砂浓度：面板透多少（设置里可调，存本机） */
-    --blur:24px;                    /* 模糊强度：同上 */
+    --frost:.68;                    /* 磨砂浓度：面板透多少。这是 JS 起来之前的兜底值，
+                                       JS 一起就由 applyLook() 按本机存的（缺省见 LOOK_DEF）改写。 */
+    --blur:24px;                    /* 模糊强度：同上，缺省值必须与 JS 的 LOOK_DEF.blur 一致 */
     --glass:rgba(var(--glass-rgb), var(--frost));
     --glass-2:rgba(var(--glass-rgb), calc(var(--frost) * .66));
     --solid:#fff;
@@ -97,6 +102,17 @@
   }
   html[data-theme="light"]{ color-scheme:light }
 
+  /* 换肤那一帧不许补间。主题变量一动，几乎每个组件都会从旧主题色补间到新色 ——
+     按钮的 `background .16s, color .16s`、面板的 `background-color .34s`、阅读条那颗
+     `.34s`……几十个各按各的时长走：有的 0.15s 就位、有的还在路上，满屏颜色对不齐，
+     就是用户报的「切日间 / 夜间时页面闪烁」。applyTheme() 在换的那一帧给 <html>
+     挂上这个类把全站补间压平，颜色一次性到位；下一帧摘掉，悬停 / 按压那些反馈补间照旧。
+     注：这一条实测只压补间就够（对照实验：关 transition 混色帧 10 → 0；只关 animation
+     不关 transition 照旧闪），所以不碰 animation —— 免得把进度条那些无限动画也搅进来。 */
+  html.theme-switching, html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after{
+    transition:none!important;
+  }
+
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
   body{
@@ -108,6 +124,13 @@
   }
   @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) body{background:#12151b} }
   html[data-theme="dark"] body{background:#12151b}
+
+  /* 按钮上的字一律不折行。这些钮都是固定高度的单行件，一旦被 flex 挤窄，
+     浏览器会逐字换行 —— 中文就成了竖排，还冲出按钮自己的边框（阅读条那一排
+     导出钮、搜索条的「划线内容」都栽在这上面）。全站只有章节列表 `.rdch`
+     的标题要折两行，在它自己那条规则里单独开回来。
+     写在这里也是回归护栏：以后新加的钮忘了 nowrap 也不会重犯。 */
+  button{white-space:nowrap}
 
   /* 环境光：极淡的色晕 + 细颗粒，让玻璃有东西可以透 */
   .ambient{position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden}
@@ -185,6 +208,10 @@
   .live.good b{background:var(--mint)}
   .live.bad{color:var(--err); background:rgba(200,85,74,.12)}
   .live.bad b{background:var(--err)}
+  /* 取书那阵子这一颗是可点的：任务抽屉撤了之后，它就顶上「取书状态」这个位置，
+     点一下看这一本取到哪儿了。空跑（登录 / 装组件）没有书可看，就不给手型。 */
+  .live.click{cursor:pointer}
+  .live.click:hover{filter:brightness(1.05)}
   /* 界面比本机后端新时的那条提示。为什么要它：界面每次请求都从磁盘现读，
      后端的路由表却是进程起来那一刻装进内存的 —— 代码更新了而旧进程还挂着，
      新功能就一律 404。这条只讲「哪儿不匹配」和「一键换掉」，不让人去猜服务起没起。 */
@@ -217,9 +244,9 @@
      功能变多以后，一条下拉列表已经装不下：壁纸、磨砂、导出位置、索引、小 Agent
      全挤在一起，翻半天找不到。改成分类弹窗 —— 左边选分类，右边只显示这一类，
      每类各自成组，改哪一项去哪个分类找是确定的。 */
-  /* 层序（从下往上）：内容 1 → 顶栏 30 → 任务抽屉 40 → 批量条 45 → 气泡与小助手 50
-     → 设置遮罩与弹窗 54/55 → 确认弹层 60 → 轻语提示 70。
-     设置弹窗是「拿到焦点」的那一层，必须盖住右下角这些常驻玻璃；
+  /* 层序（从下往上）：内容 1 → 顶栏 30 → 边栏触发/抽屉 41~44 → 批量条 45
+     → 小助手面板 50 → 设置遮罩与弹窗 54/55 → 确认弹层 60 → 轻语提示/划词条 70。
+     设置弹窗是「拿到焦点」的那一层，必须盖住右下角的常驻玻璃；
      轻语提示在最顶上，是因为在弹窗里点保存，回执不能被弹窗自己挡掉。 */
   .popmask{
     position:fixed; inset:0; z-index:54; background:rgba(14,19,28,.36);
@@ -633,6 +660,59 @@
   .emptyline{padding:40px 20px; text-align:center; color:var(--ink-3); font-size:12.5px}
   .emptyline b{display:block; color:var(--ink-2); font-weight:520; margin-bottom:5px}
 
+  /* ── 搜索页：微信读书 ⇄ Z-Library 左右分栏 ──────────────
+     两边的逻辑根本不同：微信读书是「取书」（搜到 → 加入书架 → 整本取回），
+     Z-Library 是「下载」（搜到 → 直接下一份 EPUB/PDF 落进本地书架）。
+     所以并排两栏、各有各的栏头与动作，别把两条路揉成一条控件。
+     高度按「一屏刚好」算（配合 body.feedfit）：两栏各自内部滚，整页不动。 */
+  .zsplit{display:flex; height:100%; min-height:0}
+  .zcol{flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden}
+  .zcol + .zcol{border-left:1px solid var(--line)}
+  @media (max-width:1000px){
+    /* 窄窗收成上下排：两栏并排时每边只剩两百来像素，书名与按钮都挤成一条缝。 */
+    .zsplit{flex-direction:column; height:auto}
+    .zcol{overflow:visible}
+    .zcol + .zcol{border-left:0; border-top:1px solid var(--line)}
+  }
+  .zhead{flex:none; display:flex; align-items:baseline; gap:9px; padding:11px 15px;
+    border-bottom:1px solid var(--line); background:var(--paper-2)}
+  .zhead .b{font-size:12.5px; font-weight:600; flex:none}
+  .zhead .s{font-size:11px; color:var(--ink-3); min-width:0; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap}
+  .zhead .s em{font-style:normal; color:var(--ink-2)}
+  .zbody{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
+  /* 「划线内容」那格不走 .zsplit（只有书城分左右栏），它自己收口滚一下。 */
+  .zscroll{height:100%; min-height:0; overflow:auto; overscroll-behavior:contain}
+  /* Z-Library 的结果按「行」排：一本一行（小封面 + 书名/作者 + 格式与大小 + 下载钮）。
+     这一栏要的是「一眼看清能不能下、点了就下」，行式比卡片更利落。 */
+  .zrow{display:flex; gap:11px; padding:11px 15px; border-bottom:1px solid var(--line);
+    align-items:center; transition:background .14s ease}
+  .zrow:hover{background:var(--surface-2)}
+  .zrow .zc{flex:none; width:44px; aspect-ratio:2/3; border-radius:7px; overflow:hidden;
+    background:var(--surface-2); display:grid; place-items:center}
+  .zrow .zc img{width:100%; height:100%; object-fit:cover; display:block}
+  .zrow .zc .sp{font-size:16px; font-weight:600; opacity:.28}
+  .zrow .zm{flex:1; min-width:0}
+  .zrow .zt{font-size:12.5px; font-weight:600; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .zrow .za{font-size:11px; color:var(--ink-3); margin-top:3px; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap}
+  .zrow .zb{display:flex; gap:6px; flex-wrap:wrap; margin-top:6px}
+  .zrow .zb span{font-size:10px; line-height:1; padding:3px 6px; border-radius:6px;
+    background:var(--surface-2); border:1px solid var(--line); color:var(--ink-3)}
+  .zrow .zb span.ok{color:var(--accent); border-color:var(--accent-soft); background:var(--accent-soft)}
+  .zrow .zn{flex:none; align-self:center}
+  /* 右栏未登录时的就地登录：不进设置也能填一次，登录后就地出结果。 */
+  .zlogin{padding:20px 16px}
+  .zlogin .tip{font-size:11.5px; color:var(--ink-3); line-height:1.72; margin-bottom:13px}
+  .zlogin .row{margin-bottom:9px}
+  .zlogin input{width:100%; height:32px; padding:0 11px; border-radius:9px;
+    border:1px solid var(--line-2); background:var(--surface-2); outline:none;
+    font:inherit; font-size:12.5px; color:var(--ink)}
+  .zlogin input:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .zlogin .act{display:flex; gap:8px; align-items:center}
+  .zlogin .act .grow{flex:1}
+
   /* ── 侧边栏 + 内容区 ───────────────────── */
   .shell{display:grid; grid-template-columns:214px minmax(0,1fr); gap:16px; align-items:start}
   @media (max-width:840px){ .shell{grid-template-columns:1fr} }
@@ -718,7 +798,15 @@
   .hoveract button:active{transform:scale(.96)}
   .hoveract button.ghost{background:rgba(255,255,255,.94); color:var(--ink)}
   .pbar{position:absolute; left:0; right:0; bottom:0; padding:8px 10px; color:#fff; background:rgba(18,24,36,.66); z-index:2}
-  .pbar .lb{display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:5px; letter-spacing:.02em}
+  .pbar .lb{display:flex; align-items:center; gap:6px; font-size:10.5px; margin-bottom:5px; letter-spacing:.02em}
+  .pbar .lb>span:first-child{flex:none}
+  .pbar .lb>span:nth-child(2){flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; opacity:.9}
+  /* 取书进行中的「详情」：进度条本来就是唯一告诉你「取到哪儿了」的地方，
+     点它直接看这一本的输出记录（原来要跑到右下角那条任务抽屉里找）。 */
+  .pbar .dtl{flex:none; height:17px; padding:0 7px; border-radius:9px;
+    border:1px solid rgba(255,255,255,.5); background:rgba(255,255,255,.16); color:#fff;
+    font-size:10px; line-height:1; white-space:nowrap; cursor:pointer; transition:background .15s ease}
+  .pbar .dtl:hover{background:rgba(255,255,255,.3)}
   .pbar .bg{height:4px; border-radius:2px; background:rgba(255,255,255,.3); overflow:hidden}
   .pbar .bg i{display:block; height:100%; background:#fff; width:0; transition:width .45s ease}
   /* 还不知道总量（目录没建好）时的不定长条：一段光带来回走，表示"在动" */
@@ -753,29 +841,10 @@
   .wcard:not(.open) .strip,
   .wcard:not(.open) .strip button{-webkit-backdrop-filter:none; backdrop-filter:none}
 
-  /* ── 右下角任务记录 ───────────────────── */
-  .dock{
-    position:fixed; right:20px; bottom:78px; z-index:40; width:272px; border-radius:12px; overflow:hidden;
-    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
-    backdrop-filter:blur(var(--blur)) saturate(180%);
-    border:1px solid var(--line); box-shadow:var(--shadow);
-  }
-  .dockhead{display:flex; align-items:center; gap:8px; padding:9px 12px; cursor:pointer; user-select:none}
-  .dockhead .dt{font-size:12px; font-weight:600}
-  .dockhead .dn{font-size:11px; color:var(--ink-3)}
-  .dockhead .grow{flex:1}
-  .dockhead .dchev{font-size:11px; color:var(--ink-3)}
-  .dockhead .dclear{
-    border:1px solid var(--line-2); border-radius:7px; cursor:pointer;
-    background:rgba(var(--glass-rgb), calc(var(--frost) * .5));
-    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
-    font:inherit; font-size:10.5px; color:var(--ink-3); padding:2px 8px;
-    transition:color .15s ease, border-color .15s ease, background .15s ease;
-  }
-  .dockhead .dclear:hover{color:var(--accent); border-color:rgba(47,127,240,.32)}
-  .dockhead .dclear:disabled{opacity:.4; cursor:default}
-  .dockbody{max-height:238px; overflow:auto; border-top:1px solid var(--line)}
-  .dock.closed .dockbody{max-height:0; overflow:hidden}   /* 高度过渡见 2.0 段：不再 display:none */
+  /* ── 任务记录 ─────────────────────────
+     1.0.6 起右下角那条常驻的「任务」抽屉去掉了（用户要求）。取书时的进度现在就在
+     书卡封面那条进度条上，条子右侧的「详情」点开就是原来抽屉里那份输出记录。
+     任务数据本身还留着（tasks / showTaskLog），只是不再有常驻的落脚点。 */
   .drow{display:flex; align-items:center; gap:9px; padding:9px 12px; border-top:1px solid var(--line); cursor:pointer}
   .drow:first-child{border-top:0}
   .drow:hover{background:rgba(127,140,160,.09)}
@@ -784,40 +853,15 @@
   .drow .st.ok{color:var(--mint)}
   .drow .st.bad{color:var(--err)}
   .dempty{padding:16px 12px; text-align:center; font-size:11.5px; color:var(--ink-3)}
-  @media (max-width:640px){
-    .dock{right:12px; bottom:70px; width:calc(100vw - 24px)}
-  }
 
-  /* ── 右下角小 Agent ──────────────────────
-     一颗常驻气泡。「已经配好」是常态、「还没配」才是要留意的事，所以红点只在
-     没配的时候亮 —— 界面右上角那颗连接状态灯用的是同一套语义。 */
-  .agent{
-    position:fixed; right:20px; bottom:20px; z-index:50;
-    width:46px; height:46px; border-radius:50%; cursor:pointer; padding:0;
-    display:grid; place-items:center; color:var(--ink-2);
-    background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(180%);
-    backdrop-filter:blur(var(--blur)) saturate(180%);
-    border:1px solid var(--line); box-shadow:var(--shadow);
-    transition:transform .2s var(--spring), color .16s ease, box-shadow .2s ease;
-  }
-  .agent svg{width:21px; height:21px}
-  .agent:hover{transform:translateY(-2px); color:var(--accent)}
-  .agent:active{transform:scale(.94)}
-  .agent.on{color:var(--accent)}
-  .agent .dot{
-    position:absolute; right:8px; top:8px; width:7px; height:7px; border-radius:50%;
-    background:transparent; transition:background .2s ease;
-  }
-  .agent.none .dot{background:var(--err)}
-
-  /* 右下角这一条竖向的队：气泡（20）→ 任务抽屉（78）→ 小助手面板。
-     面板的落脚点跟着抽屉的实测高度走（--dock-h 由脚本写），所以抽屉展开也不会被压住。
-     之前两个都写死 bottom:78px，矩形完全重合 —— 一开小助手就整块盖在任务列表上。 */
+  /* ── 读书小助手面板 ──────────────────────
+     1.0.6 起不再有常驻气泡 —— 主页那一颗去掉了（用户要求：主页不要对话入口）。
+     面板本身留着，它现在是「阅读器里划一句问它」的出口（划词小条的「问小助手」、
+     阅读条那颗「问」），用完就收，界面上没有常驻的对话入口。 */
   .agentpane{
-    position:fixed; right:20px; z-index:50;
-    bottom:calc(78px + var(--dock-h, 36px) + 10px);
+    position:fixed; right:20px; bottom:20px; z-index:50;
     width:min(360px, calc(100vw - 40px));
-    height:min(482px, calc(100vh - 150px - var(--dock-h, 36px)));
+    height:min(482px, calc(100vh - 80px));
     display:flex; flex-direction:column; border-radius:16px; overflow:hidden;
     background:var(--glass); -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
     backdrop-filter:blur(var(--blur)) saturate(190%);
@@ -883,9 +927,7 @@
   .agfoot button:active{transform:scale(.96)}
   .agfoot button:disabled{opacity:.45; cursor:default}
   @media (max-width:640px){
-    .agent{right:12px; bottom:12px}
-    .agentpane{right:12px; left:12px; width:auto;
-      bottom:calc(70px + var(--dock-h, 36px) + 8px)}
+    .agentpane{right:12px; left:12px; width:auto; bottom:12px}
   }
 
   /* ── 顶栏：主题切换 ───────────────────── */
@@ -1204,7 +1246,11 @@
   body.feedfit #view > .vpane[data-pane="video"],
   body.feedfit #view > .vpane[data-pane="flomo"],
   /* 写作台同理：稿列、正文、坞各自滚，整页不动 —— 打字时页面跟着跳是最刺眼的。 */
+  /* 搜索页也是两栏（微信读书 / Z-Library）：各自滚，整页不动，翻结果时工具条不会滚出视野。 */
+  body.feedfit #view > .vpane[data-pane="search"],
   body.feedfit #view > .vpane[data-pane="write"]{height:calc(100vh - 106px); min-height:0}
+  /* 搜索这一屏内部自己收口（.zsplit / .zscroll 各自滚），vbody 不必再滚一层。 */
+  body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:hidden}
   @media (min-width:841px){ body.feedfit main{padding-bottom:22px} }
   body.feedfit main{max-width:min(1440px, 100%)}
   @media (max-width:840px){
@@ -1218,6 +1264,14 @@
     body.feedfit #view > .vpane[data-pane="flomo"]{height:auto; min-height:0}
     /* 写作在窄窗也回到整页滚：稿列收成一条缝之后，定高只会把正文挤成半屏。 */
     body.feedfit #view > .vpane[data-pane="write"]{height:auto; min-height:0}
+  }
+  /* 搜索这一屏的断点得跟着两栏走，不能等 840：≤1000px 时两栏已经收成上下排（见 .zsplit
+     那一段），这时若还定高，下半栏就被压成一条能滚的缝，超出的那一截还会被 vbody 的
+     overflow:hidden 吃掉、连滚都滚不到 —— 等于把结果藏了。所以定高的阈值与「并排 / 上下排」
+     的阈值对齐。 */
+  @media (max-width:1000px){
+    body.feedfit #view > .vpane[data-pane="search"]{height:auto; min-height:0}
+    body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:visible}
   }
   /* 中栏与右栏自己不平滚：滚的必须是里面那一片（列表 / 正文）。三层都开 overflow
      的话，鼠标滚轮一碰到就整栏一起动，工具条会被滚出视野，也就白设了。 */
@@ -1345,8 +1399,11 @@
   .vtrow .act{display:flex; gap:5px; opacity:0; transition:opacity .15s ease}
   .vtrow:hover .act,.vtrow.edit .act{opacity:1}
   @media (prefers-reduced-motion:reduce){ .vtrow .act{opacity:1} }
-  .vtrow .act button,.vtbook .rd{height:22px; padding:0 8px; border-radius:7px; cursor:pointer;
-    font:inherit; font-size:10.5px; line-height:1; border:1px solid var(--line-2);
+  /* 行上的「原片 / 删 / 插」和左栏那个「读」原来挂在 22px 那一档（行内小钮）。
+     可它们是这两栏里唯一的落点，旁边那排工具钮却是 26~28px —— 一屏里三种身高，
+     鼠标扫过去整排按钮的份量忽轻忽重。拉到「正常钮」26px 这一档，与工具栏对齐。 */
+  .vtrow .act button,.vtbook .rd{height:26px; padding:0 10px; border-radius:8px; cursor:pointer;
+    font:inherit; font-size:11px; line-height:1; border:1px solid var(--line-2);
     background:transparent; color:var(--ink-3); flex:none;
     transition:background .15s ease, color .15s ease, transform .12s ease}
   .vtrow .act button:hover,.vtbook .rd:hover{background:var(--accent-soft); color:var(--accent)}
@@ -1667,16 +1724,11 @@
      否则算好的 106 之外还要多出 22px 的下边距，整页照样被顶出滚动条。 */
   body.reading #view{margin-bottom:0}
   body.reading #view > .vpane[data-pane="read"]{height:calc(100vh - 106px); min-height:0}
-  /* main 默认下留白 96px（给悬浮 dock 让位）；阅读时不需要，收到 22px 才能贴底。 */
+  /* main 默认下留白 56px；阅读时不需要，收到 22px 才能贴底。 */
   @media (min-width:841px){ body.reading main{padding-bottom:22px} }
   /* 阅读器是三栏（目录 / 正文 / 笔记），1080 的居中宽度切完只剩 270 出头的正文，
      字还没看两行就换行了。读书时把舞台放宽，正文才配得上一本书。 */
   body.reading main{max-width:min(1440px, 100%)}
-  /* 右下角的「任务」进度 dock 是抓取用的，读书时既不相关又会压住正文右下角；
-     淡出并让出点击（用 opacity 而非 display，进出阅读时有一小段过渡，不突兀）。
-     右下角那颗 Agent 气泡窄，落在正文列外的留白里，保持常驻。 */
-  .dock{transition:opacity .28s var(--spring), transform .28s var(--spring)}
-  body.reading .dock{opacity:0; pointer-events:none; transform:translateY(8px)}
   /* 专注模式是「只出现书籍的内容」：这时连左侧那条应用导航也让开，
      整屏都是书。退出还是那三下 —— F、再点一次「专注」、或返回。 */
   .shell, .side{transition:grid-template-columns .3s var(--spring), gap .3s var(--spring),
@@ -1718,7 +1770,8 @@
   .rdch:hover{background:var(--surface-2); color:var(--ink)}
   .rdch .ix{flex:none; min-width:1.7em; padding-top:1px; color:var(--ink-3);
     font-size:11px; font-variant-numeric:tabular-nums}
-  .rdch .tt{min-width:0; overflow:hidden; display:-webkit-box;
+  /* 全站唯一要折行的按钮文字：章节标题长起来必须截两行，否则目录里全是半句。 */
+  .rdch .tt{min-width:0; overflow:hidden; display:-webkit-box; white-space:normal;
     -webkit-line-clamp:2; -webkit-box-orient:vertical}
   .rdch.on{background:var(--accent-soft); color:var(--accent); font-weight:550}
   .rdch.on .ix{color:var(--accent)}
@@ -1861,12 +1914,21 @@
   .ntrow .nfoot .grow{flex:1}
   .ntrow .nk{flex:none; padding:1px 6px; border-radius:99px; background:var(--surface-2);
     color:var(--ink-2); font-size:10px}
-  /* 行上动作：平时不占视线，hover 或键盘聚焦才浮出来。 */
-  .ntrow .nacts{display:flex; gap:3px; margin-top:6px; opacity:0; max-height:0;
-    overflow:hidden; transition:opacity .16s ease, max-height .18s var(--spring)}
-  .ntrow:hover .nacts, .ntrow:focus-within .nacts, .ntrow.on .nacts{opacity:1; max-height:30px}
-  .ntrow .nacts button{border:1px solid var(--line-2); border-radius:7px; background:var(--paper-inset);
-    cursor:pointer; font:inherit; font-size:11px; color:var(--ink-2); height:22px; padding:0 8px;
+  /* 行上动作：原来靠 max-height 从 0 撑到 30px 展开，展开的是这一行、被顶下去的
+     却是它下面所有行 —— 鼠标顺着列表扫一遍，整栏都在跟着跳。改成浮在行尾
+     （.ntrow 本来就是 relative），出现时行高纹丝不动。它盖住的是右下角那点
+     「种类 · 时间」，hover 时让它俩先淡掉，免得叠字。 */
+  .ntrow .nacts{position:absolute; right:8px; bottom:6px; display:flex; gap:4px;
+    padding:3px; border-radius:12px; background:var(--paper);
+    box-shadow:0 1px 6px rgba(20,24,32,.13);
+    opacity:0; pointer-events:none; transition:opacity .15s ease}
+  .ntrow:hover .nacts, .ntrow:focus-within .nacts, .ntrow.on .nacts{opacity:1; pointer-events:auto}
+  .ntrow:hover .nfoot .nk, .ntrow:hover .nfoot > span:last-child,
+  .ntrow:focus-within .nfoot .nk, .ntrow:focus-within .nfoot > span:last-child,
+  .ntrow.on .nfoot .nk, .ntrow.on .nfoot > span:last-child{opacity:0}
+  .ntrow .nfoot .nk, .ntrow .nfoot > span:last-child{transition:opacity .15s ease}
+  .ntrow .nacts button{border:1px solid var(--line-2); border-radius:8px; background:var(--paper);
+    cursor:pointer; font:inherit; font-size:11px; color:var(--ink-2); height:26px; padding:0 10px;
     transition:background .14s ease, color .14s ease, border-color .14s ease}
   .ntrow .nacts button:hover{background:var(--surface-2); color:var(--ink)}
   .ntrow .nacts button.del:hover{background:#fdeceb; border-color:#f6c9c5; color:#b3352c}
@@ -2239,6 +2301,9 @@
     transition:background-color .34s ease, box-shadow .22s ease}
   .rdfoot .grow{flex:1}
   .rdpos{white-space:nowrap}
+  /* 底栏那条「还剩 N 页」：跟百分比同一档让位（见下面 rdf 容器查询），
+     一窄就先收它 —— 它是锦上添花，百分比是「读到哪」的硬信息。 */
+  .rdplan{white-space:nowrap; color:var(--ink-2)}
   /* 底部导出：md / epub / pdf 三档贴成一组，中间细线分格，看着像一枚控件。 */
   .rddl{display:flex; flex:none; border:1px solid var(--line); border-radius:9px;
     overflow:hidden}
@@ -2249,12 +2314,16 @@
   /* 底栏这一组挤不挤，跟窗口多宽没关系 —— 目录栏一收、笔记栏一摊，中间那栏
      就窄了。所以把「底栏自己」设成容器，量的是它自己的宽度。别用 .rdmain：
      那上面挂着 position:absolute 的设置浮层，套上 containment 会把它们重新钉位。
-     两条实测注记：① 这排东西摊开要 443px，所以降级点定在 470 / 400，不是拍脑袋；
-     ② 容器查询管不到容器自己（改自己的 gap / flex-wrap 会被浏览器丢掉，怕成循环），
-        所以每一档都只动里面的孩子：先藏百分比、再收字距，最后连进度条也收掉。 */
+     两条实测注记：① 这排东西全摊开（含右边那枚「1 / N」百分比）要 542px 的容器。
+     2026-10-05 按钮统一改 nowrap 之后，这一排比从前宽了一截 —— 原先把第一档定在
+     470 是按旧宽度量的，于是容器落在 500~542 这一段时百分比还露着、整排就顶出去了
+     （门禁 520px 那一档逮到的就是这个）。所以第一档跟着抬到 510：容器查询量的是内容盒，
+     542 减左右 padding 32 正好 510；② 容器查询管不到容器自己（改自己的 gap / flex-wrap
+     会被浏览器丢掉，怕成循环），所以每一档都只动里面的孩子：先藏百分比、再收字距，
+     最后连进度条也收掉。 */
   .rdfoot{container-type:inline-size; container-name:rdf}
-  @container rdf (max-width:470px){
-    .rdfoot .rdpos{display:none}
+  @container rdf (max-width:510px){
+    .rdfoot .rdpos, .rdfoot .rdplan{display:none}
     .rddl .deed{padding:0 8px}
   }
   @container rdf (max-width:400px){
@@ -2456,8 +2525,6 @@
     .rdscroll{overflow:visible}
     .rdin{padding:22px 18px 56px; max-width:var(--rd-w)}
     .rdfoot{position:relative}
-    /* 窄窗里右下角气泡正好压在「下载 md」上；读书时收起来，退出即回。 */
-    body.reading .agent{display:none}
   }
 
   /* 卡片：只动 transform/opacity（走合成层，不掉帧）；封面在自己的盒子里微缩放 */
@@ -2524,10 +2591,6 @@
   @media (prefers-reduced-motion:reduce){ .vin{animation:none} }
 
   /* 设置弹窗的进出交给上面那组规则（居中缩放），这里不再从齿轮位置长出来 */
-
-  /* 任务栏展开/收起用高度过渡，不再「啪」地出现 */
-  .dockbody{transition:max-height .34s var(--spring), opacity .2s ease}
-  .dock.closed .dockbody{max-height:0; opacity:0; border-top-color:transparent}
 
   /* 侧边栏当前项：胶囊跟着换位置，用一层伪元素做位移动画 */
   .side nav{position:relative}
@@ -2612,7 +2675,7 @@
   }
 
   /* 大容器：更圆的角 + 更厚的模糊，接近液态玻璃 */
-  .side, .content, .shelfbox, .dock, .sheet{
+  .side, .content, .shelfbox, .sheet{
     border-radius:var(--r-xl);
     -webkit-backdrop-filter:blur(var(--blur)) saturate(190%);
     backdrop-filter:blur(var(--blur)) saturate(190%);
@@ -2624,8 +2687,9 @@
   .wcard:hover{box-shadow:var(--shadow), var(--sheen)}
   .wcard .cv{border-radius:14px 14px 0 0}
 
-  /* 留白：更接近参考图的呼吸感 */
-  main{max-width:1120px; padding:26px 22px 96px}
+  /* 留白：更接近参考图的呼吸感。底部原来留 96px 是给右下角那条任务抽屉让位，
+     1.0.6 抽屉撤了，收到 56px —— 够避开批量条，也不再让最后一行卡片悬在半空。 */
+  main{max-width:1120px; padding:26px 22px 56px}
   .shell{grid-template-columns:196px minmax(0,1fr); gap:20px}
   .side{padding:16px 12px}
   /* 窄窗口（分屏、小窗）：侧边栏收到内容上方，导航横排——2.0 的 .shell 覆盖了旧断点，这里补回来 */
@@ -2643,7 +2707,6 @@
   .chead{padding:16px 18px}
   .stools, .ntools{padding:12px 18px}
   .statgrid{gap:12px; padding:18px}
-  .dock{width:280px; border-radius:22px}
 
   /* 顶栏：去掉"方块里带字"，只留一个线条标记 */
   .mark{
@@ -2717,6 +2780,46 @@
   @keyframes growx{from{transform:scaleX(0)}to{transform:scaleX(1)}}
   .pwrap .bg i{transform-origin:left center; animation:growx .66s var(--spring) backwards}
   .dacts{display:flex; gap:8px; flex-wrap:wrap; padding:0 22px 20px}
+
+  /* ── 详情页「阅读计划」那一块 ────────────────────────────
+     和详情卡同宽同底色，读起来像同一张卡片往下延伸。数字用等宽字形，
+     换数字时宽度不跳，进度条和「还剩 N 页」不会跟着抖。 */
+  .plan{margin:0 22px 22px; padding:16px 18px; border-radius:16px;
+    background:var(--glass-2); border:1px solid var(--line);
+    font-variant-numeric:tabular-nums}
+  .planhd{display:flex; align-items:baseline; gap:10px}
+  .planhd h3{margin:0; font-size:13.5px; font-weight:600; letter-spacing:.01em}
+  .planhd .sub{font-size:11.5px; color:var(--ink-3)}
+  .plan .grow{flex:1}
+  .plan .big{font-size:19px; font-weight:640; letter-spacing:-.01em; margin:12px 0 0}
+  .plan .big small{font-size:11.5px; font-weight:400; color:var(--ink-3); margin-left:8px}
+  .plan .bar{height:8px; border-radius:4px; background:rgba(127,140,160,.2);
+    overflow:hidden; margin:11px 0 4px}
+  .plan .bar i{display:block; height:100%; border-radius:4px; background:var(--accent);
+    transform-origin:left center; animation:growx .66s var(--spring) backwards}
+  .plan .rowsk{display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr));
+    gap:9px; margin-top:13px}
+  .plan .sk{padding:9px 11px; border-radius:11px; background:var(--solid); border:1px solid var(--line)}
+  .plan .sk .k{font-size:10.5px; color:var(--ink-3)}
+  .plan .sk .v{font-size:13px; font-weight:560; margin-top:2px}
+  .plan .sk .v small{font-size:10.5px; font-weight:400; color:var(--ink-3); margin-left:2px}
+  .plan .on{color:var(--accent)}
+  .plan .lead{font-size:11.5px; color:var(--ink-3); line-height:1.75; margin-top:11px}
+  .plan .prow{display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:13px}
+  .plan .segs{display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden}
+  .plan .segs button{border:none; background:transparent; padding:6px 14px; font:inherit;
+    font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
+  .plan .segs button+button{border-left:1px solid var(--line)}
+  .plan .segs button.on{background:var(--accent-soft); color:var(--accent); font-weight:560}
+  .plan .num{width:92px; height:32px; padding:0 11px; border-radius:10px; font:inherit;
+    font-size:13px; color:var(--ink); background:var(--solid); border:1px solid var(--line)}
+  .plan .num:focus{outline:none; border-color:rgba(47,127,240,.5)}
+  .plan .sub{font-size:11.5px; color:var(--ink-3); white-space:nowrap}
+  .plan .hist{margin-top:13px; border-top:1px solid var(--line); padding-top:11px}
+  .plan .hist .hl{font-size:11.5px; color:var(--ink-3); margin-bottom:7px}
+  .plan .hist .hi{display:flex; gap:9px; font-size:12px; color:var(--ink-2);
+    padding:3px 0}
+  .plan .hist .hi .d{color:var(--ink-3); font-variant-numeric:tabular-nums}
 
   /* 批量 */
   .wcard .pick{position:absolute; top:9px; left:9px; z-index:4; display:none}
@@ -3000,7 +3103,7 @@
     padding:15px 19px 22px; color:var(--ink); font-size:15.5px; line-height:1.9; tab-size:2;
     font-family:Georgia,"Songti SC","STSong","Noto Serif CJK SC",serif}
   .wrbar{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
-  .wrbar .lab{font-size:10.5px; color:var(--ink-3); letter-spacing:.6px; flex:none}
+  .wrbar .lab{font-size:10.5px; color:var(--ink-3); letter-spacing:.6px; flex:0 1 auto; min-width:0}
   /* 撑开的一段：动作钮靠左、屏数与「收起」靠右。这一页没有全局 .grow，得自己给。 */
   .wrbar .grow,.wrline .grow{flex:1}
   .wrres{border:1px solid var(--line-2); border-radius:var(--r); background:var(--surface-2);
@@ -3027,7 +3130,12 @@
      （那边靠 border-top 分行、这里要换行挤一挤），所以另起一个名字。 */
   .wrline{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:2px 0 8px}
   .wrline:last-child{margin-bottom:0}
-  .wrline .lab{font-size:11px; color:var(--ink-3); letter-spacing:.4px; flex:none}
+  /* 这行标签有时是短前缀（「写多少」），有时是一整句说明（稿子那屏的「还没有稿子…」）。
+     短前缀不能长（所以 flex-grow:0），但整句必须能在窄栏里折行 —— 原来写 flex:none，
+     等于既不长也不缩，句子的宽度就顶着 max-content 戳出容器：实测在写作屏左栏里
+     戳出 82px，越过 214px 的稿子列压进正文。改成「允许收缩 + min-width:0」，短前缀
+     照旧，整句该折行就折行。 */
+  .wrline .lab{font-size:11px; color:var(--ink-3); letter-spacing:.4px; flex:0 1 auto; min-width:0}
   .wrline label{display:inline-flex; gap:6px; align-items:center; font-size:12px;
     color:var(--ink-2); cursor:pointer}
   .wrline input[type=checkbox]{accent-color:var(--accent)}
@@ -3121,6 +3229,7 @@
   <aside class="popnav" id="popnav">
     <div class="head">设置</div>
     <button class="pcat on" data-cat="acct">账号</button>
+    <button class="pcat" data-cat="zlib">Z-Library</button>
     <button class="pcat" data-cat="look">外观</button>
     <button class="pcat" data-cat="nav">导航</button>
     <button class="pcat" data-cat="out">导出</button>
@@ -3165,6 +3274,36 @@
       <div class="hint" id="flomohint">flomo 记录 API 地址。填入后可把划线笔记导入 flomo。获取方式：flomo 网页版 → 设置 → API，格式为 https://flomoapp.com/iwh/xxxx/。需要 flomo PRO。</div>
     </section>
 
+    <section class="popcat" data-cat="zlib">
+      <div class="sechd">Z-Library 账号</div>
+      <div class="row">
+        <span class="k">状态</span>
+        <span class="v" id="v-zlib">未登录</span>
+        <span class="grow"></span>
+        <button class="deed" id="zlibOut">退出</button>
+      </div>
+      <div class="row" id="zlibAcct">
+        <span class="k">邮箱</span>
+        <input id="zlibEmail" type="text" spellcheck="false" autocomplete="off" placeholder="登录邮箱"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row" id="zlibAcct2">
+        <span class="k">密码</span>
+        <input id="zlibPass" type="password" spellcheck="false" autocomplete="off" placeholder="登录密码"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        <button class="deed" id="zlibLogin">登录</button>
+      </div>
+      <div class="hint">在「搜索」页搜书时，右侧一栏会显示 Z-Library 的结果，可以直接下载 EPUB / PDF 收进本地书架。密码只用于换一次登录令牌，换到之后本机只保存令牌（不保存密码）。</div>
+      <div class="sechd">镜像域名</div>
+      <div class="row">
+        <span class="k">域名</span>
+        <input id="zlibDomain" type="text" spellcheck="false" autocomplete="off" placeholder="1lib.sk"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+        <button class="deed" id="zlibSaveDom">保存</button>
+      </div>
+      <div class="hint" id="zlibhint">Z-Library 的入口域名时常更换。默认使用 1lib.sk，如无法访问可在此填入当前可用的镜像域名。访问走本机代理（与取书同一套），不必额外配置。</div>
+    </section>
+
     <section class="popcat" data-cat="look">
       <div class="sechd">背景</div>
       <div class="row">
@@ -3179,16 +3318,16 @@
       <div class="sechd">玻璃</div>
       <div class="row">
         <span class="k">磨砂浓度</span>
-        <input type="range" id="frostRange" min="30" max="96" step="2" value="72"
+        <input type="range" id="frostRange" min="30" max="96" step="2"
                style="flex:1;min-width:0;accent-color:var(--accent)">
-        <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
+        <span class="v" id="v-frost" style="width:44px;text-align:right"></span>
       </div>
       <div class="hint">控制玻璃面板的透明度。调低更通透，可看清壁纸；调高更实，文字更易读。写作台、笔记纸与正文纸面为固定实心纸，不受此设置影响。</div>
       <div class="row">
         <span class="k">模糊强度</span>
-        <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
+        <input type="range" id="blurRange" min="0" max="40" step="2"
                style="flex:1;min-width:0;accent-color:var(--accent)">
-        <span class="v" id="v-blur" style="width:44px;text-align:right">26px</span>
+        <span class="v" id="v-blur" style="width:44px;text-align:right"></span>
       </div>
     </section>
 
@@ -3203,12 +3342,6 @@
         </div>
       </div>
       <div class="hint" id="navSideHint">常驻：侧边栏固定占用页面左侧。靠左缘滑出：侧边栏收起，页面占满宽度；指针移至窗口左缘时滑出，移开后自动收起。</div>
-      <div class="row">
-        <span class="k">悬停切换</span>
-        <span class="grow"></span>
-        <input type="checkbox" id="navHover" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
-      </div>
-      <div class="hint">开启后，指针在侧边栏入口停留约 150 毫秒即切换到该页面，无需点击。指针移回页面区域后，切换结果保留。</div>
       <div class="sechd">入口显隐</div>
       <div class="navlist" id="navList"></div>
       <div class="hint" id="navListHint">取消勾选的入口不会出现在侧边栏与主页中。至少需保留一个入口，否则没有可显示的内容。此处顺序即侧边栏当前顺序。</div>
@@ -3268,7 +3401,7 @@
         <button class="deed" id="saveagent">保存</button>
         <button class="deed" id="agenttest" style="margin-left:6px">测一下</button>
       </div>
-      <div class="hint" id="agenthint">兼容 OpenAI 的接口地址与密钥，用于启用右下角的小 Agent。地址写到 /v1 为止。密钥仅保存在本机，不显示在界面中。</div>
+      <div class="hint" id="agenthint">兼容 OpenAI 的接口地址与密钥，用于阅读器里划词提问、以及 AI 小结与写作续写。地址写到 /v1 为止。密钥仅保存在本机，不显示在界面中。</div>
       <div class="hint">提问时，小 Agent 会读取以下本机数据并发往上述接口：书架与阅读进度、已下载书籍的划线笔记、阅读统计汇总。仅在提问时发送。</div>
     </section>
 
@@ -3505,17 +3638,6 @@
   <button class="deed" data-b="off">退出</button>
 </div>
 
-<div class="dock closed" id="dock">
-  <div class="dockhead" id="dockHead">
-    <span class="dt">任务</span><span class="dn" id="dockCount"></span>
-    <span class="grow"></span>
-    <button class="dclear" id="logClear" type="button" title="清除攒下的输出记录">清日志</button>
-    <button class="dclear" id="dockClear" type="button" title="清空已完成的记录">清空</button>
-    <span class="dchev" id="dockChev">展开</span>
-  </div>
-  <div class="dockbody" id="dockBody"></div>
-</div>
-
 <div class="veil" id="veil">
   <div class="sheet glass">
     <h3 id="sheetTitle"></h3>
@@ -3681,17 +3803,9 @@
   </section>
 </div>
 
-<!-- 右下角小 Agent：一颗常驻气泡，点开是一块对话面板。
-     面板里不预置任何「示例回答」—— 说话的是你自己在设置里配的接口，没配就先在这儿说清怎么配。 -->
-<button class="agent none" id="agent" type="button" aria-label="读书小助手" title="读书小助手">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M20.6 11.6a8.1 8.1 0 0 1-8.9 8.1 9.4 9.4 0 0 1-2.5-.4L4.2 21l1.5-3.8a8 8 0 0 1-2.0-5.2 8.1 8.1 0 0 1 8.5-8.1 8.1 8.1 0 0 1 8.4 7.7Z"/>
-    <path d="M9.1 11.6h.01M13.2 11.6h.01"/>
-  </svg>
-  <span class="dot"></span>
-</button>
-
+<!-- 读书小助手面板：1.0.6 起主页那颗常驻气泡去掉了，这块面板只由阅读器来开
+     （划词小条的「问小助手」、阅读条那颗「问」）。面板里不预置「示例回答」——
+     说话的是你自己在设置里配的接口，没配就先在这儿说清怎么配。 -->
 <div class="agentpane" id="agentpane" role="dialog" aria-label="读书小助手">
   <div class="aghead">
     <span class="t">读书小助手</span>
@@ -3898,13 +4012,6 @@ function compose(lines) {
   return frag;
 }
 
-function paintTaskCount() {
-  const el = $('#dockCount');
-  if (!el) return;
-  const live = tasks.filter(t => t.state === 'running').length;
-  el.textContent = live ? `${live} 进行中` : (tasks.length ? `${tasks.length} 条` : '');
-}
-
 let whisperEl = null, whisperTimer = null;
 /** 右下角那一条提示的容器，懒建。 */
 function whisperBox() {
@@ -4032,32 +4139,10 @@ function pct(id) {
   return Math.round(kept);
 }
 
-function paintDock() {
-  const body = $('#dockBody');
-  if (!body) return;
-  paintTaskCount();
-  const clear = $('#dockClear');
-  if (clear) clear.disabled = !tasks.some(t => t.state !== 'running');
-  if (!tasks.length) {
-    body.innerHTML = '<div class="dempty">还没有任务</div>';
-    return;
-  }
-  body.replaceChildren(...tasks.map(t => {
-    const row = document.createElement('div');
-    row.className = 'drow';
-    const n = document.createElement('div');
-    n.className = 'nm';
-    n.textContent = t.title || t.book;
-    const st = document.createElement('div');
-    st.className = 'st' + (t.state === 'done' ? ' ok' : t.state === 'fail' ? ' bad' : '');
-    const p = pct(t.book);
-    st.textContent = t.state === 'running' ? (p < 0 ? '抓取中' : p + '%')
-      : t.state === 'done' ? '导出成功'
-        : (local[t.book] && local[t.book].chapters ? '没取完 ' + local[t.book].chapters + ' 章' : '未走完');
-    row.append(n, st);
-    row.onclick = () => showTaskLog(t);
-    return row;
-  }));
+/* 任务抽屉在 1.0.6 撤掉了。取书时的「查看详情」直接看这一本的输出记录：
+   本地记着就取本地那条，没记着（命令行 / MCP 起的）就现搓一条当壳。 */
+function taskOf(book, title) {
+  return tasks.find(t => t.book === book) || {book, title, state: 'running'};
 }
 
 async function showTaskLog(t) {
@@ -4090,7 +4175,6 @@ function startTask(book, title) {
   const t = {book, title, at: Date.now(), state: 'running'};
   tasks.unshift(t);
   saveTasks();
-  paintDock();
   delete pctHold[book];          // 新一轮从 0 起，别拿上次的百分比垫着
   return t;
 }
@@ -4315,6 +4399,13 @@ function shelfCard(b, bits) {
     const bar = document.createElement('div');
     bar.className = 'pbar';
     bar.innerHTML = barHtml(id);
+    // 「详情」按钮每 1.2s 会随进度条重画一次，挂在按钮自己身上的监听会跟着丢，
+    // 所以监听挂在这个不动的 .pbar 上，靠 closest 认按钮。
+    bar.addEventListener('click', e => {
+      if (!e.target.closest('.dtl')) return;
+      e.stopPropagation();
+      showTaskLog(taskOf(id, b.title || id));
+    });
     cv.append(bar);
   }
 
@@ -4413,7 +4504,9 @@ function syncShelfCard(el, b, bits) {
   return el;
 }
 
-/** 进度条的内容：百分比 + 一句「正在做什么」；不知道总量时用不定长条 */
+/** 进度条的内容：百分比 + 一句「正在做什么」+ 一个「详情」。
+ *  「详情」点开就是这一本的输出记录（什么时候翻到第几页、卡在哪），
+ *  原来那份记录挂在右下角的任务抽屉上，1.0.6 抽屉撤了，入口挪到这里。 */
 function barHtml(id) {
   const p = pct(id);
   const pr = (local[id] || {}).progress || {};
@@ -4422,7 +4515,8 @@ function barHtml(id) {
       : (pr.running ? '正在打开阅读器' : '后台抓取中'));
   const fill = p < 0 ? '<i class="unk"></i>' : '<i style="width:' + p + '%"></i>';
   return '<div class="lb"><span>' + (p < 0 ? '抓取中' : p + '%') + '</span><span>'
-    + note + '</span></div><div class="bg">' + fill + '</div>';
+    + note + '</span><button class="dtl" type="button">详情</button></div>'
+    + '<div class="bg">' + fill + '</div>';
 }
 
 /** 不重排网格，只把进度条推进（避免每 2.6s 重渲染抖一下） */
@@ -4449,7 +4543,7 @@ let sideFootStamp = '';
    界面写着 1.0.1，而文案却说什么「本机服务没在跑」，把人带去查一件本来没事的事。
    GUIZANG_PAGE 是这份界面写给哪版后端看的；ui_server.py 改完没跟着改版本号的情况，
    靠 404 兜住（后端认不得这条接口 = 它比界面旧）。 */
-const GUIZANG_PAGE = "1.0.5";
+const GUIZANG_PAGE = "1.0.6";
 const GZ = {back: "", code: "", stale: false, hid: false, swapping: false, why: "", prof: ""};
 
 function gzStale(what) {
@@ -4638,13 +4732,19 @@ async function drawState(force) {
                  + (b && b.chapters ? `（已存 ${b.chapters} 章，可续取）` : ''));
   }
   if (flipped) saveTasks();
-  paintDock();
 
   const live = $('#live'), txt = $('#liveText');
-  if (running) { live.className = 'live on'; txt.textContent = MOOD[t.kind] || '进行中'; }
-  else if (t.exit_code && t.exit_code !== 0) { live.className = 'live bad'; txt.textContent = '上次未走完'; }
-  else if (lastStarted) { live.className = 'live good'; txt.textContent = '已停下'; }
-  else { live.className = 'live'; txt.textContent = '静候'; }
+  // 任务抽屉撤掉后，顶栏这一颗就是「取书状态」：正在取哪一本、取到哪儿了都从这儿进。
+  // 空跑（登录 / 装组件）后面没有书可看，就不做成可点的。
+  const liveBook = running && t.book ? (local[t.book] || {}) : null;
+  if (running) {
+    live.className = 'live on' + (t.book ? ' click' : '');
+    live.title = t.book ? '点开看这本取到哪儿了' : '';
+    txt.textContent = (MOOD[t.kind] || '进行中')
+      + (liveBook && liveBook.title ? ' · 《' + liveBook.title + '》' : '');
+  } else if (t.exit_code && t.exit_code !== 0) { live.className = 'live bad'; live.title = ''; txt.textContent = '上次未走完'; }
+  else if (lastStarted) { live.className = 'live good'; live.title = ''; txt.textContent = '已停下'; }
+  else { live.className = 'live'; live.title = ''; txt.textContent = '静候'; }
   if (t.started_at) lastStarted = t.started_at;
 
   $('#connect').disabled = running;
@@ -4671,6 +4771,7 @@ async function drawState(force) {
   paintAgent(s.agent || {});
   paintSync(s.sync || {});
   paintVideoCfg(s.video || {});
+  paintZlib(s.zlib || {});
 
   // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
   const ki = $('#keyinput'), fi = $('#flomoinput');
@@ -4801,18 +4902,15 @@ const NAV_GROUP_NAME = {space: '空间', tool: '工具'};
 const SIDE_KEY = 'guizang_side_v1';   // 待法的本机镜像：状态回来前先用它，免得闪一下
 const PEEK_ZONE = 268;                // 浮层 246px + 一点余量：指针越过就当作「回页面了」
 const DRAG_HOLD = 400;                // 长按进拖拽态的门槛
-const DWELL = 150;                    // 悬停即切换的停留门槛
 
 let navCfg = null;          // 后端那份 nav.items（拿不到之前侧边栏是空的）
 let navSig = '';            // 上一次铺进 DOM 的指纹，一样就别重建
 let sideMode = '';          // 生效中的待法：'' 表示还没定（用 localStorage 的结果）
 let navBooted = false;      // 第一次拿到导航表才决定落在哪一屏
-let navHoverOn = true;        // 悬停切换的开关（设置里那一颗）
 let navPress = null;        // 按下但还没够成拖拽的那一下
 let navDrag = null;         // 正在拖的那一颗
 let navSkipClick = 0;       // 拖完紧跟着的 click：吞掉，不然会把页面切到刚拖走的那格
 let peekTimer = 0;
-let dwellBtn = null, dwellTimer = 0;
 let GZPROF = {};          // 后端那份 profile 的当前值：个人主界面那一屏要拿它填表单
 
 /** 徽章只认「这一格在不在」：入口被关掉后 DOM 里就没有这个节点，
@@ -4862,7 +4960,6 @@ function takeNav(nav) {
   if (!nav || !nav.items) return;
   const sig = JSON.stringify(nav.items);
   navCfg = nav;
-  navHoverOn = nav.hover !== false;
   applySideMode(nav.sidebar);
   if (sig !== navSig) { navSig = sig; renderNav(); }
   if (!navBooted) {
@@ -4899,7 +4996,6 @@ function sidePeek(on) {
   document.body.classList.toggle('side-peek', !!on);
   if (on) growAvatar();
   clearTimeout(peekTimer); peekTimer = 0;
-  if (!on) dwellCancel();
 }
 
 /** 左上角那颗头像跟着浮层一起「长」出来一次。重放动画必须先摘 class 再逼一次
@@ -4924,31 +5020,10 @@ document.addEventListener('pointermove', e => {
   } else clearTimeout(peekTimer);
 }, {passive: true});
 
-/* 悬停即切换：指针停在某一格上够久就切过去，不需要点。
-   三条护栏：设置里可以整个关掉；正在拖拽时不切；指针离开侧边栏就取消还没到的那一次。
-   拖拽与切页都由同一批 pointer 事件驱动，所以长按那一格时先取消 dwell。
-
-   只认 pointermove，不认 pointerover：改窗口大小、窄屏断点重排会让另一格滑到原地
-   不动的指针底下，浏览器这时补一个 pointerover —— 那不是用户把指针挪过去，照切就会
-   在改大小的当口把界面跳到别的一屏（真机门禁在 720px 那一档正是这么栽的：最后一次
-   真实移动在 840ms 前，坐标与那个合成事件一模一样）。pointermove 只在指针真的动了
-   才来，用它当唯一入口，这条岔路就没了。 */
-function dwellCancel() {
-  clearTimeout(dwellTimer); dwellTimer = 0; dwellBtn = null;
-}
-$('#nav').addEventListener('pointermove', e => {
-  if (!navHoverOn || navDrag || navPress) return;
-  const b = e.target.closest('button[data-v]');
-  if (!b || b.dataset.v === v) { dwellCancel(); return; }
-  if (b === dwellBtn) return;                 // 还在同一格上：那一次倒计时别重来
-  dwellCancel();
-  dwellBtn = b;
-  dwellTimer = setTimeout(() => {
-    if (!navDrag && navHoverOn && b.isConnected && b.dataset.v !== v) setView(b.dataset.v);
-    dwellBtn = null;
-  }, DWELL);
-});
-$('#nav').addEventListener('pointerleave', dwellCancel);
+/* 切页只认一次真正的点击（见后面 `#nav` 的 click）。指针扫过、在某格上停一停，
+   都只让那一格自己亮一下，不会把整屏换走 —— 指针在侧边栏上是「路过」，不是
+   「要去那一格」。这里原来挂的是一段 150ms 的 dwell 计时器，停够久就自动切页；
+   用户要求砍掉这条 hover 触发的跳转，只留点击。 */
 
 /* 长按拖拽排序：按满 400ms 才进拖拽态，所以「点一下切页」这件事一点没变。
    进态先抖一下（.grabbing 那 0.2s），之后跟着指针实时换位，松手才发回后端。
@@ -4957,7 +5032,6 @@ $('#nav').addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   const b = e.target.closest('button[data-v]');
   if (!b) return;
-  dwellCancel();
   clearTimeout(navPress && navPress.timer);
   navPress = {btn: b, x: e.clientX, y: e.clientY, id: e.pointerId,
               timer: setTimeout(() => navGrab(b, e), DRAG_HOLD)};
@@ -5032,8 +5106,8 @@ async function postNav(payload, label) {
   return true;
 }
 
-/* ── 设置里那一栏「导航」 ────────────────────────────────
-   显示方式 / 悬停切换 / 入口显隐三样都在这一栏，值从后端那份 nav 来。
+/* ── 设置里那一栏「侧边栏」 ────────────────────────────
+   显示方式 / 入口显隐两样都在这一栏，值从后端那份 nav 来。
    每次重画都要先把正在拖拽的可能性排除掉：勾选和拖拽说的是同一件事的两半。 */
 function paintNavList() {
   if (!navCfg) return;
@@ -5046,8 +5120,6 @@ function paintNavList() {
   }
   const seg = $('#navSideSeg');
   if (seg) [...seg.children].forEach(b => b.classList.toggle('on', b.dataset.s === (navCfg.sidebar || 'open')));
-  const hov = $('#navHover');
-  if (hov) hov.checked = navCfg.hover !== false;
 }
 
 $('#navSideSeg').addEventListener('click', e => {
@@ -5056,7 +5128,6 @@ $('#navSideSeg').addEventListener('click', e => {
   applySideMode(b.dataset.s);      // 先按下去的样子给看，回执到了再以后端为准
   postNav({sidebar: b.dataset.s}, '');
 });
-$('#navHover').addEventListener('change', e => postNav({hover: !!e.target.checked}, ''));
 $('#navList').addEventListener('change', e => {
   const b = e.target.closest('input[data-nav]');
   if (!b || !navCfg) return;
@@ -6331,10 +6402,15 @@ try { theme = localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) {}
 function applyTheme(t) {
   theme = t;
   const root = document.documentElement;
+  /* 换肤要一次性到位，不许补间（见 CSS 里 .theme-switching 那段）。这一帧先挂类把全站补间
+     压平，改完主题下一帧再摘 —— 摘的时候颜色已经落定，各组件不会再有「旧色→新色」可补，
+     也就不会几十个一起错时闪。 */
+  root.classList.add('theme-switching');
   if (t === 'dark' || t === 'light') root.dataset.theme = t;
   else delete root.dataset.theme;          // auto：交回给系统
   try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
   [...$('#themeSeg').children].forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
 }
 $('#themeSeg').addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -6345,6 +6421,11 @@ applyTheme(theme);
 /* ── 磨砂浓度 / 模糊强度：只影响观感，存在本机 localStorage ── */
 
 const LOOK_KEY = 'guizang_look_v1';
+/* 外观那两颗滑杆的缺省值只有这一份（磨砂浓度 %、模糊强度 px）。CSS 里 --frost/--blur 那两行
+   是 JS 起来之前的兜底，数值必须与这里对齐；设置弹窗里滑杆的值与读数都由 applyLook() 现填，
+    HTML 不再写死。原来 HTML 把模糊写死成 26px、JS 缺省却是 24 —— 同一样东西两个默认值，
+    JS 一跑滑杆就跳一下，所以把写死的那一份删掉，只留这里。 */
+const LOOK_DEF = {frost: 72, blur: 24};
 
 function look() {
   try { return JSON.parse(localStorage.getItem(LOOK_KEY) || '{}') || {}; }
@@ -6354,8 +6435,8 @@ function look() {
 function applyLook(part) {
   const l = look();
   const root = document.documentElement;
-  const frost = l.frost != null ? l.frost : 72;     // 百分比
-  const blur = l.blur != null ? l.blur : 24;        // px
+  const frost = l.frost != null ? l.frost : LOOK_DEF.frost;     // 百分比
+  const blur = l.blur != null ? l.blur : LOOK_DEF.blur;         // px
   if (part !== 'blur') root.style.setProperty('--frost', (frost / 100).toFixed(3));
   if (part !== 'frost') root.style.setProperty('--blur', blur + 'px');
   const fr = $('#frostRange'), br = $('#blurRange');
@@ -6421,29 +6502,9 @@ $('#batchbar').addEventListener('click', e => {
   runBatch(b.dataset.b);
 });
 
-$('#dockHead').onclick = () => {
-  const d = $('#dock');
-  const was = d.classList.contains('closed');
-  d.classList.toggle('closed');
-  $('#dockChev').textContent = d.classList.contains('closed') ? '展开' : '收起';
-  // 要摊开任务列表，就把小助手收掉：两块玻璃挤在同一个角上必定互相压。
-  if (was) agOpen(false);
-};
-
-// 清空记录：只清跑完的（成功/未走完），正在抓的那几条得留着看进度
-$('#dockClear').onclick = e => {
-  e.stopPropagation();
-  const gone = tasks.filter(t => t.state !== 'running').length;
-  if (!gone) { whisper('没有可以清掉的记录'); return; }
-  tasks = tasks.filter(t => t.state === 'running');
-  saveTasks();
-  paintDock();
-  whisper(`已清掉 ${gone} 条记录`);
-};
-
-/* 清日志：右下角「清空」动的是本机那 24 条任务条目，后端攒下的输出记录是另一份 ——
-   以前这份一直清不掉，点进任务看到的还是上一次失败时的现场，就像「记录没真的清掉」。
-   正在跑的那一次会保留，否则中止/查进度时看不到现场，反倒制造新的「点了没反应」。 */
+/* 清日志：任务抽屉撤了之后，这份输出记录的入口只剩任务弹层里的「清除记录」
+   （以及后端那条 log.clear）。原来还有右下角「清空」与横条上的「清日志」两个常驻钮，
+   随抽屉一起收掉了。 */
 async function clearRunLog() {
   let r;
   try { r = await post('log.clear'); } catch (e) { whisper('连不上本地服务'); return; }
@@ -6452,8 +6513,7 @@ async function clearRunLog() {
   if (!sBody.hidden) sBody.value = '（输出记录已清除）';
 }
 
-/* 清除输出记录有两个入口：进展横条上的「清日志」、任务弹层里的「清除记录」。
-   两个都走这一份确认 —— 弹层里一击就抹掉整片现场太手滑了。 */
+/* 清除输出记录走这一份确认 —— 弹层里一击就抹掉整片现场太手滑了。 */
 async function askClearLog() {
   let n = 0;
   try {
@@ -6463,12 +6523,10 @@ async function askClearLog() {
   if (!n) { whisper('输出记录已经是空的'); return; }
   sheet({
     title: '清除输出记录',
-    text: `将清掉攒下的 ${n} 行输出记录（进展里那些抓取现场）。正在跑的任务照清，之后的新输出会继续记进来；右下角的任务条目不受影响。`,
+    text: `将清掉攒下的 ${n} 行输出记录（进展里那些抓取现场）。正在跑的任务照清，之后的新输出会继续记进来；书架上的书与它们取回的进度不受影响。`,
     actions: [{ label: '确认清除', lead: true, run: clearRunLog }, { label: '算了' }],
   });
 }
-
-$('#logClear').onclick = e => { e.stopPropagation(); askClearLog(); };
 
 $('#connect').onclick = async () => {
   const r = await post('login');
@@ -6481,6 +6539,13 @@ $('#fix').onclick = async () => {
   if (!r.ok) whisper(r.msg);
   setPop(false);
   drawState();
+};
+
+// 顶栏那颗「取书状态」：正在取某本书时点开它，就是这一本的输出记录。
+// 没在取书（空跑或静候）时点了不出声 —— 它那时不是一枚按钮。
+$('#live').onclick = () => {
+  if (!running || !runningBook) return;
+  showTaskLog(taskOf(runningBook, (local[runningBook] || {}).title));
 };
 
 async function saveCfg(payload, label) {
@@ -6505,6 +6570,48 @@ $('#saveflomo').onclick = () => {
   saveCfg({flomo_url: v}, 'flomo 地址').then(() => { $('#flomoinput').value = ''; });
 };
 $('#flomoinput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveflomo').click(); });
+
+/* ── Z-Library 账号 ─────────────────────────────
+   登录把邮箱＋密码在本机换成一对令牌，后端只留令牌（密码不落盘）。这里几条都打
+   /api/zlib，回来的是 {ok, zlib, msg}；成功后立刻把状态照到界面上，不等下一轮轮询。
+   搜索页右栏那张就地登录表也是这几个动作，共用同一份状态。 */
+async function zlibCall(payload) {
+  return gzApi('/api/zlib', payload, 30000);
+}
+$('#zlibEmail').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibPass').focus(); });
+$('#zlibPass').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibLogin').click(); });
+$('#zlibLogin').onclick = async () => {
+  const email = $('#zlibEmail').value.trim();
+  const pass = $('#zlibPass').value;
+  if (!email || !pass) { whisper('先填邮箱与密码'); return; }
+  $('#zlibLogin').disabled = true;
+  whisper('正在登录 Z-Library…');
+  const r = await zlibCall({mode: 'login', email, password: pass});
+  $('#zlibLogin').disabled = false;
+  if (!r.ok) { whisper(r.msg || '登录没成功'); return; }
+  $('#zlibEmail').value = '';
+  $('#zlibPass').value = '';
+  paintZlib(r.zlib || {});
+  whisper(r.msg || '已登录 Z-Library');
+};
+$('#zlibOut').onclick = async () => {
+  const r = await zlibCall({mode: 'logout'});
+  if (r.ok) { paintZlib(r.zlib || {}); whisper(r.msg || '已退出 Z-Library'); }
+  else whisper(r.msg || '退出没成功');
+};
+$('#zlibDomain').addEventListener('input', () => { zlibDomDirty = true; });
+$('#zlibSaveDom').onclick = async () => {
+  const v = $('#zlibDomain').value.trim();
+  const r = await zlibCall({mode: 'domain', domain: v});
+  if (!r.ok) { whisper(r.msg || '没能保存'); return; }
+  zlibDomDirty = false;
+  const dm = $('#zlibDomain');
+  dm.value = '';
+  dm.placeholder = (r.zlib || {}).domain || '1lib.sk';
+  paintZlib(r.zlib || {});
+  whisper(r.msg || '已保存域名');
+};
+$('#zlibDomain').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibSaveDom').click(); });
 
 /* ── 导出位置 ─────────────────────────────
    选目录这件事只能在原生外壳里做：浏览器拿不到真实路径（input[webkitdirectory]
@@ -6839,8 +6946,10 @@ function paneEl(name) {
   // 把 main 底部那段呼吸留白收窄（配合 .rdwrap 的定高），离开时再还回去。
   document.body.classList.toggle('reading', name === 'read');
   // 订阅 / 视频 / 便签这三屏同理：栏内各自滚，整页不动，翻列表时不会把顶部工具条滚出视野。
+  // 搜索也是两栏（微信读书 / Z-Library），收在同一套高度算法里。
   document.body.classList.toggle('feedfit',
-    name === 'feed' || name === 'video' || name === 'flomo' || name === 'write');
+    name === 'feed' || name === 'video' || name === 'flomo' || name === 'write'
+    || name === 'search');
   if (changed) {
     shownPane = name;
     slideView(slideDir, name);
@@ -10600,6 +10709,10 @@ function renderFlomoView() {
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
+let zlibDomDirty = false;   // Z-Library 的域名输入被改过、还没保存（同上，别被轮询盖回）
+// Z-Library 的登录状态。搜书页右栏据此决定先摆登录表单还是直接搜；
+// 只在 paintZlib() 一处写入，轮询与设置里登录/登出/换域名都从那儿过一遍，别各存各的。
+let zlibState = {};
 const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHead: null,
                cnt: null, plan: null, start: null, stop: null};
 const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
@@ -11825,6 +11938,30 @@ function paintVideoCfg(v) {
   }
 }
 
+/* Z-Library 那一行状态 / 表单。凭据与令牌都在后端，这一屏只是把它照出来：
+   登录了就显示「已登录 · 邮箱」，把邮箱与密码两行收起来，只留「退出」。 */
+function paintZlib(z) {
+  z = z || {};
+  zlibState = z;
+  const on = !!z.logged_in;
+  const st = $('#v-zlib');
+  if (st) st.textContent = on
+    ? ('已登录' + (z.email ? ' · ' + z.email : (z.name ? ' · ' + z.name : '')))
+    : '未登录';
+  const out = $('#zlibOut');
+  if (out) out.disabled = !on;
+  for (const id of ['#zlibAcct', '#zlibAcct2']) {
+    const r = $(id);
+    if (r) r.hidden = on;             // 登录了就不再摆着邮箱/密码
+  }
+  const dm = $('#zlibDomain');
+  if (dm && !zlibDomDirty) dm.placeholder = z.domain || '1lib.sk';
+  const hi = $('#zlibhint');
+  if (hi) hi.textContent = on
+    ? '已登录，搜索页右侧可直接搜书并下载。访问走本机代理（与取书同一套）。'
+    : 'Z-Library 的入口域名时常更换。默认使用 1lib.sk，如无法访问可在此填入当前可用的镜像域名。访问走本机代理（与取书同一套），不必额外配置。';
+}
+
 /* ── 划线笔记（多选 → flomo） ─────────── */
 
 let nbBooks = [], nbItems = [], nbSel = new Set(), nbOpen = null, nbTitle = '';
@@ -12249,9 +12386,12 @@ async function renderPickView() {
 /* ── 搜索 ─────────────────────────────── */
 
 /* 「我的书架」这一域已经砍掉了：书架本来就一屏能看完，顶部还有筛选框，
-   搜索页只留「书城 + 划线内容」两类真正需要搜的东西。 */
+   搜索页只留「书城 + 划线内容」两类真正需要搜的东西。
+   「书城」这一格现在并排两条路：左边微信读书（搜到 → 加入书架 → 整本取回），
+   右边 Z-Library（搜到 → 直接下载 EPUB / PDF 收进本地书架）。两边逻辑不同，
+   所以各有各的栏头与动作：同一个搜索框，一次搜同时发两问。 */
 const SEARCH_HINTS = {
-  store: '在微信读书书城里搜（需要接口 Key）。搜到的书可在详情页「加入书架」，勾选多本后批量条里一次加完。',
+  store: '在上面的框里写个书名、作者或关键词，微信读书与 Z-Library 会同时搜。微信读书那边搜到后加入书架、再整本取回；Z-Library 这边可以直接下载 EPUB / PDF，下载完自动收进本地书架。',
   notes: '在你的划线与想法正文里搜（需要先建一次笔记索引）。',
 };
 
@@ -12263,7 +12403,7 @@ function renderSearchView() {
        <button data-s="notes">划线内容</button>
      </span>
      <span class="wrsearch" style="padding:0;border:0;margin-left:10px">
-       <input id="wrq" placeholder="想搜什么？" style="width:200px" autocomplete="off">
+       <input id="wrq" placeholder="书名 / 作者 / 关键词" style="width:210px" autocomplete="off">
        <button class="deed" id="wrgo" style="height:34px">搜索</button>
        <button class="deed" id="wrweb" style="height:34px">在网页中搜</button>
      </span>`));
@@ -12273,62 +12413,90 @@ function renderSearchView() {
   const q = () => find('#wrq').value.trim();
   const web = kw => open('https://weread.qq.com/web/search/books?keyword=' + encodeURIComponent(kw),
                          '_blank', 'noopener');
-  const paintTabs = () => tabs.forEach(b => b.classList.toggle('on', b.dataset.s === scope()));
+  const paintTabs = () => {
+    tabs.forEach(b => b.classList.toggle('on', b.dataset.s === scope()));
+    const w = find('#wrweb');
+    if (w) w.hidden = scope() !== 'store';      // 「在网页中搜」只在书城那格有意义
+  };
 
   const hint = () => {
     setNote('search');
     body.innerHTML = `<div class="emptyline" style="padding:24px 20px">${esc(SEARCH_HINTS[scope()])}</div>`;
   };
 
-  const grid = items => {
-    let g = body.querySelector('.sgrid');
-    if (!g) {
-      g = document.createElement('div');
-      g.className = 'sgrid';
-      body.replaceChildren(g);
-    }
-    fillGrid(g, items);
-  };
-
-  async function searchFlow(sc) {
-    const kw = q();
-    if (sc === 'notes') {
-      const st = await loadIdxState();
-      if (!st.count) {
-        body.replaceChildren(indexPrompt(
-          '划线搜索要在本地建一次索引（把你的划线与想法读进来，一次性，之后很快）。'));
-        return;
-      }
-      const d = await (await fetch('/api/notes_search?q=' + encodeURIComponent(kw) + '&limit=80')).json();
-      const items = d.data || [];
-      setNote('search', items.length ? `命中 ${d.total} 条` : '');
-      if (!items.length) { body.innerHTML = '<div class="emptyline">没搜到相关划线</div>'; return; }
-      const wall = document.createElement('div');
-      wall.className = 'wall';
-      wall.append(...items.map(x => {
-        const c = document.createElement('div');
-        c.className = 'qcard';
-        const t = document.createElement('div');
-        t.className = 't';
-        t.textContent = x.text;
-        const m = document.createElement('div');
-        m.className = 'm';
-        const k = document.createElement('span');
-        k.className = 'k';
-        k.textContent = x.kind;
-        m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
-        c.append(t, m);
-        c.onclick = () => {
-          window.__scope = 'notes';
-          renderDetailView(x.bookId, bookToReaderMap()[x.bookId] || '', x.title);
-        };
-        return c;
-      }));
-      body.replaceChildren(wall);
+  // ── 划线内容：本地索引里搜引文 ─────────────────────────
+  async function notesFlow(kw) {
+    const st = await loadIdxState();
+    if (!st.count) {
+      body.replaceChildren(indexPrompt(
+        '划线搜索要在本地建一次索引（把你的划线与想法读进来，一次性，之后很快）。'));
       return;
     }
+    const d = await (await fetch('/api/notes_search?q=' + encodeURIComponent(kw) + '&limit=80')).json();
+    const items = d.data || [];
+    setNote('search', items.length ? `命中 ${d.total} 条` : '');
+    const box = document.createElement('div');
+    box.className = 'zscroll';
+    if (!items.length) {
+      box.innerHTML = '<div class="emptyline">没搜到相关划线</div>';
+      body.replaceChildren(box);
+      return;
+    }
+    const wall = document.createElement('div');
+    wall.className = 'wall qwall';
+    wall.append(...items.map(x => {
+      const c = document.createElement('div');
+      c.className = 'qcard';
+      const t = document.createElement('div');
+      t.className = 't';
+      t.textContent = x.text;
+      const m = document.createElement('div');
+      m.className = 'm';
+      const k = document.createElement('span');
+      k.className = 'k';
+      k.textContent = x.kind;
+      m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
+      c.append(t, m);
+      c.onclick = () => {
+        window.__scope = 'notes';
+        renderDetailView(x.bookId, bookToReaderMap()[x.bookId] || '', x.title);
+      };
+      return c;
+    }));
+    box.append(wall);
+    body.replaceChildren(box);
+  }
 
-    // 书城
+  // ── 书城：左微信读书 / 右 Z-Library ─────────────────────
+  /** 两栏的骨架。栏头把「这一栏是干什么的」写在明处 —— 两边动作不同，
+   *  用户不必点一下才知道左边是取书、右边是下载。 */
+  function storeFrame() {
+    body.innerHTML = `
+      <div class="zsplit">
+        <section class="zcol" data-z="wr">
+          <div class="zhead"><span class="b">微信读书</span>
+            <span class="s">搜到后加入书架，再整本取回</span></div>
+          <div class="zbody" id="zbodyWr"></div>
+        </section>
+        <section class="zcol" data-z="zl">
+          <div class="zhead"><span class="b">Z-Library</span>
+            <span class="s" id="zlibHead">EPUB / PDF 直接下载入本地书架</span></div>
+          <div class="zbody" id="zbodyZl"></div>
+        </section>
+      </div>`;
+    return {wr: body.querySelector('#zbodyWr'), zl: body.querySelector('#zbodyZl'),
+            head: body.querySelector('#zlibHead')};
+  }
+
+  /** 左栏：微信读书书城。走的是老那条路 —— 搜到的是「书城里的书」，
+   *  卡片上的动作是「取书 / 查看详情」，不是下载。返回命中数（搜不了时回 null）。 */
+  async function searchWeRead(col, kw) {
+    if (!keySet) {
+      col.innerHTML = '<div class="emptyline"><b>需要接口 Key</b>'
+        + '在「设置 → 账号」里填入微信读书开放接口 Key 之后，才搜得了微信读书书城。</div>';
+      return null;
+    }
+    col.innerHTML = skelCards(6);
     try {
       const d = await wcall('/store/search', {keyword: kw, scope: 10});
       const seen = new Set();
@@ -12344,24 +12512,177 @@ function renderSearchView() {
         }
         if (books.length >= 12) break;
       }
-      setNote('search', books.length ? `找到 ${books.length} 本` : '');
-      if (!books.length) { body.innerHTML = '<div class="emptyline">没搜到</div>'; return; }
-      grid(books);
+      if (!books.length) { col.innerHTML = '<div class="emptyline">微信读书里没搜到</div>'; return 0; }
+      const g = document.createElement('div');
+      g.className = 'sgrid';
+      fillGrid(g, books);          // 卡片自身带「取书 / 查看详情」，与书架同一套
+      col.replaceChildren(g);
+      return books.length;
     } catch (e) {
-      body.innerHTML = `<div class="emptyline"><b>搜索失败</b>${esc(e.message)}</div>`;
+      col.innerHTML = `<div class="emptyline"><b>搜索失败</b>${esc(e.message)}</div>`;
+      return null;
     }
   }
 
-  /** 搜索没法预判（词还没打出来），所以这一段更得把空白先占住：书城铺卡片骨架，
+  /** 右栏：Z-Library。未登录先就地登录；登录后搜到的是「能下的文件」，
+   *  每行一颗「下载」，点完直接下一份收进本地书架。返回命中数（搜不了时回 null）。 */
+  async function searchZlib(col, head, kw) {
+    if (!zlibState.logged_in) {
+      head.textContent = '登录后可直接下载 EPUB / PDF';
+      col.replaceChildren(zlibLoginForm(() => searchZlib(col, head, kw)));
+      return null;
+    }
+    head.textContent = zlibState.email
+      ? '已登录 · ' + zlibState.email : 'EPUB / PDF 直接下载入本地书架';
+    col.innerHTML = zlibSkel(6);
+    const d = await gzApi('/api/zlib', {mode: 'search', q: kw, limit: 24}, 40000);
+    if (!d || !d.ok) {
+      col.innerHTML = `<div class="emptyline"><b>没能连上 Z-Library</b>`
+        + `${esc((d && d.msg) || '没答上来')}<br>可在「设置 → Z-Library」里换一个镜像域名。</div>`;
+      return null;
+    }
+    const books = d.books || [];
+    if (!books.length) { col.innerHTML = '<div class="emptyline">Z-Library 里没搜到</div>'; return 0; }
+    const box = document.createElement('div');
+    box.append(...books.map(zlibRow));
+    col.replaceChildren(box);
+    return books.length;
+  }
+
+  /** Z-Library 一行：小封面 + 书名 / 作者 + 格式与大小 + 下载钮。
+   *  封面是外链（走系统代理时浏览器未必取得到），取不到就落回书脊色块，形状不变。 */
+  function zlibRow(b) {
+    const row = document.createElement('div');
+    row.className = 'zrow';
+    const cv = document.createElement('div');
+    cv.className = 'zc';
+    const sp = () => {
+      const d = document.createElement('span');
+      d.className = 'sp';
+      d.textContent = (b.title || '书').trim().slice(0, 1);
+      return d;
+    };
+    if (b.cover) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = b.cover;
+      img.onerror = () => img.replaceWith(sp());
+      cv.append(img);
+    } else cv.append(sp());
+
+    const m = document.createElement('div');
+    m.className = 'zm';
+    const ti = document.createElement('div');
+    ti.className = 'zt';
+    ti.textContent = b.title || '(无题)';
+    const au = document.createElement('div');
+    au.className = 'za';
+    au.textContent = [b.author, b.publisher].filter(Boolean).join(' · ') || '佚名';
+    const bs = document.createElement('div');
+    bs.className = 'zb';
+    const fmt = document.createElement('span');
+    fmt.textContent = (b.extension || '').toUpperCase() || '未知格式';
+    if (b.readable) fmt.className = 'ok';
+    bs.append(fmt);
+    for (const v of [b.size, b.year, b.language]) {
+      if (!v) continue;
+      const s = document.createElement('span');
+      s.textContent = v;
+      bs.append(s);
+    }
+    m.append(ti, au, bs);
+
+    const go = document.createElement('button');
+    go.className = 'deed';
+    go.textContent = b.readable ? '下载' : '阅读器打不开';
+    go.disabled = !b.readable;
+    go.onclick = () => zlibDownload(b, go);
+    const zn = document.createElement('div');
+    zn.className = 'zn';
+    zn.append(go);
+    row.append(cv, m, zn);
+    return row;
+  }
+
+  /** 下载一本书：后端下一份、转成章节、收进「本地书架」。
+   *  下载要拿直链再拉整本，比一次搜索慢得多，所以超时给到两分钟。 */
+  async function zlibDownload(b, btn) {
+    if (btn.dataset.busy) return;
+    btn.dataset.busy = '1';
+    btn.textContent = '下载中…';
+    const r = await gzApi('/api/zlib', {mode: 'download', book: b}, 120000);
+    btn.dataset.busy = '';
+    if (!r.ok) { btn.textContent = '下载'; whisper(r.msg || '下载没成功'); return; }
+    btn.textContent = '已入架';
+    whisper(r.msg || ('已下载《' + (b.title || '') + '》'));
+    drawState(true);      // 书架多了一本：把状态与「已取回」计数刷新一遍
+  }
+
+  function zlibLoginForm(onOk) {
+    const box = document.createElement('div');
+    box.className = 'zlogin';
+    box.innerHTML = `<div class="tip">Z-Library 的账号在这里登录一次就行。登录后这一栏能搜书并直接下载 EPUB / PDF，下载完自动收进「本地书架」。密码只用来换一次登录令牌，本机只保存令牌，不保存密码。</div>
+      <div class="row"><input id="zlEmail" type="text" placeholder="登录邮箱" autocomplete="off" spellcheck="false"></div>
+      <div class="row"><input id="zlPass" type="password" placeholder="登录密码" autocomplete="off"></div>
+      <div class="act"><button class="deed" id="zlGo">登录</button><span class="grow"></span></div>`;
+    const em = box.querySelector('#zlEmail'), pw = box.querySelector('#zlPass'),
+          go = box.querySelector('#zlGo');
+    const run = async () => {
+      const email = em.value.trim(), pass = pw.value;
+      if (!email || !pass) { whisper('先填邮箱与密码'); return; }
+      go.disabled = true;
+      go.textContent = '登录中…';
+      const r = await gzApi('/api/zlib', {mode: 'login', email, password: pass}, 30000);
+      go.disabled = false;
+      go.textContent = '登录';
+      if (!r.ok) { whisper(r.msg || '登录没成功'); return; }
+      paintZlib(r.zlib || {});    // 搜书页右栏与设置里那一段都跟着变
+      whisper(r.msg || '已登录 Z-Library');
+      if (onOk) onOk();
+    };
+    go.onclick = run;
+    [em, pw].forEach(x => x.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); }));
+    return box;
+  }
+
+  // 与结果行同形状的骨架（封面块 + 两行文字），冷启动时先把位置占住
+  function zlibSkel(n) {
+    let s = '';
+    for (let i = 0; i < (n || 6); i++) {
+      s += '<div class="zrow"><div class="zc">'
+        + '<span class="skbar" style="width:26px;height:38px;border-radius:6px"></span></div>'
+        + '<div class="zm"><div class="skline" style="margin:0;width:64%"></div>'
+        + '<div class="skline" style="margin:8px 0 0;width:40%;height:9px"></div></div></div>';
+    }
+    return s;
+  }
+
+  async function storeFlow(kw) {
+    const cols = storeFrame();
+    const [a, b] = await Promise.all([
+      searchWeRead(cols.wr, kw),
+      searchZlib(cols.zl, cols.head, kw),
+    ]);
+    const bits = [];
+    if (a != null) bits.push(`微信读书 ${a} 本`);
+    if (b != null) bits.push(`Z-Library ${b} 本`);
+    setNote('search', bits.join(' · '));
+  }
+
+  /** 搜索没法预判（词还没打出来），所以这一段更得把空白先占住：书城两栏各自铺骨架，
    *  划线铺引文条骨架。不论从哪个分支收口（结果 / 没搜到 / 失败 / 要先建索引），
    *  都是「骨架 → 真内容」那一下，淡入统一在包装里补一次，不必每个分支各写一行。 */
   async function runSearch() {
     const kw = q();
-    const sc = scope();
-    if (sc === 'store' && !kw) { find('#wrq').focus(); return; }
-    if (sc === 'store' && !keySet) { web(kw); return; }
-    body.innerHTML = sc === 'store' ? skelCards(8) : skelLines(5);
-    try { await searchFlow(sc); } finally { fadeIn(body); }
+    if (scope() === 'notes') {
+      body.innerHTML = `<div class="zscroll">${skelLines(5)}</div>`;
+      try { await notesFlow(kw); } finally { fadeIn(body); }
+      return;
+    }
+    if (!kw) { find('#wrq').focus(); return; }
+    try { await storeFlow(kw); } finally { fadeIn(body); }
   }
 
   if (fresh) {
@@ -12538,6 +12859,194 @@ async function renderDetailView(storeId, readerId, title) {
     }
   }
   body.append(acts);
+  // 有本地正文才谈得上计划（页数从正文折算，读到哪也靠正文）。没取过的书不铺这一块。
+  if (id && mine && mine.chapters) body.append(planPanel(id));
+}
+
+/* ── 每本书的阅读计划 ─────────────────────────────
+   计划存在后端（cache/readplan.json），换台机器、换个壳都还在。页数由正文字数折算
+   （每 1000 字一页），跟字号、窗口宽窄都无关 —— 所以「还剩多少页」是一个稳定的数，
+   不会因为调了一次字号就从三十页变成四十页。这一块负责定目标、看进度、留档；
+   阅读器底栏那条「还剩 N 页」由它自己往上汇报位置得来。 */
+async function planGet(book) {
+  try {
+    const d = await (await fetch('/api/plan?book=' + encodeURIComponent(book))).json();
+    return d && d.ok ? (d.data || {}) : null;
+  } catch (e) { return null; }
+}
+
+async function planSend(body) {
+  try {
+    const d = await (await fetch('/api/plan', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {})
+    })).json();
+    return d || {ok: false, msg: '本地服务没有回应'};
+  } catch (e) { return {ok: false, msg: '连不上本地服务'}; }
+}
+
+/** 'YYYY-MM-DD'（后端口径）折成「M 月 D 日」；认不出就原样回。 */
+function planDay(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  return m ? (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : (s || '');
+}
+/** Unix 秒折成「M 月 D 日」；0 给空串。 */
+function planStamp(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日';
+}
+const planPer = p => (p === 'weekly' ? '每周' : '每天');
+const planVer = (p, n) => planPer(p) + ' ' + n + ' 页';
+
+/** 详情页那块「阅读计划」。一个盒子自己管自己：定 / 改 / 结束都在原地重画，不跳别处。 */
+function planPanel(bookId) {
+  const box = document.createElement('div');
+  box.className = 'plan';
+  let cur = null;          // 最近一次读数（has:false 也留着，里头有全书页数）
+  let editing = false;     // 正在改目标：表单换成「保存目标 / 不改了」
+  let endArmed = false;    // 「结束计划」点过一次，等第二下（和别处的两下确认一致）
+
+  const bar = pct => '<div class="bar"><i style="width:' +
+    Math.max(2, Math.min(100, pct || 0)) + '%"></i></div>';
+  const sk = (k, v) => '<div class="sk"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>';
+
+  function lead(total, period, amount) {
+    if (!total) return '这本书还没有本地正文，先在详情页把它取回来或导进来，再来定计划。';
+    const n = Math.max(1, parseInt(amount, 10) || Math.max(1, Math.round(total / 15)));
+    const periods = Math.max(1, Math.ceil(total / n));
+    const days = period === 'weekly' ? periods * 7 : periods;
+    return '全书约 ' + total + ' 页，照这个节奏大约 ' + days + ' 天读完，一天约 '
+      + (total / days).toFixed(1) + ' 页。';
+  }
+
+  function form(p) {
+    const total = (p && p.pages) || 0;
+    const g = (p && p.goal) || {};
+    const period = (editing && g.period === 'weekly') ? 'weekly' : 'daily';
+    const amount = (editing && g.pages) ? g.pages : '';
+    const sug = total ? Math.max(1, Math.round(total / 15)) : '';
+    return '<div class="planhd"><h3>阅读计划</h3><span class="grow"></span>'
+      + '<span class="sub">' + (total ? '全书 ' + total + ' 页' : '') + '</span></div>'
+      + '<div class="prow">'
+      + '<div class="segs" id="plSeg">'
+      + '<button data-p="daily"' + (period === 'daily' ? ' class="on"' : '') + '>每天</button>'
+      + '<button data-p="weekly"' + (period === 'weekly' ? ' class="on"' : '') + '>每周</button>'
+      + '</div>'
+      + '<input class="num" id="plNum" type="number" min="1" inputmode="numeric"'
+      + ' placeholder="' + (sug || '页数') + '" value="' + (amount || '') + '">'
+      + '<span class="sub" id="plUnit">页 / ' + (period === 'weekly' ? '周' : '天') + '</span>'
+      + '<button class="deed" id="plSave" style="height:32px">'
+      + (editing ? '保存目标' : '开始计划') + '</button>'
+      + (editing ? '<button class="deed" id="plCancel" style="height:32px">不改了</button>' : '')
+      + '</div>'
+      + '<div class="lead" id="plLead">' + lead(total, period, amount) + '</div>';
+  }
+
+  function paceLine(v) {
+    if (!v.read) return '还没有读到任何一页；翻开正文读一点，这里就会开始记。';
+    let s = (v.pace ? '目前一天约 ' + v.pace + ' 页' : '')
+      + (v.eta ? '，照这个节奏约 ' + planDay(v.eta) + ' 读完' : '') + '。';
+    if (!v.on_pace && v.need_pace) {
+      s += '想按目标收尾，往后每天要读到约 ' + v.need_pace + ' 页。';
+    }
+    return s;
+  }
+
+  function readout(v) {
+    const g = v.goal || {};
+    const done = !!v.done_at;
+    let t = '<div class="planhd"><h3>阅读计划</h3><span class="grow"></span>'
+      + '<span class="sub">全书 ' + v.pages + ' 页</span></div>';
+    if (done) {
+      t += '<div class="big">已读完全书<small>共 ' + (v.took || 1) + ' 天</small></div>' + bar(100)
+        + '<div class="rowsk">'
+        + sk('完成于', planStamp(v.done_at) || '已归档')
+        + sk('起读日', planDay(v.started))
+        + sk('当时目标', planVer(g.period, g.pages)) + '</div>';
+    } else {
+      t += '<div class="big">已读 ' + v.read + ' / ' + v.pages + ' 页'
+        + '<small>还剩 ' + v.left + ' 页 · ' + (v.pct || 0) + '%</small></div>' + bar(v.pct)
+        + '<div class="rowsk">'
+        + sk('目标', planVer(g.period, g.pages))
+        + sk('今日', (v.today || 0) + ' 页')
+        + sk(g.period === 'weekly' ? '本周' : '本周期',
+            (v.period || 0) + ' 页<small>' + (v.hit ? '达标' : '未达标') + '</small>')
+        + sk('起读日', planDay(v.started))
+        + sk('预计读完', v.eta ? planDay(v.eta)
+            : (v.target ? planDay(v.target) + '<small>截止</small>' : '—'))
+        + '</div>'
+        + '<div class="lead">' + paceLine(v) + '</div>';
+    }
+    const hist = (v.history || []);
+    if (done && hist.length) {
+      t += '<div class="hist"><div class="hl">往期完成记录</div>'
+        + hist.slice(-4).reverse().map(h =>
+          '<div class="hi"><span class="d">' + planStamp(h.done_at) + '</span>'
+          + '<span>读完 ' + (h.pages || 0) + ' 页 · 共 ' + (h.days || 1) + ' 天 · '
+          + planVer((h.goal || {}).period, (h.goal || {}).pages) + '</span></div>').join('')
+        + '</div>';
+    }
+    t += '<div class="prow">'
+      + '<button class="deed" id="plEdit">' + (done ? '重新开始' : '调整目标') + '</button>'
+      + (done ? '' : '<button class="deed' + (endArmed ? ' sure' : '') + '" id="plEnd">'
+          + (endArmed ? '再点一次就结束' : '结束计划') + '</button>')
+      + '</div>';
+    return t;
+  }
+
+  function draw() {
+    box.innerHTML = (cur && cur.has && !editing) ? readout(cur) : form(cur);
+  }
+  function segPeriod() {
+    const on = box.querySelector('#plSeg button.on');
+    return (on && on.dataset.p) || 'daily';
+  }
+  function refreshLead() {
+    const el = box.querySelector('#plLead');
+    const inp = box.querySelector('#plNum');
+    if (el && inp) el.textContent = lead((cur && cur.pages) || 0, segPeriod(), inp.value);
+  }
+
+  box.addEventListener('input', e => { if (e.target.id === 'plNum') refreshLead(); });
+  box.addEventListener('click', async e => {
+    const seg = e.target.closest && e.target.closest('#plSeg button');
+    if (seg) {
+      box.querySelectorAll('#plSeg button').forEach(b => b.classList.toggle('on', b === seg));
+      const unit = box.querySelector('#plUnit');
+      if (unit) unit.textContent = '页 / ' + (seg.dataset.p === 'weekly' ? '周' : '天');
+      refreshLead();
+      return;
+    }
+    const btn = e.target.closest && e.target.closest('button');
+    const id = btn && btn.id;
+    if (id === 'plCancel') { editing = false; endArmed = false; draw(); return; }
+    if (id === 'plEdit') { editing = true; endArmed = false; draw(); return; }
+    if (id === 'plEnd') {
+      if (!endArmed) { endArmed = true; draw(); return; }
+      endArmed = false; editing = false;
+      const r = await planSend({act: 'clear', book: bookId});
+      if (!r.ok) { whisper(r.msg || '没能结束'); return; }
+      cur = {has: false, pages: (cur && cur.pages) || 0};
+      draw(); rdPlanPaint(cur); whisper('这本的计划结束了');
+      return;
+    }
+    if (id !== 'plSave') return;
+    const inp = box.querySelector('#plNum');
+    const num = parseInt((inp && inp.value || '').trim(), 10);
+    const amount = num > 0 ? num : Math.max(1, Math.round(((cur && cur.pages) || 100) / 15));
+    btn.disabled = true;
+    const r = await planSend({act: 'set', book: bookId, period: segPeriod(), pages: amount});
+    btn.disabled = false;
+    if (!r.ok) { whisper(r.msg || '没能定下计划'); return; }
+    cur = r.data || await planGet(bookId) || {has: false};
+    editing = false;
+    draw(); rdPlanPaint(cur); whisper('计划定好了');
+  });
+
+  draw();
+  planGet(bookId).then(v => { if (v) { cur = v; draw(); rdPlanPaint(v); } });
+  return box;
 }
 
 /* ── 页内看正文（左右分栏阅读器）─────────
@@ -12670,6 +13179,7 @@ function readerSkeleton() {
         <span class="grow"></span>
         <span class="rdbar-mini" title="本章阅读进度"><i id="rdProg2"></i></span>
         <span class="rdpos" id="rdPos"></span>
+        <span class="rdplan" id="rdPlan" title="这本书的阅读计划"></span>
         <div class="rddl">
           <button class="deed" data-dl="md" style="height:26px" title="导出整本为 Markdown">MD</button>
           <button class="deed" data-dl="epub" style="height:26px" title="导出整本为 EPUB">EPUB</button>
@@ -12846,6 +13356,7 @@ async function openReader(bookId, title, backPane) {
 
   RD.book = bookId; RD.title = title || bookId; RD.chapters = []; RD.at = -1;
   rdPaintPick();
+  rdPlanLoad(bookId);                               // 底栏那条计划读数：开书取一次
   rdTimeStart();                                    // 开书即开始记本机阅读时长
   ntLoad(bookId);                                   // 右栏那本笔记跟着这本书一起换
 
@@ -12974,6 +13485,42 @@ function rdSavePos() {
     localStorage.setItem(rdPosKey(RD.book),
       JSON.stringify({c: RD.at, y: Math.round(sc.scrollTop)}));
   } catch (e) { /* 满了或被关了：大不了回到章首，不值得为它打断阅读 */ }
+  rdPlanTick();   // 顺手把「读到哪」报给计划：底栏那条「还剩 N 页」跟着走
+}
+
+/* ── 阅读计划在阅读器里的那一面 ────────────────────
+   计划页数按「正文字数 ÷ 1000」算，跟显示设置无关；这里只负责把当前章 + 章内进度
+   报上去，再把后端算出来的读数贴到底栏。报频就是 rdSavePos 那个 800ms 防抖 ——
+   停手才发一笔，不会每帧打服务。 */
+function rdPlanPaint(v) {
+  const p = PANES.read;
+  const el = p && p.querySelector('#rdPlan');
+  if (!el) return;
+  if (!v || !v.has) { el.textContent = ''; return; }
+  el.textContent = v.done_at ? '已读完'
+    : '还剩 ' + v.left + ' 页 · ' + (v.pct || 0) + '%';
+}
+
+async function rdPlanLoad(book) {
+  const v = await planGet(book);
+  if (book !== RD.book) return;    // 期间换了书，这次结果作废
+  rdPlanPaint(v);
+}
+
+async function rdPlanTick() {
+  if (!RD.book || RD.at < 0) return;
+  const sc = rdScroller();
+  let frac = 0;
+  if (sc) {
+    const max = sc.scrollHeight - sc.clientHeight;
+    // 一章短到不用滚（max<=4）时给 0 而不是 1：翻到下一章时，前一章的整段字数
+    // 会一并算进来，高水位自然就上去了；给 1 反倒会在「刚打开」那一下虚记一页。
+    frac = max > 4 ? Math.max(0, Math.min(1, sc.scrollTop / max)) : 0;
+  }
+  const book = RD.book;
+  const r = await planSend({act: 'pos', book, at: RD.at, frac});
+  if (book !== RD.book) return;
+  if (r && r.ok) rdPlanPaint(r.data);
 }
 
 function rdReadPos(book) {
@@ -16868,14 +17415,11 @@ function agSave() {
 
 const agReady = () => !!(agentCfg.url_set && agentCfg.model);
 
-/** 把气泡、设置里那行状态、问候语一起刷成当前配置的样子。
- *  每 2.6s 会被 drawState 叫一次，所以只写文字、只换 class，不重建节点。 */
+/** 把设置里那行状态、问候语刷成当前配置的样子。
+ *  每 2.6s 会被 drawState 叫一次，所以只写文字、只换 class，不重建节点。
+ *  1.0.6 起没有右下角那颗气泡了（用户要求砍掉主页的对话入口），这里只管设置那行。 */
 function paintAgent(cfg) {
   agentCfg = cfg || {};
-  const b = $('#agent');
-  if (!b) return;
-  b.classList.toggle('none', !agReady());
-  b.classList.toggle('on', agReady());
   const who = $('#agWho');
   if (who) who.textContent = agReady() ? (agentCfg.model + (agentCfg.key_set ? '' : ' · 没填 Key')) : '没配';
   const va = $('#v-agent');
@@ -17045,39 +17589,14 @@ async function agAsk(text, extraCtx) {
   }
 }
 
-/* 右下角这条队：气泡 → 任务抽屉 → 小助手面板。
-   面板要站在抽屉上方，就得知道抽屉实测多高 —— 展开/收起、任务条数变化都会改它，
-   所以用 ResizeObserver 把高度写成 --dock-h，位置由 CSS 算。
-   （之前两边都写死 bottom:78px，两个矩形完全重合，一开面板就整块压住任务列表。） */
-function syncRail() {
-  const d = $('#dock');
-  if (!d) return;
-  const h = Math.round(d.getBoundingClientRect().height);
-  document.documentElement.style.setProperty('--dock-h', (h > 0 ? h : 36) + 'px');
-}
-syncRail();
-window.addEventListener('resize', syncRail);
-if (window.ResizeObserver && $('#dock')) new ResizeObserver(syncRail).observe($('#dock'));
-
 function agOpen(open) {
   const p = $('#agentpane');
   if (!p) return;
-  if (open) {
-    // 抽屉摊开时面板会被挤成一条，开面板前先把它收起 —— 右下角同时只摊开一块玻璃。
-    const d = $('#dock');
-    if (d && !d.classList.contains('closed')) {
-      d.classList.add('closed');
-      const c = $('#dockChev');
-      if (c) c.textContent = '展开';
-    }
-    syncRail();
-    agDraw();
-    agScroll();
-  }
+  if (open) { agDraw(); agScroll(); }
   p.classList.toggle('open', !!open);
 }
 
-$('#agent').onclick = e => { e.stopPropagation(); agOpen(!$('#agentpane').classList.contains('open')); };
+
 $('#agentpane').onclick = e => e.stopPropagation();
 $('#agSend').onclick = () => agAsk($('#agQ').value);
 $('#agQ').addEventListener('keydown', e => {
@@ -17096,7 +17615,7 @@ $('#agSet').onclick = e => { e.stopPropagation(); agOpen(false); setPop(true, 'a
 document.addEventListener('click', e => {
   if (!$('#agentpane').classList.contains('open')) return;
   if (agBusy || pop.classList.contains('open')) return;
-  if (e.target.closest && e.target.closest('#agent, #agentpane')) return;
+  if (e.target.closest && e.target.closest('#agentpane')) return;
   agOpen(false);
 });
 
@@ -17105,7 +17624,7 @@ $('#saveagent').onclick = async () => {
   const url = $('#agenturl').value.trim();
   const key = $('#agentkey').value.trim();
   const model = $('#agentmodel').value.trim();
-  // 地址留空＝关掉它（气泡上的红点会自己亮起来），和 Key 那栏的用法一致
+  // 地址留空＝关掉它，和 Key 那栏的用法一致
   const r = await post('agent.save', {url, key, model});
   whisper(r.msg || '已保存');
   paintAgent(r.agent || {});

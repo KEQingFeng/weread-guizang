@@ -61,6 +61,14 @@ run "取书续传锚点" "$PY" tests/check_resume.py
 # 数据目录全指进各自沙盒，不联网、不碰用户真实书库。
 run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.py
 run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
+# Z-Library 取书这条路一个真网请求都不发：本机假 eAPI 顶替，验的是「登录只存令牌
+# 不存密码、回显只给后四位、下载先登录、阅读器打不开的格式挡住、代理探测各情形都对」。
+# 真下载与「下完入本地书架」归 ui_server 的接口，见 smoke_api.py。
+run "Z-Library 取书（登录 / 搜索 / 下载 / 凭据 / 代理）" "$PY" tests/check_zlib.py
+# 上面那条管客户端本身，这一条管接口这一层：mode 认不认得、下载完有没有真的走
+# book_import 落进书库、walk() 认不认得它是「本地书架」的书。假 eAPI 给的下载直链
+# 是一份现编的最小 EPUB，所以「下载 → 收书 → 上架」是端到端跑过的，全程离线。
+run "Z-Library 接口（状态 / 登录 / 搜书 / 下载入库 / 登出）" "$PY" tests/check_zlib_route.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
@@ -98,10 +106,19 @@ run "AI 小结（范围 / 提示词 / 导图兜底 / 缓存 / 断流）" "$PY" t
 # 报一个巨大间隔，不夹就是一根通天柱）、单日封顶 12 小时、缺的日子补 0 而不是跳过（跳一格
 # 整张图就错位）、连续天数对「今天还没开始」宽容。纯函数不算盘不碰 HTTP，所以归静态段。
 run "时长账（夹 / 封顶 / 补零 / 连续 / 色阶 / 归档）" "$PY" tests/check_activity.py
+# 阅读计划那一套也是纯逻辑：页数按正文字数折算（跟字号、窗口宽窄无关）、进度只增不减
+# （翻回去查个词不该把「今天读了 30 页」缩成 8 页）、跨天 / 跨周记账、读完把当时的
+# 目标与起止留进档案（改新计划也冲不掉）。时间由调用方传，所以不用起浏览器也验得实。
+run "阅读计划（页数折算 / 只增不减 / 跨天记账 / 读完留档）" "$PY" tests/check_plan.py
 # 文案这一条守的是「界面上不再有 AI 味」：语气词、波浪号尾巴（「好的~」）、感叹号、emoji
 # 一律不许出现在散文里 —— 唯一放行的是剪藏正文的清洗正则（它得把别人的 emoji 滤掉）。
 # 顺带钉住「设置那一段的每条提示都写完整句子、以句号收」，以及个人主界面那颗「设置」还在。
 run "界面文案（零语气词 / 零俏皮号 / 零 emoji / 提示成句）" "$PY" tests/check_copy.py
+# 「文字规格」这一类毛病里，有一半不用起浏览器也能钉死：同一样东西写在好几处、数值还对不上
+# （毛玻璃模糊值 CSS 写 24、设置弹窗却写死 26，JS 一跑滑杆就从 26 跳到 24）。这一条只读
+# ui.html 的源码，把「外观缺省值只有一处真相」和「按钮字一律 nowrap、只有章节标题开回来」
+# 两条规矩按成会失败的断言 —— 真机上量得出几何的另有一半，见 check_overflow.py。
+run "文字与外观规格（缺省值一处真相 / 折行规矩）" "$PY" tests/check_spec.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
@@ -150,6 +167,22 @@ echo "沙盒服务：$BASE   书库：$GUIZANG_BOOKS"
 fresh_shelf() { "$PY" tests/seed.py --force >/dev/null || exit 1; }
 
 fresh_shelf; run "布局校验" "$PY" tests/ui_check.py "$BASE/"
+# 悬停会不会把版面顶动：先把 CSSOM 里所有改「在流内」布局的 hover 规则逮出来，再真机
+# hover 视频转写行与章节行、比对整屏坐标。上一轮的病根是 `.nacts` 用 max-height 从 0 撑开，
+# 展开的是自己那一行、被顶下去的是下面所有行，鼠标顺着列表一划整栏都在跳。
+fresh_shelf; run "悬停位移（hover 不许顶动版面）" "$PY" tests/check_hover_shift.py "$BASE"
+# 切日间 / 夜间不许闪：全站几十个组件都带着给悬停用的补间，主题一变它们各按各的时长
+# 从旧色补到新色，颜色对不齐就是那一下闪。这一条掐两个中途采样点，钉死「换肤那一刻
+# 没有任何元素停在中间色上」，浅转深、深转浅各走一遍。
+fresh_shelf; run "主题切换（换肤不许闪）" "$PY" tests/check_theme.py "$BASE"
+# 文字不许戳出它所在的框：写作屏左栏那句长说明被 `flex:none` 顶着 max-content 宽度、
+# 在 214px 的稿子列里戳出 82px 压进正文。同一类写法（定宽标签不给 min-width:0）全站都
+# 可能再犯，所以这一条把十二格入口 + 个人主界面 + 设置弹窗在三档宽度下都扫一遍。
+fresh_shelf; run "文字溢出体检（文字不许戳出边框）" "$PY" tests/check_overflow.py "$BASE"
+# 「顺」和「稳」也要能失败：这一套把当下的基线钉住 —— 页签图标在（否则浏览器撞 /favicon.ico
+# 404）、十二格 + 个人主界面 + 设置弹窗走两遍零报错、暖态切屏主线程没有超过 50ms 的长活、
+# 连点 30 下不许有一屏卡在半透明。以后谁往渲染里塞了重活，先被这一条拦下。
+fresh_shelf; run "流畅与稳定（零报错 / 无长任务 / 连点不卡）" "$PY" tests/check_fluency.py "$BASE"
 fresh_shelf; run "重新取书取证" "$PY" tests/check_refetch.py "$BASE"
 fresh_shelf; run "视口回归" "$PY" tests/check_viewports.py "$BASE"
 fresh_shelf; run "书架交互" "$PY" tests/check_shelf.py "$BASE"
@@ -171,6 +204,14 @@ fresh_shelf; run "阅读器续读与大纲" "$PY" tests/check_reader_flow.py "$B
 # docs/交接说明.md 的踩坑清单里：浮层盖住按钮、前端嗅错流类型、换书时旧浮层不收。
 fresh_shelf; run "AI 小结真机（一个入口两种模式三种内容）" "$PY" tests/check_ai_summary_ui.py "$BASE"
 fresh_shelf; run "订阅与视频两屏" "$PY" tests/check_media_views.py "$BASE"
+# 搜索这一屏 1.0.6 起分了两栏（左微信读书取书 / 右 Z-Library 下载），断点、就地登录、
+# 没 Key 时的说法、以及「窄到两栏变上下排时不许再定高」（定高会把下面那栏裁掉还滚不到）
+# 都只有真机点得出来。这一套把这几条钉成可失败的检查。
+fresh_shelf; run "搜索页两栏（微信读书 / Z-Library）" "$PY" tests/check_zlib_ui.py "$BASE"
+# 阅读计划一半是纯逻辑（见静态段的 check_plan.py），另一半只有真机点得出来：详情页那块
+# 定 / 改 / 结束都在原地重画、阅读器底栏那条「还剩 N 页」跟着读到的位置走、读完变成
+# 「已读完全书」并把往期记录留档。这一套自己清旧账、自己推尾声，不看别的套件脸色。
+fresh_shelf; run "阅读计划（详情页定 / 改 / 结束 · 底栏实时读数 · 读完留档）" "$PY" tests/check_plan_ui.py "$BASE"
 # 写作平台最要紧的不是「存得下」而是「不许悄悄覆盖」：存盘带版本号，对不上就当面停下问。
 # 这一套前一半打接口（建/存/冲突/改名/快照/回退/四种导出），后一半开浏览器验这一屏点得动
 # —— 六颗动作钮各开一次坞、第一句落下就把稿子建出来（不点「新建」也不该丢字）、
@@ -181,7 +222,7 @@ fresh_shelf; run "写作平台（稿列 / 正文 / 六件事 / 导出模板）" 
 # 两边都去磁盘上数段落。
 fresh_shelf; run "转写工作台（筛 / 存 / 重建 / 导出 / 真机）" "$PY" tests/check_video_workbench.py "$BASE"
 # MCP 那一层没有界面上的护栏：agent 只会「只发自己改的那几段」，而后端三条写口全是整本覆盖。
-# 这一套把 47 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
+# 这一套把 56 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
 # 护栏钉成可失败的检查 —— 它要 node，所以归真机段（本机没 node 时明确 SKIP，不装绿）。
 fresh_shelf; run "MCP 工具清单与三条新线" "$PY" tests/check_mcp_tools.py "$BASE"
 # 上面那套挂在活服务上，验不到「后台没人、第一次点」—— 那是用户装完只开 agent 的默认处境。

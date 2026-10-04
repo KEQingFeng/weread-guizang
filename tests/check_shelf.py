@@ -388,7 +388,7 @@ with sync_playwright() as pw:
       return {cw: f.clientWidth, sw: f.scrollWidth, pos: getComputedStyle(f.querySelector('.rdpos')).display};
     }""")
     chk("底栏不溢出（满栏宽）", foot["sw"] <= foot["cw"] + 1, foot)
-    chk("栏宽够的时候百分比留着", foot["cw"] > 470 and foot["pos"] != "none", foot)
+    chk("栏宽够的时候百分比留着", foot["cw"] > 542 and foot["pos"] != "none", foot)
     page.keyboard.press("d")                      # 收起目录栏
     page.wait_for_timeout(700)
     flush()
@@ -400,8 +400,8 @@ with sync_playwright() as pw:
     page.keyboard.press("d")
     page.wait_for_timeout(600)
 
-    # 实测这排东西摊开要 443px，所以按量出来的宽度做三档降级，逐档验一遍：
-    # ≤470 百分比让位、≤400 收掉迷你进度条、≤340 放开导出组收缩。每档都不许溢出。
+    # 实测这排东西全摊开要 542px，所以按量出来的宽度做三档降级，逐档验一遍：
+    # ≤510（内容盒）百分比让位、≤400 收掉迷你进度条、≤340 放开导出组收缩。每档都不许溢出。
     tiers = page.evaluate("""async () => {
       const f = document.querySelector('.rdfoot');
       const prev = f.style.width;
@@ -426,7 +426,7 @@ with sync_playwright() as pw:
     for t in tiers:
         chk(f"底栏 {t['w']}px 宽不溢出", t["sw"] <= t["cw"] + 1, t)
     chk("百分比只在栏宽不够那一档才让位",
-        all((t["inner"] <= 470) == (t["pos"] == "none") for t in tiers), tiers)
+        all((t["inner"] <= 510) == (t["pos"] == "none") for t in tiers), tiers)
     chk("进度条只在更窄那一档才收",
         all((t["inner"] <= 400) == (t["mini"] == "none") for t in tiers), tiers)
     # 容器查询改不动容器自己（gap / flex-wrap 会被丢掉），所以最后一档靠「导出组收缩」
