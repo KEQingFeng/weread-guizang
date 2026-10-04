@@ -18,19 +18,26 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import selftest  # noqa: E402
+import book_layout  # noqa: E402
 
 # 笔记/阅读器套件点名的那本书：10 章、正文够长（能划出不重复的一串字）、标记为已取全。
 GAP_BOOK = "GAPBOOK1"
 GAP_CHAPTERS = 10
 
 # 书架排法要有内容才看得出叠卡的扇形和瀑布的行列，至少给 5 本。
+# 1.0.1 起三格各摆各的：叠卡那套要数到「甩出画外的那两张」（距离 > 3 才存在），
+# 微信读书这一格得有 8 本以上才摊得开 —— 以前合并展示时随手就凑够的数，拆开后会不够。
 SHELF_BOOKS = [
     ("SE_ALLOCATION", "内存分配为什么慢", "陈七", 6),
     ("SE_COMPILER", "编译原理十二讲", "林二", 9),
     ("SE_LINGUISTICS", "语言学纲要札记", "周午", 4),
     ("SE_NETWORK", "网络协议速通", "吴九", 7),
     ("SE_STATISTICS", "统计学习方法笔记", "郑十", 5),
+    ("SE_DATABASE", "数据库系统内幕", "钱六", 5),
+    ("SE_OS", "操作系统实战四讲", "孙八", 8),
+    ("SE_DEBUGGING", "调试的艺术", "赵一", 3),
 ]
 
 # 导入书（imp_ 前缀）与剪藏书（clip_ 前缀）各留一本：
@@ -137,23 +144,59 @@ def _write_video_book(root, bid, title, uploader):
     return d
 
 
+def module_root(books_root, module):
+    """书库里那一格的文件夹：1.0.1 起一本书得住在自己模块的文件夹里，
+    货架跟着产品走，不然真机套件测的就只是一条兜底的旧路径。"""
+    return pathlib.Path(book_layout.book_dir(str(books_root), module))
+
+
+def _reset_ledger():
+    """把沙盒那本分类账（夹子 / 归类 / 标签 / 排序）一起清掉。
+
+    书架清了账没清，界面上就留下上一轮跑测建的夹子：同名药丸长出两颗，
+    「归进哪一颗」变成看运气，计数断言跟着失真，收尾又把它们当成新造的删不掉 ——
+    真机套件报的「夹子删了又复活」就是这么来的，不是接口漏删。
+
+    路径问 ui_server 要（文件名只有一个地方说了算，改了名这里跟着走），
+    但只删落在沙盒里的那一份：没设沙盒环境变量时它指到用户自己的数据目录，
+    那种情况下直接不动 —— 测试脚本不许碰真人的书架分类。
+    """
+    try:
+        import ui_server
+        path = pathlib.Path(ui_server.LIB_PATH)
+    except Exception:
+        path = selftest.CACHE / "library.json"
+    if selftest.SANDBOX not in path.parents:
+        return
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError:
+        pass
+
+
 def seed(books_dir=None, force=False):
-    """铺书架，返回书库路径。force=True 时先删掉整个沙盒书库再铺。"""
+    """铺书架，返回书库路径。force=True 时先删掉整个沙盒书库与分类账再铺。"""
     root = pathlib.Path(books_dir or selftest.BOOKS)
     if force and root.exists():
         shutil.rmtree(root, ignore_errors=True)
+    if force:
+        _reset_ledger()
     root.mkdir(parents=True, exist_ok=True)
+    mine = module_root(root, "weread")
 
-    _write_book(root, GAP_BOOK, "缺口试验这本", "某人", GAP_CHAPTERS)
+    _write_book(mine, GAP_BOOK, "缺口试验这本", "某人", GAP_CHAPTERS)
     for bid, title, author, n in SHELF_BOOKS:
-        _write_book(root, bid, title, author, n)
-    _write_book(root, IMPORT_BOOK[0], IMPORT_BOOK[1], "我自己", 3, source="local", prefix="imp")
-    _write_book(root, CLIP_BOOK[0], CLIP_BOOK[1], "某个公众号", 1, source="clip", prefix="clip")
+        _write_book(mine, bid, title, author, n)
+    _write_book(module_root(root, "local"), IMPORT_BOOK[0], IMPORT_BOOK[1], "我自己",
+                3, source="local", prefix="imp")
+    _write_book(module_root(root, "clip"), CLIP_BOOK[0], CLIP_BOOK[1], "某个公众号",
+                1, source="clip", prefix="clip")
     # 视频那一屏的工作台要有带时间戳的转写才点得动（改字 / 保存 / 导字幕全在这本上跑）
-    _write_video_book(root, VIDEO_BOOK[0], VIDEO_BOOK[1], VIDEO_BOOK[2])
+    _write_video_book(module_root(root, "video"), VIDEO_BOOK[0], VIDEO_BOOK[1], VIDEO_BOOK[2])
 
     # 一本「取了一半」的书：卡片上应该给「续取」而不是「正文」，这是 0.9.8 那两道锁的靶子。
-    part = _write_book(root, "SE_PARTIAL", "只取了一半的书", "某人", 2, done=False)
+    part = _write_book(mine, "SE_PARTIAL", "只取了一半的书", "某人", 2, done=False)
     (part / "_catalog.json").write_text(
         json.dumps([{"chapterTitle": "第%d章" % (i + 1)} for i in range(7)], ensure_ascii=False),
         encoding="utf-8")
@@ -161,11 +204,18 @@ def seed(books_dir=None, force=False):
 
 
 def book_dir(bid):
-    return pathlib.Path(os.environ.get("GUIZANG_BOOKS", str(selftest.BOOKS))) / bid
+    """这本书现在在哪儿：先按 id 去书库里找（模块文件夹 or 平铺的旧位置）。
+
+    套件不该关心书库长什么样 —— 目录结构变了，只要还按 id 问，一样指得对。
+    """
+    root = pathlib.Path(os.environ.get("GUIZANG_BOOKS", str(selftest.BOOKS)))
+    if not bid:
+        return str(root)
+    return book_layout.resolve(str(root), bid) or str(root / bid)
 
 
 if __name__ == "__main__":
     force = "--force" in sys.argv
     where = seed(force=force)
     print("书架已铺好：" + str(where))
-    print("书数：%d" % len([p for p in where.iterdir() if p.is_dir()]))
+    print("书数：%d" % len(book_layout.walk(str(where))))

@@ -52,6 +52,12 @@ _write_video_book(BOOKS, MK, MK_TITLE, "讲师丙")
 atexit.register(lambda: shutil.rmtree(BOOKS / MK, ignore_errors=True))
 
 
+def http_get(path):
+    req = urllib.request.Request(BASE + path)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def chk(name, cond, extra=""):
     global PASSED
     if cond:
@@ -189,8 +195,8 @@ try:
     names = [t["name"] for t in tools]
     chk("握手：tools/list 数出来的工具与 TOOL_DEFS 一致",
         len(names) == len(declared) == len(handlers), (len(names), len(declared), len(handlers)))
-    chk("清单：至少 45 个工具（这轮加完的新下限；再往下就是工具被删了却没改这里）",
-        len(names) >= 45, len(names))
+    chk("清单：至少 47 个工具（便签那两条加完的新下限；再往下就是工具被删了却没改这里）",
+        len(names) >= 47, len(names))
     chk("清单：名字唯一", len(names) == len(set(names)))
     missing = sorted(set(handlers) - set(names))
     chk("清单：agent 能看见全部实现", not missing, missing)
@@ -431,7 +437,109 @@ try:
     chk("board_delete：删第二遍不算失败，也不甩红字（文件本来就不在）",
         not bad and "不在了" in txt, txt[:240])
 
-    # ── 6. 界面上那句「一键接入 MCP」的说明不能停在旧数字 ──────────
+    # ── 6. 便签（flomo）：Agent 读的是用户那本笔记，不是它自己编的清单 ──
+    # 这一条走的是「界面之外的第二条通路」：界面上看得见的东西，工具那边必须同样读得到，
+    # 而且读到的必须是同一批数据 —— 所以这里先导入真导出包，再从工具口子里数条数。
+    import base64
+    import flomo_fixture as FF
+    http_post("/api/flomo/notes", {"act": "clear"})     # 从干净账开始，别被上一次跑的残留骗了
+
+    bad, txt = m.call("flomo_notes", {})
+    chk("flomo_notes：账是空的时候不报错，说的是「去哪导入」",
+        not bad and "还没有导入" in txt and "便签" in txt, txt[:160])
+    bad, txt = m.call("flomo_portrait")
+    chk("flomo_portrait：账是空的时候不给假画像",
+        not bad and "空的" in txt, txt[:160])
+
+    imp = http_post("/api/flomo/notes", {"act": "import", "name": "mcp.zip",
+                                         "data": base64.b64encode(FF.export_zip()).decode()})
+    chk("夹具：这份导出包真的进了本机账（%d 条）" % FF.N_MEMOS,
+        imp.get("ok") and (imp.get("stats") or {}).get("memos") == FF.N_MEMOS,
+        imp if not imp.get("ok") else (imp.get("stats") or {}).get("memos"))
+
+    bad, txt = m.call("flomo_notes", {})
+    ids = re.findall(r"\[id: (fm_\w{6,})\]", txt)
+    chk("flomo_notes：默认那一屏把每条的 id、时间、标签与正文都给了（agent 靠 id 说话）",
+        not bad and len(ids) == FF.N_MEMOS and "本机存着 %d 条" % FF.N_MEMOS in txt,
+        (len(ids), txt[:260]))
+    chk("flomo_notes：头部带这批笔记的骨架数字（条 / 天 / 字数 / 图 / 标签）",
+        "骨架" in txt and "个标签" in txt and "张图" in txt, txt[:200])
+    chk("flomo_notes：一次给全时不说翻页，条目多到给不完时才报「还剩几条」",
+        "还剩" not in txt, txt[-200:])
+    # 界面上标签只在卡片下面那排药丸里露一次，正文末尾那几个字是前端摘掉的。Agent 这条
+    # 通路没有前端：后端要是把原始 md 直接吐给它，同一个标签就在同一条里出现两遍 ——
+    # 用户屏幕上看不到的东西，喂给模型的也不该有。逐条比对「头一行列的标签」与正文。
+    dupes, cur = [], None
+    for ln in txt.split("\n"):
+        hit = re.search(r"\[id: (fm_\w{6,})\]", ln)
+        if hit:
+            cur = (hit.group(1), set(re.findall(r"#([^\s#]+)", ln.split("[id:")[0])))
+            continue
+        if not ln.strip():
+            continue
+        if not ln.startswith("  "):
+            cur = None
+            continue
+        for t in (cur[1] if cur else ()):
+            if "#" + t in ln:
+                dupes.append((cur[0], t, ln.strip()[:44]))
+    chk("flomo_notes：正文不再重复头一行列过的 #标签（Agent 读的和屏幕上是一个样）",
+        not dupes, dupes[:3])
+    chk("flomo_notes：句末那个「#3」序号原样留着（摘的只是账上的标签，不是所有井号）",
+        "#3" in txt, txt[:400])
+    pg = m.call("flomo_notes", {"limit": 5, "offset": 0})[1]
+    chk("flomo_notes：翻页数得清（前 5 条、还剩 %d 条、下一页 offset=5）" % (FF.N_MEMOS - 5),
+        "第 1-5 条" in pg and "还剩 %d 条" % (FF.N_MEMOS - 5) in pg and "offset=5" in pg,
+        (pg[:120], pg[-200:]))
+    chk("flomo_notes：末尾指着「先读画像」这条更便宜的路",
+        "flomo_portrait" in txt, txt[-200:])
+
+    leaf = m.call("flomo_notes", {"tag": "读书/神经科学"})[1]
+    bad, txt = m.call("flomo_notes", {"tag": "读书"})
+    chk("flomo_notes：按标签筛用的是界面那同一把尺（父标签带子标签，叶子不多捞）",
+        not bad and "筛出 2 条" in txt and "筛出 1 条" in leaf, (txt[:140], leaf[:140]))
+    bad, txt = m.call("flomo_notes", {"tag": "不存在的那个标签"})
+    chk("flomo_notes：标签落空时把账上有的标签报回去，不只说一句「没有」",
+        not bad and "筛出 0 条" in txt and "标签账上有" in txt, txt[:200])
+    bad, txt = m.call("flomo_notes", {"q": "复利"})
+    chk("flomo_notes：关键字搜的是正文里那句话",
+        not bad and "复利" in txt and "筛出 1 条" in txt, txt[:200])
+
+    trunc = m.call("flomo_notes", {"tag": "灵感"})[1]
+    long_id = re.findall(r"\[id: (fm_\w{6,})\][^\n]*\n[^\n]*还差", trunc)
+    chk("flomo_notes：长那条在列表里掐尾，并说清还差多少字",
+        not bad and "还差" in trunc and len(long_id) == 1, trunc[:200])
+    bad, txt = m.call("flomo_notes", {"id": long_id[0] if long_id else ids[0]})
+    chk("flomo_notes：带着 id 再取一次给的是全文（列表里那句「还差」在这儿兑现）",
+        not bad and "还差" not in txt and "[id: " in txt, txt[:160] + "..." + txt[-160:])
+    chk("flomo_notes：图链不给打不开的本地路径，换成「几张图」这句话",
+        "files/" not in txt and "![](" not in txt, txt[:200])
+    bad, txt = m.call("flomo_notes", {"id": "fm_deadbeef"})
+    chk("flomo_notes：id 认不出来时说人话，并指路用 tag / q 重筛",
+        not bad and "没有 id" in txt and "tag" in txt, txt[:160])
+
+    bad, txt = m.call("flomo_portrait")
+    wrote = http_get("/api/flomo/notes?mode=portrait")
+    chk("flomo_portrait：读回来的是那页画像（体量、分类习惯、常打的标签、节奏、深加工）",
+        not bad and all(s in txt for s in ("我的记忆画像", "分类习惯", "常打的标签",
+                                           "节奏", "深加工")), txt[:200])
+    chk("flomo_portrait：画像里的条数与账一致（不是另算一套）",
+        ("%d 条 flomo 笔记" % FF.N_MEMOS) in txt, txt[:240])
+    chk("flomo_portrait：说清了它存在哪，且那个位置真有东西",
+        (wrote.get("file") or "").endswith(".md") and wrote.get("ok")
+        and (wrote.get("md") or "").startswith("# 我的记忆画像")
+        and str(wrote.get("file")) in txt, txt[-260:])
+    first_memo = ((http_get("/api/flomo/notes?mode=list&limit=200").get("memos")
+                   or [{}])[0].get("md") or "")[:14]
+    chk("红线：画像一个字都不带笔记原文（它每次任务前都要喂给模型）",
+        len(first_memo) > 6 and first_memo not in txt, first_memo)
+
+    http_post("/api/flomo/notes", {"act": "clear"})
+    bad, txt = m.call("flomo_notes", {})
+    chk("清空之后：工具那边跟着回到「还没有导入」（读的是同一本账，不是缓存的旧数）",
+        not bad and "还没有导入" in txt, txt[:160])
+
+    # ── 7. 界面上那句「一键接入 MCP」的说明不能停在旧数字 ──────────
     # 取的是 /api/mcp 渲染出来的成品文本，不是源码里的字面量：说明里的数是现算的，
     # 只有跑起来才看得见它到底说了几个工具（上一版写死「20 个」，工具涨到 45 个也没人发现）。
     prompt = ""
@@ -445,10 +553,12 @@ try:
     chk("接入说明里的工具数与 tools/list 真数一致（写旧数字就是把说明变成误导）",
         stated == [str(len(names))], (stated, len(names)))
     absent = [x for x in names if x not in prompt]
-    chk("接入说明把 45 个工具都点到了名（漏了 agent 就不知道有这个能力）",
+    chk("接入说明把全部 %d 个工具都点到了名（漏了 agent 就不知道有这个能力）" % len(names),
         not absent, absent)
     chk("接入说明讲清了长任务与覆盖语义这两条设计口径",
         "轮询" in prompt and "整本覆盖" in prompt and "canvas" in prompt, prompt[-320:])
+    chk("接入说明交代了「与笔记有关先读画像、便签只读」这条口径（用户要的流程）",
+        "flomo_portrait 再动手" in prompt and "便签一律只读" in prompt, prompt[-520:])
 finally:
     if FAIL:
         tail = "".join(m.err[-12:])

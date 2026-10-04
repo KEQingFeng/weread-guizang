@@ -33,6 +33,7 @@ CACHE_ITEMS = (
     ("covers", "书架封面缓存"),
     ("apkg", "导出的 Anki 卡包"),
     ("video", "视频转笔记的临时音频与产物"),
+    ("flomo", "导入进来的 flomo 便签（笔记账、图片、记忆画像）"),
     ("_bak-before-clean", "迁移时留下的备份"),
 )
 CACHE_FILES = (

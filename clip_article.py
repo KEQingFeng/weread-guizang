@@ -237,6 +237,64 @@ def _abs(u, base):
         return u
 
 
+# 这些字样出现在图片地址里，基本可以断定它是页头 logo、作者头像、二维码、
+# 表情或追踪像素 —— og:image 缺席时最爱顶到第一张来，拿它们当封面比没封面更难看。
+NON_COVER = re.compile(
+    r"(avatar|icon|logo|qrcode|qr[-_.]?code|emoji|smiley|badge|watermark|track|"
+    r"pixel|spacer|blank|loading|placeholder|signature|account|favicon|"
+    r"suggest|ad_|ads\.)", re.I)
+# 路径里带扩展名时只认这几种：真配图。svg/ico 一律不要（那是图标，不是文章图）。
+COVER_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp")
+
+
+def first_image(markdown, base):
+    """正文里的第一张配图 → 封面兜底。
+
+    为什么在 markdown 里找而不在原始 DOM 里找：md 已经是「正文本身」—— 评论区、
+    推荐卡片、页头页脚在抽取时就被丢掉了。DOM 里的第一张 img 往往是站点 logo
+    或作者头像，而正文第一张图才是作者自己配的那张题图（用户要的就是这个）。
+    扩展名认不出就放行：微信图床的地址长这样 mmbiz.qpic.cn/.../640?wx_fmt=jpeg，
+    路径里没有 .jpg，硬要卡扩展名会把公众号题图全数丢掉。
+    """
+    for u in re.findall(r"!\[[^\]]*\]\(\s*([^)\s]+)", markdown or ""):
+        low = u.strip().lower()
+        if low.startswith("data:"):
+            continue
+        if NON_COVER.search(u):
+            continue
+        ext = os.path.splitext(urllib.parse.urlparse(u).path)[1]
+        if ext and ext not in COVER_EXT:
+            continue
+        return _abs(u, base)
+    return ""
+
+
+def safe_image_url(u):
+    """这张图能不能替用户去下载：只认 http/https，本机与内网一律拒绝。
+
+    封面地址是从别人写的页面里读出来的（og:image、正文首图、视频缩略图），
+    不像用户粘进来的链接那样有人脑把关。不拦的话，一个恶意页面写个
+    og:image="http://192.168.1.1/admin" 就能让归藏替用户去敲内网的门。
+    """
+    p = urllib.parse.urlparse((u or "").strip())
+    host = (p.hostname or "").lower()
+    return (p.scheme.lower() in ALLOWED_SCHEMES and bool(host)
+            and not BLOCKED_HOSTS.match(host))
+
+
+def pick_cover(og_url, markdown, base):
+    """这一篇文章的封面用哪个地址：站点自己指定的题图优先，它不靠谱时退回顾正文首图。
+
+    「不靠谱」有三种：og:image 指到头像 / logo / 二维码（有些站点把站长头像当默认图挂
+    在每篇文章上，拿它当封面比没封面还难看）；指到本机或内网（这种地址本来就不该替用户
+    去访问，留着它只会挡掉真正能用的那张图）；干脆没有。三种都交给 `first_image`。
+    """
+    og = _abs(og_url, base)
+    if og and not NON_COVER.search(og) and safe_image_url(og):
+        return og
+    return first_image(markdown, base)
+
+
 def _safe_href(href, base):
     """脚本式 URL 一律丢；相对地址补成绝对，否则存下来的书点链接是坏的。"""
     low = (href or "").strip().lower()
@@ -562,7 +620,8 @@ def _extract_once(url):
         "author": (author or "")[:60],
         "site": (site or "")[:60],
         "date": _publish_time(tree, raw),
-        "cover": _abs(_meta(tree, "og:image", "twitter:image"), final),
+        # 封面：og:image 优先（那是作者自己在站点里指定的题图），不靠谱时退回顾正文首图
+        "cover": pick_cover(_meta(tree, "og:image", "twitter:image"), md, final),
         "url": final,
         "markdown": md,
         "words": words,

@@ -29,11 +29,13 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import selftest  # noqa: E402
+from seed import book_dir as where  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = selftest.need_base(1)
 BOOK = "GAPBOOK1"
-BDir = pathlib.Path(selftest.BOOKS) / BOOK
+# 按 id 现找目录：书库从平铺改成一个模块一个文件夹，写死平铺路径就读不到磁盘上的东西了。
+BDir = pathlib.Path(where(BOOK))
 BOARD_DIR = BDir / "boards"
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➯️⬀-⯿]")
 
@@ -936,8 +938,8 @@ def main():
         page.wait_for_timeout(1200)
         chk("画板：换到另一本书，看到的是那本书自己的板（空的，不是上一本那几张）",
             state("() => BD.boards.length") == 0
-            and sorted(pathlib.Path(selftest.BOOKS, "GAPBOOK1", "boards").glob("*.json"))
-            and not list((pathlib.Path(selftest.BOOKS) / "SE_COMPILER" / "boards").glob("*.json")),
+            and sorted(pathlib.Path(where("GAPBOOK1"), "boards").glob("*.json"))
+            and not list((pathlib.Path(where("SE_COMPILER")) / "boards").glob("*.json")),
             (state("() => BD.boards.length"), state("() => BD.book")))
         page.click("#bdClose")
         page.wait_for_timeout(600)

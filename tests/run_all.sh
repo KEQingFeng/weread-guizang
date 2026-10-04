@@ -62,6 +62,15 @@ run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_v
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
 run "画板（存得下 / 读得出 / 导得走 / 删得掉 / 不越界）" "$PY" tests/check_board.py
+# 书库从「全挤一个文件夹」改成一个模块一个文件夹，账本也跟着分格。这一条管三件事：
+# 老书归置会不会搬丢/搬坏（绝不覆盖）、按模块列清单会不会串门（剪藏不许出现在微信读书）、
+# 账本分格后建夹贴标签只动自己那一格（空文件夹不许被清理那一刀悄悄削掉）。全在临时沙盒里跑。
+run "书库目录结构（分模块 / 归置 / 账本分格）" "$PY" tests/check_book_layout.py
+# flomo 那条路（导入 → 一条笔记收成书 → 记忆画像）全是本地文件活：解析那份导出包
+# （HTML 里套 div、图在 files/ 下）、同一条不重复入库、筛与标签用的是界面那同一把尺、
+# 画像只由数字与标签算出（它是唯一会被反复喂给 Agent 的东西，带原文就是漏）。
+# 笔记内容全部现编在 tests/flomo_fixture.py 里，用户的真实笔记一个字不进仓库。
+run "flomo 便签后端（解析 / 去重 / 附件 / 收成书 / 画像）" "$PY" tests/check_flomo_notes.py
 # 转写组件那一套也是纯逻辑 + 接线检查：挑引擎、算缓存目录、直连失败换镜像、空壳不算就绪、
 # 自动准备默认不开（源码跑起来不该悄悄拉 1.6GB），外加「这两步不拦门 / 进包 / 壳里开开关」。
 # 下载那一步用桩替掉，全程不联网。所以归静态段，--fast 也得带上。
@@ -70,6 +79,16 @@ run "转写组件（引擎挑选 / 模型缓存 / 镜像回退 / 接线）" "$PY
 # 书库、别人家的模型、别人家的浏览器、数据目录本身 —— 四条红线各钉一条。
 # 全程在临时沙盒里跑，不碰真实的 cache / 书库 / HF 缓存 / playwright 缓存。
 run "维护（白名单清理 / 四条红线 / 试算不删）" "$PY" tests/check_cleanup.py
+# 封面这一轮的规矩是「剪藏用文章首图、视频用视频封面」，而它最容易出的事故不是没图，
+# 是拿错图（页头 logo、站长头像当封面，满书架一张脸）和不该下的图去下（别人网页里写的
+# og:image 指到内网，等于替用户去敲内网的门）。网络那层用记账的假 urlopen 顶掉，
+# 于是「一次请求都没发出去」也断言得出来。全程临时沙盒，不联网。
+run "封面规则（首图挑选 / 内网拦截 / 落盘与补取）" "$PY" tests/check_covers.py
+# AI 小结这一轮的口径是「一个入口、两种模式、三种内容」，规矩全在 ai_sum.py：
+# 哪一路算哪种、读书一次只吃当前这一章、超长怎么掐、模型回得不像导图时怎么兜、
+# 一个模式一份缓存互不覆盖。再加一条这轮新钉的：上游半路拔线必须和「答完了」分得开
+# —— 分不清就会把半截当成品存盘，把上一次那份好的覆盖掉。全程离线，假流直接喂字节行。
+run "AI 小结（范围 / 提示词 / 导图兜底 / 缓存 / 断流）" "$PY" tests/check_ai_sum.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
@@ -121,16 +140,25 @@ fresh_shelf; run "布局校验" "$PY" tests/ui_check.py "$BASE/"
 fresh_shelf; run "重新取书取证" "$PY" tests/check_refetch.py "$BASE"
 fresh_shelf; run "视口回归" "$PY" tests/check_viewports.py "$BASE"
 fresh_shelf; run "书架交互" "$PY" tests/check_shelf.py "$BASE"
+# 剪藏 / 本地书架 / 视频这三格从「合并展示」改成各过各的：夹子和标签一格一份账，
+# 书住在哪一格由磁盘说了算。这类改动最容易留「看不出来的错」（前端传的模块名是旧的、
+# 芯片条重画一次就闪一下、同名函数把别处的渲染顶掉），所以一半 HTTP 契约一半真机点。
+fresh_shelf; run "三格独立与分类账" "$PY" tests/check_module_shelf.py "$BASE"
 fresh_shelf; run "笔记编辑器" "$PY" tests/check_notes_editor.py "$BASE"
 fresh_shelf; run "脑图与画板" "$PY" tests/check_board_map_ui.py "$BASE"
 fresh_shelf; run "阅读器续读与大纲" "$PY" tests/check_reader_flow.py "$BASE"
+# AI 小结这一层只有浏览器里才验得全：流式一段段蹦字、两种模式换芯片、画完导图把那层
+# 收掉、存为笔记、复制、上游回 500、上游半路拔线。这一套自己起一个假的 completions
+# 服务（不联网、不烧 token），四种收尾各演一遍。它替产品挡掉的三类真事故都写在
+# docs/交接说明.md 的踩坑清单里：浮层盖住按钮、前端嗅错流类型、换书时旧浮层不收。
+fresh_shelf; run "AI 小结真机（一个入口两种模式三种内容）" "$PY" tests/check_ai_summary_ui.py "$BASE"
 fresh_shelf; run "订阅与视频两屏" "$PY" tests/check_media_views.py "$BASE"
 # 转写工作台那一屏最容易出的事故是「戴着筛子保存」—— 界面只看得见筛出来的那几段，
 # 写盘用的却是整本。这条只有真机点得出来，所以这一套一半是 HTTP 契约、一半是 Playwright，
 # 两边都去磁盘上数段落。
 fresh_shelf; run "转写工作台（筛 / 存 / 重建 / 导出 / 真机）" "$PY" tests/check_video_workbench.py "$BASE"
 # MCP 那一层没有界面上的护栏：agent 只会「只发自己改的那几段」，而后端三条写口全是整本覆盖。
-# 这一套把 45 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
+# 这一套把 47 个工具的清单对齐、以及「改一段不许丢整本 / 不带 canvas 不许抹平笔画」这两条
 # 护栏钉成可失败的检查 —— 它要 node，所以归真机段（本机没 node 时明确 SKIP，不装绿）。
 fresh_shelf; run "MCP 工具清单与三条新线" "$PY" tests/check_mcp_tools.py "$BASE"
 # 上面那套挂在活服务上，验不到「后台没人、第一次点」—— 那是用户装完只开 agent 的默认处境。
@@ -139,6 +167,10 @@ fresh_shelf; run "MCP 工具清单与三条新线" "$PY" tests/check_mcp_tools.p
 fresh_shelf; run "MCP 冷启动（服务没起时自己拉起来）" "$PY" tests/check_mcp_boot.py
 # 订阅那一屏自己起服务、自己铺夹具源（订源要真的订、真的抓），所以不吃上面那份沙盒。
 run "订阅阅读器全流程" "$PY" tests/check_feed_ui.py
+# 便签那一屏同理，而且比订阅更不能共用沙盒：它改的是真账本 cache/flomo/notes.json，
+# 导入、收成书、忘掉、清空一路走到底，共用那份一定互相踩（自己起服务、自己临时目录，
+# 跑完整包删掉）。
+run "便签全流程（导入 / 时间线 / 收成书 / 画像 / 清空）" "$PY" tests/check_flomo_ui.py
 run "首启页" "$PY" tests/check_onboarding.py
 fresh_shelf; run "异常兜底" "$PY" tests/test_server_fallback.py
 

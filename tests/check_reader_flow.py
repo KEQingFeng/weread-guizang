@@ -21,6 +21,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import selftest  # noqa: E402
+from seed import book_dir as where  # noqa: E402
 from playwright.sync_api import sync_playwright
 
 BASE = selftest.need_base(1)
@@ -28,7 +29,7 @@ BOOK = "GAPBOOK1"
 # 章节文件名是 0 基的（产品口径：引擎 / book_import / book_notes 都从 0000.md 起头），
 # 所以「翻到第 3 章」（rdGo(2)）改的那一份是 0002.md —— 里头人读的序号还是第3章，
 # 别被名字骗了：写成 0003.md 会铺到第 4 章上，这一章就短得滚不起来。
-CH3 = pathlib.Path(selftest.BOOKS) / BOOK / "chapters" / "0002.md"
+CH3 = pathlib.Path(where(BOOK)) / "chapters" / "0002.md"
 selftest.SHOTS.mkdir(parents=True, exist_ok=True)
 SHOT = str(selftest.SHOTS / "reader-outline.png")
 
