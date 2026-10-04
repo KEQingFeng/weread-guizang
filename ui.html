@@ -897,6 +897,10 @@
   .seg button:hover{color:var(--ink)}
   .seg button.on{background:var(--solid); color:var(--ink); box-shadow:0 1px 3px rgba(28,37,54,.13)}
   .seg svg{width:13px; height:13px; display:block}
+  /* .seg 原本是给顶栏那种图标钮用的（写死 27×22）。写作平台拿它当文字档位用，
+     得让按钮按字数自己撑开，否则「黑白简约」会被压成四行叠在一起。 */
+  .seg.txt{flex:none}
+  .seg.txt button{width:auto; padding:0 9px; white-space:nowrap; font-size:12px}
 
   /* ── 书架工具条 ───────────────────────── */
   .stools{display:flex; align-items:center; gap:9px; padding:11px 15px; border-bottom:1px solid var(--line); flex-wrap:wrap}
@@ -1198,7 +1202,9 @@
   /* 视频那一屏和订阅同一个算法：两栏各自滚，整页不动。表头一换行也不影响贴底。 */
   body.feedfit #view > .vpane[data-pane="feed"],
   body.feedfit #view > .vpane[data-pane="video"],
-  body.feedfit #view > .vpane[data-pane="flomo"]{height:calc(100vh - 106px); min-height:0}
+  body.feedfit #view > .vpane[data-pane="flomo"],
+  /* 写作台同理：稿列、正文、坞各自滚，整页不动 —— 打字时页面跟着跳是最刺眼的。 */
+  body.feedfit #view > .vpane[data-pane="write"]{height:calc(100vh - 106px); min-height:0}
   @media (min-width:841px){ body.feedfit main{padding-bottom:22px} }
   body.feedfit main{max-width:min(1440px, 100%)}
   @media (max-width:840px){
@@ -1210,6 +1216,8 @@
     /* 便签在手机宽度下也回到整页滚：时间线本来就是一根长列，定高只会让它在
        小屏里变成「窗里再开一个窗」，两级滚动很难用。 */
     body.feedfit #view > .vpane[data-pane="flomo"]{height:auto; min-height:0}
+    /* 写作在窄窗也回到整页滚：稿列收成一条缝之后，定高只会把正文挤成半屏。 */
+    body.feedfit #view > .vpane[data-pane="write"]{height:auto; min-height:0}
   }
   /* 中栏与右栏自己不平滚：滚的必须是里面那一片（列表 / 正文）。三层都开 overflow
      的话，鼠标滚轮一碰到就整栏一起动，工具条会被滚出视野，也就白设了。 */
@@ -2794,6 +2802,254 @@
   .ambient i:nth-child(2){animation-duration:58s; animation-delay:-13s}
   .ambient i:nth-child(3){animation-duration:66s; animation-delay:-27s}
   .tabs button:active, .seg button:active{transform:scale(.96)}
+
+  /* ═══ 1.0.5 · 侧边栏：摊开 / 靠边触发，导航可拖拽排序 ═══
+
+     两种待法共用同一份 DOM：摊开时它占 .shell 的第一列（和以前一样随页面滚动
+     钉在顶部），靠边触发时它整块脱离文档流变成贴左缘的浮层 —— 内容区因此拿到
+     全宽，鼠标移近左缘才「啪」一下弹回来。弹出用的是带回弹的曲线（第二条控制点
+     过 1），位移会略微冲过头再收住，这就是那一下果冻感；顺带从 .96 放大回 1，
+     像是从屏幕外头长出来的。左上角那颗头像是唯一的常驻线索，弹开时它自己再跳一次。
+
+     层级说清楚：遮罩 42 < 浮层 44 < 设置弹窗的遮罩 54。弹层压得住顶栏（30），
+     但压不住弹窗 —— 打开设置时会先把浮层收掉，不会出现两层玻璃互相盖。 */
+  .avatarbtn{
+    width:32px; height:32px; flex:none; border-radius:50%; overflow:hidden; padding:0;
+    border:1px solid var(--line-2); background:var(--glass-2); color:var(--ink-2);
+    display:grid; place-items:center; cursor:pointer;
+    font-size:12.5px; font-weight:600; font-family:inherit;
+    box-shadow:0 1px 3px rgba(20,24,32,.08), var(--sheen);
+    transition:transform .3s var(--pop), box-shadow .2s ease, border-color .2s ease;
+  }
+  .avatarbtn:hover{border-color:var(--accent); box-shadow:0 3px 12px -4px rgba(47,127,240,.5), var(--sheen)}
+  .avatarbtn:active{transform:scale(.93)}
+  .avatarbtn img{width:100%; height:100%; object-fit:cover; display:block}
+  @keyframes growIn{
+    0%{transform:scale(.55); opacity:.35}
+    68%{transform:scale(1.09); opacity:1}
+    100%{transform:scale(1); opacity:1}
+  }
+  .avatarbtn.grow{animation:growIn .42s var(--pop) both}
+
+  /* 触发条与遮罩只在「靠左缘滑出」这一种形态下存在。摊开时侧边栏就在页面里，
+     那条 16px 的透明带要还留着，它会把侧边栏最左一列的点击全吃掉。 */
+  .edgepad{position:fixed; left:0; top:0; bottom:0; width:16px; z-index:41;
+    display:none; cursor:default}
+  body.side-edge .edgepad{display:block}
+  /* 遮罩只把背后压暗一层，永远不吃鼠标 —— 用户要的是「鼠标往右滑，页面就停在
+     那儿，完全不需要点击」。挡一道的话就得先点掉它才碰得到内容，那句话就落空了。
+     收回浮层由指针位置判定（ui.html 里的 PEEK_ZONE）。 */
+  .siderim{position:fixed; inset:0; z-index:42; opacity:0; pointer-events:none;
+    background:rgba(14,19,28,.3); transition:opacity .3s ease}
+  body.side-edge.side-peek .siderim{opacity:1}
+
+  /* 靠边触发：侧边栏整块改成贴左缘的浮层 */
+  body.side-edge .shell{grid-template-columns:minmax(0,1fr); gap:0}
+  body.side-edge .side{
+    position:fixed; left:0; top:0; bottom:0; z-index:44; width:246px; margin:0;
+    padding:70px 12px 18px; border-radius:0 var(--r-xl) var(--r-xl) 0; overflow-y:auto;
+    transform:translate3d(-102%,0,0) scale(.96); transform-origin:left center;
+    opacity:0; pointer-events:none;
+    transition:transform .5s var(--pop), opacity .24s ease;
+    box-shadow:var(--shadow), var(--sheen);
+  }
+  body.side-edge.side-peek .side{
+    transform:translate3d(0,0,0) scale(1); opacity:1; pointer-events:auto}
+  /* 摊开模式保持原来的列布局，只把曲线带上（切换那一格时胶囊会回弹一下） */
+  body.side-open .side{transition:opacity .24s ease}
+
+  /* 窄窗口仍然是「导航横排贴在内容上方」，两种模式都不例外 ——
+     841px 以下把浮层那套收掉，靠边触发在这个宽度上没有意义（没地方可躲）。 */
+  @media (max-width:840px){
+    body.side-edge .side{position:static; width:auto; padding:16px 12px; border-radius:var(--r-xl);
+      transform:none; opacity:1; pointer-events:auto; overflow:visible}
+    .edgepad, .siderim{display:none}
+  }
+
+  /* 分组小标题（空间 / 工具）：只当路标，不参与拖拽 */
+  .side nav .navgrp{
+    padding:12px 11px 5px; font-size:10.5px; letter-spacing:.16em; color:var(--ink-3);
+    -webkit-user-select:none; user-select:none}
+  .side nav .navgrp.first{padding-top:2px}
+
+  /* 长按拖拽排序：按住 400ms 才进拖拽态，所以点一下仍然是「切页面」，
+     不会想切个书架就把整排按钮重排了。进态先抖一下（视觉确认），
+     之后格子跟着指针实时换位，松手才写回本机。 */
+  @keyframes navGrab{0%{transform:scale(1)}45%{transform:scale(1.035)}100%{transform:scale(1)}}
+  body.navdragging{cursor:grabbing; -webkit-user-select:none; user-select:none}
+  body.navdragging .side{-webkit-user-select:none; user-select:none}
+  .side nav button{cursor:pointer; -webkit-user-select:none; user-select:none}
+  .side nav button.grabbing{animation:navGrab .2s ease}
+  .side nav button.dragsrc{
+    background:var(--solid); color:var(--ink); box-shadow:var(--shadow), var(--sheen);
+    opacity:.96}
+  .side nav button.draghint{box-shadow:inset 0 2px 0 var(--accent)}
+
+  /* 侧边栏顶部现在是「你是谁」：头像 + 名字 + 简介，整块可点，进去就是个人主界面。
+     原来那行「读书破万卷 / 未连接」没有消失，它搬到了底下一条（微信读书的连接
+     状态本来就该和「已取回 N 本」待在一起，那是同一件事：这台机器连上读了多少）。 */
+  .sidehead{cursor:pointer; border-radius:12px; padding:4px 8px 8px; margin:0 -4px;
+    transition:background .16s ease}
+  .sidehead:hover{background:rgba(127,140,160,.1)}
+  .sidehead .metxt{min-width:0}
+  .sidehead .sname{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .sidehead .ssub{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .meav{
+    width:32px; height:32px; flex:none; border-radius:50%; overflow:hidden;
+    display:grid; place-items:center; color:#fff; font-size:13px; font-weight:600;
+    background:linear-gradient(150deg,#4b93f2,#2568cc);
+    box-shadow:0 4px 12px -6px rgba(47,127,240,.7), inset 0 .5px 0 rgba(255,255,255,.42)}
+  .meav img{width:100%; height:100%; object-fit:cover; display:block}
+
+  /* ═══ 个人主界面：两张热力图 ═══
+     一格一天，一年 53 列 × 7 行，色阶由后端算（它才知道这一年的分布长什么样，
+     前端只管「第几档涂多深」）。横轴走时间是默认，鼠标停在某格上时上面那行
+     话会说清这一天记了几分钟。 */
+  .mehd{display:flex; gap:18px; align-items:center; padding:22px 22px 6px; flex-wrap:wrap}
+  .mehd .meav{width:64px; height:64px; font-size:24px}
+  .mename{font-size:17px; font-weight:600; line-height:1.3}
+  .mebiosub{font-size:12px; color:var(--ink-3); margin-top:5px; line-height:1.55; max-width:52ch}
+  .meops{display:flex; gap:8px; padding:14px 22px 4px; flex-wrap:wrap}
+  .meform{padding:8px 22px 4px; display:none; flex-direction:column; gap:9px}
+  .meform.on{display:flex}
+  .meform label{font-size:11.5px; color:var(--ink-3)}
+  .meform input, .meform textarea{
+    width:100%; box-sizing:border-box; padding:8px 11px; border-radius:11px; outline:none;
+    border:1px solid var(--line-2); background:var(--glass-2); font:inherit; font-size:13px;
+    color:var(--ink)}
+  .meform textarea{resize:vertical; min-height:62px; line-height:1.6}
+  .meform input:focus, .meform textarea:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .heatbox{padding:16px 22px 20px}
+  .heathd{display:flex; align-items:baseline; gap:9px; font-size:12.5px; color:var(--ink-2);
+    font-weight:600; margin-bottom:9px}
+  .heathd small{font-weight:400; color:var(--ink-3); font-size:11.5px}
+  .heathd .grow{flex:1}
+  .heatgrid{display:grid; grid-auto-flow:column; grid-template-rows:repeat(7, 11px);
+    gap:3px; width:max-content; max-width:100%; padding-bottom:4px}
+  .heatcell{width:11px; height:11px; border-radius:3px; background:rgba(127,140,160,.13);
+    transition:transform .12s ease, box-shadow .12s ease}
+  .heatcell.lv1{background:rgba(47,127,240,.2)}
+  .heatcell.lv2{background:rgba(47,127,240,.38)}
+  .heatcell.lv3{background:rgba(47,127,240,.6)}
+  .heatcell.lv4{background:rgba(47,127,240,.86)}
+  .heatcell.today{box-shadow:0 0 0 1.5px var(--accent)}
+  .heatcell:hover{transform:scale(1.34)}
+  .heatstat{display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:10px;
+    margin:2px 0 14px}
+  .heatstat .s{padding:10px 12px; border-radius:12px; background:var(--glass-2);
+    border:1px solid var(--line)}
+  .heatstat .s b{display:block; font-size:16px; font-weight:600; color:var(--ink); line-height:1.3}
+  .heatstat .s span{font-size:11px; color:var(--ink-3)}
+
+  /* 设置里那一栏「入口显隐」：一颗颗小勾选，顺序就是侧边栏现在的顺序 */
+  .navlist{display:flex; flex-wrap:wrap; gap:6px; padding:4px 12px 10px}
+  .navlist label{
+    display:flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px;
+    border:1px solid var(--line-2); background:var(--surface-2); font-size:11.5px;
+    color:var(--ink-2); cursor:pointer; user-select:none}
+  .navlist label.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+  .navlist input{accent-color:var(--accent); margin:0}
+
+  /* 热力图那一块的横轴：月份标在「这一列的第一格落在哪个月」的位置上。
+     格子 11px + 间距 3px = 一列 14px，所以定位直接用 col × 14px，
+     不靠 flex 平均分配 —— 平均分会让后面的月份越标越偏。 */
+  .heatmonths{position:relative; height:13px; margin:0 0 4px; min-width:100%;
+    font-size:10.5px; color:var(--ink-3)}
+  .heatmonths span{position:absolute; top:0; left:0; white-space:nowrap}
+  .heatlegend{display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--ink-3)}
+  .heatlegend i{width:11px; height:11px; border-radius:3px; display:block}
+  .mebottom{display:flex; gap:8px; align-items:center; padding:6px 22px 22px; flex-wrap:wrap}
+  .mepill{display:inline-flex; gap:7px; align-items:baseline; padding:7px 12px; border-radius:12px;
+    border:1px solid var(--line-2); background:var(--glass-2); font-size:11.5px; color:var(--ink-3)}
+  .mepill b{font-size:14px; color:var(--ink); font-weight:600}
+
+  /* 窄窗口铺不满一年 53 列时，横轴要能左右滚。月份标和格子必须在同一个滚动容器里 ——
+     分开放的话滚了格子、月份还钉在原地，越滚越对不上。 */
+  .heatscroll{overflow-x:auto; padding-bottom:2px}
+  .heatscroll > *{width:max-content}
+  .heatgrid{overflow:visible}
+
+  /* ═══ 1.0.5 · 写作平台 ═══
+     一屏三段：左边是稿列，中间是正文，下面那条坞装 AI 与导出。
+     坞不开新层 —— 稿子在手上时，AI 给的东西必须贴着编辑器；跳出一层，思路就断了。
+     正文用衬线：写长文的人盯的是句子节奏，等宽和无衬线都把注意力拽回字形本身。 */
+  .wrapp{display:flex; gap:14px; height:100%; min-height:0; padding:0 18px 14px}
+  .wrdocs{width:214px; flex:none; display:flex; flex-direction:column; gap:8px; min-height:0}
+  .wrdoclist{flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:3px}
+  .wrdoc{display:block; text-align:left; width:100%; border:1px solid transparent;
+    background:transparent; border-radius:var(--r-sm); padding:8px 10px; cursor:pointer;
+    transition:background .22s var(--spring), border-color .22s var(--spring), transform .16s var(--spring)}
+  .wrdoc:hover{background:var(--surface-2)}
+  .wrdoc:active{transform:scale(.985)}
+  .wrdoc.on{background:var(--accent-soft); border-color:var(--accent)}
+  .wrdoc .wt{display:block; font-size:12.5px; font-weight:600; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .wrdoc .wm{display:block; font-size:10.5px; color:var(--ink-3); margin-top:3px}
+  .wrmain{flex:1; min-width:0; display:flex; flex-direction:column; gap:9px; min-height:0}
+  .wrhead{display:flex; align-items:center; gap:10px}
+  .wrtitle{flex:1; min-width:0; height:30px; border:0; background:transparent; outline:none;
+    color:var(--ink); font-size:16.5px; font-weight:650; letter-spacing:.2px; padding:0 2px;
+    font-family:inherit}
+  .wrtitle::placeholder{color:var(--ink-3); font-weight:500}
+  .wrmeta{font-size:11px; color:var(--ink-3); white-space:nowrap; display:flex; gap:9px; align-items:baseline}
+  .wred{flex:1; min-height:130px; display:flex; border:1px solid var(--line-2);
+    border-radius:var(--r); background:var(--glass-2); overflow:hidden;
+    transition:border-color .2s var(--spring), box-shadow .2s var(--spring)}
+  .wred:focus-within{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .wrtext{flex:1; width:100%; min-height:0; border:0; outline:none; resize:none; background:transparent;
+    padding:15px 19px 22px; color:var(--ink); font-size:15.5px; line-height:1.9; tab-size:2;
+    font-family:Georgia,"Songti SC","STSong","Noto Serif CJK SC",serif}
+  .wrbar{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
+  .wrbar .lab{font-size:10.5px; color:var(--ink-3); letter-spacing:.6px; flex:none}
+  /* 撑开的一段：动作钮靠左、屏数与「收起」靠右。这一页没有全局 .grow，得自己给。 */
+  .wrbar .grow,.wrline .grow{flex:1}
+  .wrres{border:1px solid var(--line-2); border-radius:var(--r); background:var(--surface-2);
+    max-height:44%; display:flex; flex-direction:column; min-height:0;
+    animation:wrUp .3s var(--spring) both}
+  /* 上面那条 display:flex 会盖掉 hidden 属性默认的 display:none（作者样式优先于 UA 样式），
+     所以收起必须写死一条，不然坞一收其实是「透明地还占着地方」。同类坑在 .vpane 上踩过一次。 */
+  .wrres[hidden]{display:none}
+  @keyframes wrUp{from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none}}
+  .wrresbar{display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--line)}
+  .wrresbody{overflow-y:auto; padding:10px 12px 12px; min-height:0; font-size:13px; color:var(--ink-2)}
+  .wrout{white-space:pre-wrap; line-height:1.85; font-size:14px; color:var(--ink);
+    font-family:Georgia,"Songti SC","STSong","Noto Serif CJK SC",serif}
+  .wrcard{border:1px solid var(--line-2); border-radius:var(--r-sm); padding:9px 11px; margin-bottom:7px;
+    background:var(--glass-2)}
+  .wrcard b{display:block; font-size:12.5px; color:var(--ink); margin-bottom:3px; font-weight:650}
+  .wrcard span{display:block; font-size:12px; color:var(--ink-2); line-height:1.75}
+  .wrblk{display:flex; gap:9px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line)}
+  .wrblk .wd{font-size:10.5px; color:var(--accent); flex:none; width:22px; letter-spacing:.5px}
+  .wrblk .wtxt{flex:1; min-width:0; font-size:12.5px; line-height:1.7}
+  .wrblk .o{display:block; color:var(--ink-3); text-decoration:line-through}
+  .wrblk .n{display:block; color:var(--ink)}
+  /* 这一行是坞里的「一个开关 + 一个说明」，和划线笔记那屏的 .wrrow 撞名会互相盖掉
+     （那边靠 border-top 分行、这里要换行挤一挤），所以另起一个名字。 */
+  .wrline{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:2px 0 8px}
+  .wrline:last-child{margin-bottom:0}
+  .wrline .lab{font-size:11px; color:var(--ink-3); letter-spacing:.4px; flex:none}
+  .wrline label{display:inline-flex; gap:6px; align-items:center; font-size:12px;
+    color:var(--ink-2); cursor:pointer}
+  .wrline input[type=checkbox]{accent-color:var(--accent)}
+  .wrline select{height:26px; border:1px solid var(--line-2); border-radius:8px;
+    background:var(--glass-2); color:var(--ink); font:inherit; font-size:12px; padding:0 7px; outline:none}
+  .wrmat{display:flex; flex-direction:column; gap:9px}
+  .wrmat .k{font-size:11px; color:var(--ink-3); letter-spacing:.4px}
+  .wrtyped{width:100%; min-height:64px; border:1px solid var(--line-2); border-radius:var(--r-sm);
+    background:var(--glass-2); color:var(--ink); font:inherit; font-size:12.5px; line-height:1.7;
+    padding:8px 10px; outline:none; resize:vertical}
+  /* 坞里那些一行填的字（往哪走、素材手打的那几行）：和 .wrtyped 同一套皮，只是一行高 */
+  .wrinp{flex:1; min-width:120px; height:27px; border:1px solid var(--line-2); border-radius:8px;
+    background:var(--glass-2); color:var(--ink); font:inherit; font-size:12px; padding:0 9px; outline:none}
+  .wrinp:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .wrfmlist{max-height:168px; overflow-y:auto; display:flex; flex-direction:column; gap:1px}
+  .wrfm{display:flex; gap:7px; align-items:flex-start; padding:5px 7px; border-radius:8px;
+    cursor:pointer; font-size:11.5px; color:var(--ink-2); line-height:1.55}
+  .wrfm:hover{background:var(--glass-2)}
+  .wrfm input{accent-color:var(--accent); margin-top:2px; flex:none}
+  .wrfm .d{color:var(--ink-3); flex:none; font-size:10.5px; margin-top:1px}
+  .wrprev{border:1px solid var(--line-2); border-radius:var(--r-sm); overflow:hidden; background:#fff}
+  .wrprev iframe{width:100%; height:300px; border:0; display:block; background:#fff}
 </style>
 </head>
 <body>
@@ -2803,12 +3059,10 @@
 <div class="ambient"><i></i><i></i><i></i><u></u></div>
 
 <header class="bar">
-  <button class="iconbtn" id="gear" aria-expanded="false" title="设置">
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="10" cy="10" r="2.6"/>
-      <path d="M10 2.4v1.8M10 15.8v1.8M17.6 10h-1.8M4.2 10H2.4M15.4 4.6l-1.3 1.3M5.9 14.1l-1.3 1.3M15.4 15.4l-1.3-1.3M5.9 5.9 4.6 4.6"/>
-    </svg>
-  </button>
+  <!-- 左上角这一颗就是「你是谁」：没上传头像时是名字第一个字，传了就是那张图。
+       它同时是个人主界面的入口，也是「靠左缘滑出」那一种待法下唯一的常驻线索。
+       data-av 是一个「把头像涂到这里」的记号，侧边栏顶部和主界面那一屏共用同一份。 -->
+  <button class="avatarbtn meav" id="mebtn" data-av title="个人主界面">归</button>
   <div class="mark" title="归藏">
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.45"
          stroke-linecap="round" stroke-linejoin="round">
@@ -2847,6 +3101,11 @@
   <div class="live" id="live"><b></b><span id="liveText">静候</span></div>
 </header>
 
+<!-- 靠边触发那一档用的两块「看不见的东西」：左缘 16px 的感应条，和弹开后压住
+     内容的那层薄遮罩。摊开模式下它们都点不到（.edgepad 只在 body.side-edge 下有尺寸）。 -->
+<div class="edgepad" id="edgepad" aria-hidden="true"></div>
+<div class="siderim" id="siderim" aria-hidden="true"></div>
+
 <div class="swapbar" id="swapbar" role="status" aria-live="polite">
   <span id="swaptext"></span>
   <button class="swapgo" id="swapgo" title="让本机后端换成和界面同一份代码">换新后端</button>
@@ -2863,6 +3122,7 @@
     <div class="head">设置</div>
     <button class="pcat on" data-cat="acct">账号</button>
     <button class="pcat" data-cat="look">外观</button>
+    <button class="pcat" data-cat="nav">导航</button>
     <button class="pcat" data-cat="out">导出</button>
     <button class="pcat" data-cat="notes">笔记</button>
     <button class="pcat" data-cat="agent">小 Agent</button>
@@ -2894,7 +3154,7 @@
                style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
         <button class="deed" id="savekey">保存</button>
       </div>
-      <div class="hint" id="keyhint">填上官方接口 Key 后，下方就能看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 里复制，形如 wrk-…）。填一次就存在本机，下次打开不用再填。</div>
+      <div class="hint" id="keyhint">微信读书开放接口的 Key。填入后可在此查看书架、笔记、阅读统计与搜索。获取方式：微信读书网页版 → 设置 → 开放 API，以 wrk- 开头。仅保存在本机，无需重复填写。</div>
       <div class="sechd">导出到 flomo</div>
       <div class="row">
         <span class="k">flomo 地址</span>
@@ -2902,7 +3162,7 @@
                style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
         <button class="deed" id="saveflomo">保存</button>
       </div>
-      <div class="hint" id="flomohint">填上你的 flomo 记录 API 地址（在 flomo 网页版「设置 → API」里拿，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。</div>
+      <div class="hint" id="flomohint">flomo 记录 API 地址。填入后可把划线笔记导入 flomo。获取方式：flomo 网页版 → 设置 → API，格式为 https://flomoapp.com/iwh/xxxx/。需要 flomo PRO。</div>
     </section>
 
     <section class="popcat" data-cat="look">
@@ -2914,7 +3174,7 @@
         <button class="deed" id="pickWall">选图片</button>
         <button class="deed" id="clearWall" style="margin-left:6px">清除</button>
       </div>
-      <div class="hint" id="wallhint">选一张横屏图当整页背景。背景固定不动、页面照常往上滑，文字与玻璃颜色会跟着壁纸明暗自动调整。</div>
+      <div class="hint" id="wallhint">整页背景图，建议使用横屏图片。背景固定，页面滚动时不动；文字与玻璃颜色随壁纸明暗自动调整。</div>
       <input type="file" id="wallFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
       <div class="sechd">玻璃</div>
       <div class="row">
@@ -2923,13 +3183,37 @@
                style="flex:1;min-width:0;accent-color:var(--accent)">
         <span class="v" id="v-frost" style="width:44px;text-align:right">72%</span>
       </div>
-      <div class="hint">玻璃面板透多少、糊多少。调低更通透（能看清壁纸），调高更实（文字更好读）。写作台、笔记纸、正文纸面是固定的实心纸，不受这条影响 —— 调的是玻璃，不该把纸也调薄。</div>
+      <div class="hint">控制玻璃面板的透明度。调低更通透，可看清壁纸；调高更实，文字更易读。写作台、笔记纸与正文纸面为固定实心纸，不受此设置影响。</div>
       <div class="row">
         <span class="k">模糊强度</span>
         <input type="range" id="blurRange" min="0" max="40" step="2" value="26"
                style="flex:1;min-width:0;accent-color:var(--accent)">
         <span class="v" id="v-blur" style="width:44px;text-align:right">26px</span>
       </div>
+    </section>
+
+    <section class="popcat" data-cat="nav">
+      <div class="sechd">侧边栏</div>
+      <div class="row">
+        <span class="k">显示方式</span>
+        <span class="grow"></span>
+        <div class="seg" id="navSideSeg">
+          <button data-s="open">常驻</button>
+          <button data-s="edge">靠左缘滑出</button>
+        </div>
+      </div>
+      <div class="hint" id="navSideHint">常驻：侧边栏固定占用页面左侧。靠左缘滑出：侧边栏收起，页面占满宽度；指针移至窗口左缘时滑出，移开后自动收起。</div>
+      <div class="row">
+        <span class="k">悬停切换</span>
+        <span class="grow"></span>
+        <input type="checkbox" id="navHover" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+      </div>
+      <div class="hint">开启后，指针在侧边栏入口停留约 150 毫秒即切换到该页面，无需点击。指针移回页面区域后，切换结果保留。</div>
+      <div class="sechd">入口显隐</div>
+      <div class="navlist" id="navList"></div>
+      <div class="hint" id="navListHint">取消勾选的入口不会出现在侧边栏与主页中。至少需保留一个入口，否则没有可显示的内容。此处顺序即侧边栏当前顺序。</div>
+      <div class="sechd">排序</div>
+      <div class="hint">在侧边栏按住某个入口约 0.4 秒，图标轻微放大并进入拖动状态；拖至目标位置后松开，顺序保存在本机。短按仍为切换页面。</div>
     </section>
 
     <section class="popcat" data-cat="out">
@@ -2941,7 +3225,7 @@
         <button class="deed" id="pickExport">选择…</button>
         <button class="deed" id="resetExport" style="margin-left:6px">默认</button>
       </div>
-      <div class="hint" id="exporthint">「正文」「完整包」这些下载存到哪儿。不设就用系统「下载」文件夹。选过之后重名的文件自动加序号，不会互相覆盖。</div>
+      <div class="hint" id="exporthint">「正文」「完整包」等下载文件的保存位置。未设置时使用系统「下载」文件夹。设置后，重名文件自动加序号，不会互相覆盖。</div>
     </section>
 
     <section class="popcat" data-cat="notes">
@@ -2952,12 +3236,12 @@
         <button class="deed" id="idxBuild" data-idx-go style="height:24px">建立</button>
         <button class="deed" id="idxRebuild" style="height:24px">重建</button>
       </div>
-      <div class="hint">把下载到本机的那些书的划线笔记收成一份索引，随机漫步、卡片回顾、搜索笔记都靠它。加过新书就重建一次。</div>
+      <div class="hint">为已下载到本机的书籍建立划线笔记索引，供随机漫步、卡片回顾与笔记搜索使用。新增书籍后需重建一次。</div>
       <div class="sechd">给别的 AI 用</div>
       <div style="display:flex;gap:8px;padding:4px 12px 12px">
         <button class="deed" id="mcp" style="flex:1;height:30px">一键建立 MCP</button>
       </div>
-      <div class="hint">复制一段提示词，粘到支持 MCP 的 AI 客户端里，它就能直接读你的书架、划线、统计。</div>
+      <div class="hint">复制一段提示词，粘贴到支持 MCP 的 AI 客户端，即可读取本机的书架、划线与统计。</div>
     </section>
 
     <section class="popcat" data-cat="agent">
@@ -2984,8 +3268,8 @@
         <button class="deed" id="saveagent">保存</button>
         <button class="deed" id="agenttest" style="margin-left:6px">测一下</button>
       </div>
-      <div class="hint" id="agenthint">填一个兼容 OpenAI 的接口（/chat/completions 那一套），右下角那颗气泡就能说话了。地址写到 /v1 为止，Key 只存在本机、不会进界面。</div>
-      <div class="hint">它会看到：你的书架与读到哪里、下载到本机的书的划线笔记、以及阅读统计的汇总。这些都是你本机的东西 —— 问了才会发给上面那个接口，介意的话就别问。</div>
+      <div class="hint" id="agenthint">兼容 OpenAI 的接口地址与密钥，用于启用右下角的小 Agent。地址写到 /v1 为止。密钥仅保存在本机，不显示在界面中。</div>
+      <div class="hint">提问时，小 Agent 会读取以下本机数据并发往上述接口：书架与阅读进度、已下载书籍的划线笔记、阅读统计汇总。仅在提问时发送。</div>
     </section>
 
     <section class="popcat" data-cat="media">
@@ -2993,10 +3277,10 @@
       <div class="row">
         <span class="k">引擎</span>
         <select class="deed" id="asrEngine" style="flex:1;min-width:0;padding:0 6px">
-          <option value="auto">自动挑（推荐）</option>
+          <option value="auto">自动选择（推荐）</option>
           <option value="mlx">mlx-whisper · Apple 芯片最快</option>
           <option value="faster">faster-whisper · CPU 通用</option>
-          <option value="cloud">云端转写 · 要自己填接口</option>
+          <option value="cloud">云端转写 · 需自行配置接口</option>
         </select>
       </div>
       <div class="row">
@@ -3010,7 +3294,7 @@
         <span class="grow"></span>
         <button class="deed" id="asrSave">保存</button>
       </div>
-      <div class="hint" id="asrhint">「自动」的挑法：Apple 芯片上先用 mlx-whisper（最快，也不依赖 ffmpeg），否则用 faster-whisper，两个都没有才落到云端。点名的引擎没装会直接说清原因，不会偷偷换一个。</div>
+      <div class="hint" id="asrhint">「自动」的选择顺序：Apple 芯片优先使用 mlx-whisper（速度最快，且不依赖 ffmpeg），其次 faster-whisper，均不可用时回退到云端。指定的引擎未安装时将直接报错并说明原因，不会自动改用其他引擎。</div>
       <div class="row">
         <span class="k">组件</span>
         <span class="v" id="v-vtool">—</span>
@@ -3023,9 +3307,7 @@
         <span class="grow"></span>
         <button class="deed" id="vModelFix">准备</button>
       </div>
-      <div class="hint">装好归藏之后，转写引擎会随安装一次配好；转写模型（几百 MB ~ 1.6 GB）在进门后
-        自动在后台下，这里能看到进度，下完就能转。ffmpeg 按需下一份静态的放进归藏自己的数据目录，不动系统；
-        云端转写要在「小 Agent」那一栏把接口地址和模型配好。想换台机器接着用，把数据目录整个搬过去即可。</div>
+      <div class="hint">转写引擎在安装归藏时一并配置。转写模型（约几百 MB 至 1.6 GB）在首次进入后于后台自动下载，此处显示进度，下载完成后即可转写。ffmpeg 按需下载，存放于归藏的数据目录，不修改系统环境。云端转写需在「小 Agent」中配置接口地址与模型。迁移到其他机器时，复制整个数据目录即可。</div>
     </section>
 
     <section class="popcat" data-cat="sync">
@@ -3062,7 +3344,7 @@
           <input id="syncPass" type="password" spellcheck="false" autocomplete="off" placeholder="••••••"
                  style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
         </div>
-        <div class="hint">坚果云、Nextcloud 这类都走 WebDAV：把我们那个文件夹的地址填进来（写到要存放的目录为止），账号密码只留在本机。</div>
+        <div class="hint">坚果云、Nextcloud 等服务均通过 WebDAV 访问。填写要存放文件的目录地址（写到目标目录为止），账号与密码仅保存在本机。</div>
       </div>
 
       <div id="syncMsBox">
@@ -3078,7 +3360,7 @@
           <span class="grow"></span>
           <button class="deed" id="syncAuth">去授权</button>
         </div>
-        <div class="hint">在 Azure 门户注册一个应用（支持「个人 Microsoft 账户」），把它的客户端 ID 填到上面。点「去授权」会给你一串代码，到微软页面输一下、登进去就行；登一次会记住，不用每次来。</div>
+        <div class="hint">在 Azure 门户注册一个应用（需支持「个人 Microsoft 账户」），将其客户端 ID 填入上方。点击「去授权」后获得一串代码，在微软页面输入并登录即可完成授权。授权结果会被记住，无需重复登录。</div>
       </div>
 
       <div class="sechd">同步什么</div>
@@ -3097,7 +3379,7 @@
         <span class="grow"></span>
         <input type="checkbox" id="swBooks" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
       </div>
-      <div class="hint">时长＝本机阅读账本；记录＝划线笔记与进度；书籍文件＝下载到本机的书（体积大，按需开）。同步是往云上叠，不会把云上的东西抹掉。</div>
+      <div class="hint">时长：本机阅读记录；记录：划线笔记与阅读进度；书籍文件：已下载到本机的书籍（体积较大，按需开启）。同步只向云端追加，不会删除云端已有的内容。</div>
 
       <div class="row">
         <span class="k">上次</span>
@@ -3110,7 +3392,7 @@
         <span class="grow"></span>
         <button class="deed" id="syncSave">保存设置</button>
       </div>
-      <div class="hint" id="synchint">配好之后点「保存设置」，再点「立即同步」就把东西送上去。密钥只存在本机、不会进界面，也不会写进日志。</div>
+      <div class="hint" id="synchint">配置完成后点击「保存设置」，再点击「立即同步」即可上传。密钥仅保存在本机，不显示在界面中，也不写入日志。</div>
     </section>
 
     <section class="popcat" data-cat="maint">
@@ -3121,18 +3403,18 @@
         <span class="grow"></span>
         <button class="deed" id="clComp">卸载组件</button>
       </div>
-      <div class="hint">卸掉的是「为了让它跑起来才装的东西」：虚拟环境（转写引擎装在里头）、
-        自己下的那份 ffmpeg、转写模型（几百 MB ~ 1.6GB）、取书用的 Chromium。
-        卸完还想用，回来点一次「补齐」会重新装，不用重下整个软件。</div>
+      <div class="hint">卸载的是为运行而安装的组件：虚拟环境（转写引擎安装在其中）、下载的 ffmpeg、
+        转写模型（约几百 MB 至 1.6 GB）以及取书所用的 Chromium。卸载后如需继续使用，
+        在「账号」页点击「修复」即可重新安装，无需重装整个软件。</div>
       <div class="row">
         <span class="k">本地数据</span>
         <span class="v" id="v-data">—</span>
         <span class="grow"></span>
         <button class="deed" id="clData">清除本地数据</button>
       </div>
-      <div class="hint" id="clBooks">清掉的是它自己攒下的那些：登录态、书架清单、设置、阅读时长、
-        笔记索引、订阅条目、剪藏、封面、下载中间件。<b>书一定不动</b> —— 书在「文档 / 归藏」里，
-        那是你自己的文件。软件本体（那个 .app）也不归这儿管，不用了直接拖进废纸篓。</div>
+      <div class="hint" id="clBooks">清除的内容包括：登录状态、书架清单、设置、阅读时长、
+        笔记索引、订阅条目、剪藏、封面与下载中间缓存。<b>书籍文件不会被删除</b>，
+        它们位于「文档 / 归藏」目录中。软件本体（.app）不在清除范围内，卸载时直接拖入废纸篓即可。</div>
     </section>
 
     <section class="popcat" data-cat="about">
@@ -3141,26 +3423,26 @@
           <b>归藏</b>
           <span class="abver" id="v-abver">—</span>
         </div>
-        <div class="absay">把微信读书官方那套只给 AI Agent 用的接口，还原成一个能在本机点的工具：官方有的做成界面，官方没有的自己补上。全程只监听 127.0.0.1，不经第三方服务器。</div>
+        <div class="absay">将微信读书面向 AI Agent 的官方接口，还原为本机可操作的图形界面：官方开放的能力做成界面，官方未开放的能力自行补齐。服务仅监听 127.0.0.1，不经过第三方服务器。</div>
       </div>
 
       <div class="sechd">它能做什么</div>
       <div class="ablist">
         <div class="abitem">
           <b>取书</b>
-          <span>正文 hook 阅读器画布取字，插图按阅读顺序交错；逐章落盘，跑到一半能续。</span>
+          <span>通过 hook 阅读器画布获取正文，插图按阅读顺序交错插入；逐章写入磁盘，中断后可续取。</span>
         </div>
         <div class="abitem">
           <b>看书</b>
-          <span>书架、书城搜索、书籍详情、阅读统计、为我推荐，不开网页版也在本地看得到。</span>
+          <span>书架、书城搜索、书籍详情、阅读统计与推荐，无需打开网页版即可在本地查看。</span>
         </div>
         <div class="abitem">
           <b>用笔记</b>
-          <span>全部划线建索引后全文检索，随机漫步翻旧卡，导成 Anki 或直接转 flomo。</span>
+          <span>全部划线建立索引后支持全文检索，随机漫步回顾，可导出为 Anki 或直接导入 flomo。</span>
         </div>
         <div class="abitem">
           <b>接 Agent</b>
-          <span>20 个 MCP 工具，长任务不阻塞；服务没起时适配器自己把它拉起来。</span>
+          <span>提供 MCP 工具，长任务不阻塞；服务未启动时由适配器自动启动。</span>
         </div>
       </div>
 
@@ -3169,11 +3451,11 @@
         <span class="k">存放位置</span>
         <span class="v" id="v-path">—</span>
       </div>
-      <div class="hint">书、图片、虚拟环境、浏览器配置都在这一个目录里。换机器时把它整个拷走就能接着用。</div>
+      <div class="hint">书、图片、虚拟环境与浏览器配置均在此目录中。迁移到其他机器时，复制整个目录即可继续使用。</div>
 
       <div class="sechd">它从哪来</div>
-      <div class="hint">抓取引擎与图片下载二次开发自 <b>lbq110/weread-exporter</b>（上游未声明许可证，所以本仓库刻意不放根 LICENSE）；界面、官方接口集成、MCP 与 skills 是后加的，按 MIT 使用。源码在 <b>github.com/KEQingFeng/weread-guizang</b>。</div>
-      <div class="hint">版本号从这一版开始标注，初始为 0.9.1：界面显示的、程序包里的、安装包名字里的是同一个数，都取自后端那一处定义。</div>
+      <div class="hint">抓取引擎与图片下载二次开发自 <b>lbq110/weread-exporter</b>（上游未声明许可证，因此本仓库未放置根 LICENSE）；界面、官方接口集成、MCP 与 skills 为后续新增，按 MIT 使用。源码位于 <b>github.com/KEQingFeng/weread-guizang</b>。</div>
+      <div class="hint">版本号自 0.9.1 起标注：界面显示的、程序包内的与安装包文件名中的为同一个值，均取自后端的一处定义。</div>
     </section>
 
   </div>
@@ -3183,95 +3465,22 @@
 
   <div class="shell">
 
-    <aside class="side glass">
-      <div class="sidehead">
-        <div>
-          <div class="sname">读书破万卷</div>
-          <div class="ssub" id="wrWho">未连接</div>
+    <aside class="side glass" id="side">
+      <div class="sidehead" id="meHead" role="button" tabindex="0" title="个人主界面">
+        <span class="meav" data-av></span>
+        <div class="metxt">
+          <div class="sname" id="meName">归藏</div>
+          <div class="ssub" id="meBio">个人主界面</div>
         </div>
       </div>
-      <nav id="nav">
-        <button data-v="shelf" class="on">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3.4 5.2c0-.9.7-1.6 1.6-1.6h3.2c.9 0 1.6.7 1.6 1.6v10.3c0-.8-.7-1.4-1.6-1.4H5c-.9 0-1.6.6-1.6 1.4z"/>
-            <path d="M16.6 5.2c0-.9-.7-1.6-1.6-1.6h-3.2c-.9 0-1.6.7-1.6 1.6v10.3c0-.8.7-1.4 1.6-1.4H15c.9 0 1.6.6 1.6 1.4z"/>
-          </svg>
-          我的书架<span class="badge" id="bgShelf"></span>
-        </button>
-        <button data-v="local">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3.4" y="4.2" width="13.2" height="11.6" rx="2"/>
-            <path d="M3.4 8.4h13.2M8 4.2v4.2"/>
-            <path d="M3.4 12.2h13.2"/>
-          </svg>
-          本地书架<span class="badge" id="bgLocal"></span>
-        </button>
-        <button data-v="clip">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8.4 5.1a2.6 2.6 0 0 1 3.7 3.7l-4.2 4.2a1.8 1.8 0 0 1-2.6-2.6l3.9-3.9"/>
-            <path d="M11.2 9.7 15 13.5"/>
-            <path d="M6.2 14.9h.01M9.9 16.4h.01"/>
-          </svg>
-          剪藏文章<span class="badge" id="bgClip"></span>
-        </button>
-        <button data-v="feed">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-            <path d="M4.6 15.4h.01"/>
-            <path d="M4.6 10.6a4.8 4.8 0 0 1 4.8 4.8"/>
-            <path d="M4.6 5.6a9.8 9.8 0 0 1 9.8 9.8"/>
-          </svg>
-          订阅<span class="badge" id="bgFeed"></span>
-        </button>
-        <button data-v="video">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3.2" y="5" width="9.6" height="10" rx="2.4"/>
-            <path d="M12.8 10.1l3.6-2.2a.5.5 0 0 1 .8.4v3.4a.5.5 0 0 1-.8.4l-3.6-2.2z"/>
-          </svg>
-          视频转笔记
-        </button>
-        <button data-v="flomo">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4.6 3.4h10.8c.6 0 1.1.5 1.1 1.1v8.3c0 .6-.5 1.1-1.1 1.1H8.2l-3.6 2.4v-2.4h-.1"/>
-            <path d="M7.4 7.6h5.2M7.4 10.4h3.4"/>
-          </svg>
-          便签<span class="badge" id="bgFlomo"></span>
-        </button>
-        <button data-v="notes">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 15.5 5 12l7-7a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3l-7 7z"/>
-            <path d="M11.4 5.6 14.4 8.6"/>
-          </svg>
-          划线笔记
-        </button>
-        <button data-v="random">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3.4" y="3.4" width="13.2" height="13.2" rx="3.2" transform="rotate(8 10 10)"/>
-            <path d="M7.6 8.4h4.8M7.2 11.6h3.2"/>
-          </svg>
-          随机漫步
-        </button>
-        <button data-v="stats">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-            <path d="M4.5 16V11M10 16V5M15.5 16v-6.5"/>
-          </svg>
-          阅读统计
-        </button>
-        <button data-v="pick">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 3.2l1.7 4.1 4.1 1.7-4.1 1.7L10 14.8 8.3 10.7 4.2 9l4.1-1.7z"/>
-            <path d="M15.4 14.2l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/>
-          </svg>
-          为我推荐
-        </button>
-        <button data-v="search">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-            <circle cx="9" cy="9" r="5"/>
-            <path d="M12.8 12.8 16.4 16.4"/>
-          </svg>
-          搜索书籍
-        </button>
-      </nav>
-      <div class="sidefoot" id="sideFoot"></div>
+      <!-- 导航这一排在 1.0.5 起由 /api/state 的 nav.items 生成：顺序、显隐、分组
+           只有一处真相（本机 config），页面里不再抄一份。空着没关系，第一次状态
+           轮询（起来就发）立刻把它填满。 -->
+      <nav id="nav"></nav>
+      <div class="sidefoot">
+        <div id="wrWho">未连接</div>
+        <div id="sideFoot"></div>
+      </div>
     </aside>
 
     <section class="content glass" id="view"></section>
@@ -4240,8 +4449,8 @@ let sideFootStamp = '';
    界面写着 1.0.1，而文案却说什么「本机服务没在跑」，把人带去查一件本来没事的事。
    GUIZANG_PAGE 是这份界面写给哪版后端看的；ui_server.py 改完没跟着改版本号的情况，
    靠 404 兜住（后端认不得这条接口 = 它比界面旧）。 */
-const GUIZANG_PAGE = "1.0.3";
-const GZ = {back: "", code: "", stale: false, hid: false, swapping: false, why: ""};
+const GUIZANG_PAGE = "1.0.5";
+const GZ = {back: "", code: "", stale: false, hid: false, swapping: false, why: "", prof: ""};
 
 function gzStale(what) {
   return '本机后端是 ' + (GZ.back || '更老的一版') + '，界面是 ' + GUIZANG_PAGE +
@@ -4395,6 +4604,13 @@ async function drawState(force) {
   for (const b of (s.books || [])) local[b.id] = b;
   stateMap = s.states || {};
   takeLibs(s.libs || {});
+  // 侧边栏与个人信息的唯一真源在后端（cache/nav.json、config.json、cache/avatar.bin）。
+  // 页面每轮拿一份回来，自己不在浏览器里存「第二份真相」—— 只有待法这一项例外，
+  // 它决定首屏布局，状态回来前先用本机镜像定形，见 applySideMode 下面那行。
+  takeNav(s.nav || {});
+  paintProfile(s.profile || {});
+  actBrief(s.activity || {});
+  GZWR = s.writer || {};
 
   // 外部（命令行 / MCP）起的任务也收进右下角
   if (running && t.book && !tasks.some(x => x.book === t.book && x.state === 'running')) {
@@ -4469,11 +4685,11 @@ async function drawState(force) {
     + (running ? ' · 有任务在跑' : '');
   if (sideFootStamp !== foot) { sideFootStamp = foot; $('#sideFoot').innerHTML = foot; }
   $('#keyhint').textContent = keySet
-    ? '接口 Key 已保存在本机，下次打开不用再填。'
-    : '填上官方接口 Key 后，可看自己的书架、笔记、阅读统计与搜索（微信读书网页版 → 设置 → 开放 API 复制，形如 wrk-…）。';
+    ? '接口 Key 已保存在本机，无需重复填写。'
+    : '微信读书开放接口的 Key。填入后可在此查看书架、笔记、阅读统计与搜索。获取方式：微信读书网页版 → 设置 → 开放 API，以 wrk- 开头。仅保存在本机，无需重复填写。';
   $('#flomohint').textContent = flomoSet
-    ? 'flomo 地址已保存在本机。到「划线笔记」里多选后可一键导入。'
-    : '填上你的 flomo 记录 API 地址（flomo 网页版「设置 → API」，形如 https://flomoapp.com/iwh/xxxx/），就能把划线笔记一键导入。需要 flomo PRO。';
+    ? 'flomo 地址已保存在本机。到「划线笔记」中多选后可导入。'
+    : 'flomo 记录 API 地址。填入后可把划线笔记导入 flomo。获取方式：flomo 网页版 → 设置 → API，格式为 https://flomoapp.com/iwh/xxxx/。需要 flomo PRO。';
 
   // 壁纸：首次载入或换过就重新铺上；文字颜色由实际图片的明暗决定
   const wp = s.wallpaper || {};
@@ -4499,23 +4715,15 @@ async function drawState(force) {
     const m = b.module || 'weread';
     if (modCount[m] !== undefined) modCount[m] += 1;
   }
-  for (const pair of [['clip', '#bgClip'], ['local', '#bgLocal']]) {
-    const el = $(pair[1]);
-    if (el) el.textContent = modCount[pair[0]] ? modCount[pair[0]] : '';
-  }
+  setBadge('bgClip', modCount.clip);
+  setBadge('bgLocal', modCount.local);
   // 订阅徽章＝未读条数（不是订阅数）：侧边栏那颗数字是「有多少条还没看」，
   // 用户扫一眼就知道要不要点进去。
-  const feedUnread = ((s.feed || {}).unread) || 0;
-  const bgf = $('#bgFeed');
-  if (bgf) bgf.textContent = feedUnread ? feedUnread : '';
+  setBadge('bgFeed', ((s.feed || {}).unread) || 0);
 
   // 便签那格亮的是「本机存着多少条」：它不随阅读变化，只有导入 / 忘掉 / 清空会动，
   // 数字来自 /api/state（后端按文件指纹缓过，轮询不会重算）。
-  const bgm = $('#bgFlomo');
-  if (bgm) {
-    const n = ((s.flomo || {}).notes) || 0;
-    bgm.textContent = n ? n : '';
-  }
+  setBadge('bgFlomo', ((s.flomo || {}).notes) || 0);
 
   // 视频那条线的收尾：任务从「在跑」翻面成「停了」、而且带回了结构化结果，才用结果说话。
   // 认「翻面」而不是「有结果就播」，是为了刷新页面时不把上一回的结果又弹一遍。
@@ -4552,15 +4760,1503 @@ async function drawState(force) {
     }
     paintVideoCap(s.video || {});    // 那四盏灯跟着状态走，不必再发一趟 /api/video
     vtTools();
+  } else if (v === 'me') {
+    // 个人主界面：热力图那一年的格子只在进屏时拉一次，这里只更「今日 / 累计」几个数，
+    // 免得每 2.6 秒重铺整张网格（几百个 span 重建，正是掉帧来源）。
+    if (force) { loadActivity(true); paintMeStats(); }
+    else paintMeStats();
   } else if (force) renderView();
   // 书架那一屏上面已经更过了，再 renderView() 会把网格重建第二遍（多一次布局，正是掉帧来源）
+}
+
+/* ── 侧边栏：入口表 · 长按排序 · 显隐 · 靠边触发 ──────────────────
+   这一版把「有哪几格、什么顺序、藏了哪几格、侧边栏怎么待着」四件事一起交给后端
+   （ui_server.py 的 NAV_ITEMS / nav_view），页面不再自己抄一份清单。原因是它们得
+   跟着这台机器走：拖完顺序、关掉「视频」，第二天、重装、换台电脑都该还是那样 ——
+   存 localStorage 就会在清缓存或换浏览器时全部重来，而配置本来就在 config.json 里。
+
+   于是这里只干三件事：把后端那份 items 铺成按钮；把用户的拖拽 / 勾选发回去；
+   在「靠左缘滑出」这一种待法下管住浮层的开合。 */
+
+const NAV_ICONS = {
+  shelf: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 5.2c0-.9.7-1.6 1.6-1.6h3.2c.9 0 1.6.7 1.6 1.6v10.3c0-.8-.7-1.4-1.6-1.4H5c-.9 0-1.6.6-1.6 1.4z"/><path d="M16.6 5.2c0-.9-.7-1.6-1.6-1.6h-3.2c-.9 0-1.6.7-1.6 1.6v10.3c0-.8.7-1.4 1.6-1.4H15c.9 0 1.6.6 1.6 1.4z"/></svg>',
+  local: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.2" width="13.2" height="11.6" rx="2"/><path d="M3.4 8.4h13.2M8 4.2v4.2"/><path d="M3.4 12.2h13.2"/></svg>',
+  clip: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.4 5.1a2.6 2.6 0 0 1 3.7 3.7l-4.2 4.2a1.8 1.8 0 0 1-2.6-2.6l3.9-3.9"/><path d="M11.2 9.7 15 13.5"/><path d="M6.2 14.9h.01M9.9 16.4h.01"/></svg>',
+  feed: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.6 15.4h.01"/><path d="M4.6 10.6a4.8 4.8 0 0 1 4.8 4.8"/><path d="M4.6 5.6a9.8 9.8 0 0 1 9.8 9.8"/></svg>',
+  video: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="5" width="9.6" height="10" rx="2.4"/><path d="M12.8 10.1l3.6-2.2a.5.5 0 0 1 .8.4v3.4a.5.5 0 0 1-.8.4l-3.6-2.2z"/></svg>',
+  flomo: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 3.4h10.8c.6 0 1.1.5 1.1 1.1v8.3c0 .6-.5 1.1-1.1 1.1H8.2l-3.6 2.4v-2.4h-.1"/><path d="M7.4 7.6h5.2M7.4 10.4h3.4"/></svg>',
+  write: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.2 3.4h6L16 8.2v8.4H5.2z"/><path d="M11.2 3.4v4.8H16"/><path d="M7.6 12h5.2M7.6 14.4h3.2"/></svg>',
+  notes: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15.5 5 12l7-7a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3l-7 7z"/><path d="M11.4 5.6 14.4 8.6"/></svg>',
+  random: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="3.4" width="13.2" height="13.2" rx="3.2" transform="rotate(8 10 10)"/><path d="M7.6 8.4h4.8M7.2 11.6h3.2"/></svg>',
+  stats: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.5 16V11M10 16V5M15.5 16v-6.5"/></svg>',
+  pick: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.2l1.7 4.1 4.1 1.7-4.1 1.7L10 14.8 8.3 10.7 4.2 9l4.1-1.7z"/><path d="M15.4 14.2l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/></svg>',
+  search: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="9" r="5"/><path d="M12.8 12.8 16.4 16.4"/></svg>',
+};
+
+// 徽章只在后端那一格里有对应的数字可看；清单和 ui_server.NAV_ITEMS 一起维护。
+const NAV_BADGE = {shelf: 'bgShelf', local: 'bgLocal', clip: 'bgClip',
+                   feed: 'bgFeed', flomo: 'bgFlomo'};
+const NAV_GROUP_NAME = {space: '空间', tool: '工具'};
+
+const SIDE_KEY = 'guizang_side_v1';   // 待法的本机镜像：状态回来前先用它，免得闪一下
+const PEEK_ZONE = 268;                // 浮层 246px + 一点余量：指针越过就当作「回页面了」
+const DRAG_HOLD = 400;                // 长按进拖拽态的门槛
+const DWELL = 150;                    // 悬停即切换的停留门槛
+
+let navCfg = null;          // 后端那份 nav.items（拿不到之前侧边栏是空的）
+let navSig = '';            // 上一次铺进 DOM 的指纹，一样就别重建
+let sideMode = '';          // 生效中的待法：'' 表示还没定（用 localStorage 的结果）
+let navBooted = false;      // 第一次拿到导航表才决定落在哪一屏
+let navHoverOn = true;        // 悬停切换的开关（设置里那一颗）
+let navPress = null;        // 按下但还没够成拖拽的那一下
+let navDrag = null;         // 正在拖的那一颗
+let navSkipClick = 0;       // 拖完紧跟着的 click：吞掉，不然会把页面切到刚拖走的那格
+let peekTimer = 0;
+let dwellBtn = null, dwellTimer = 0;
+let GZPROF = {};          // 后端那份 profile 的当前值：个人主界面那一屏要拿它填表单
+
+/** 徽章只认「这一格在不在」：入口被关掉后 DOM 里就没有这个节点，
+ *  以前那几处直接 `$('#bgShelf').textContent = …` 会在这里抛错，而抛在
+ *  drawState 中间等于整轮状态更新作废 —— 界面从此不再跟着后端走。 */
+function setBadge(id, n) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const t = n ? String(n) : '';
+  if (el.textContent !== t) el.textContent = t;
+}
+
+/** 把 items 铺成按钮。分组小标题只是路标（不参与拖拽），徽章留在按钮里面 ——
+ *  真机门禁按 `#nav button[data-v=…] #bgFeed` 找那颗数字，挪出去就找不到了。 */
+function renderNav() {
+  const nav = $('#nav');
+  if (!nav || !navCfg) return;
+  const keep = {};
+  for (const k in NAV_BADGE) {
+    const el = document.getElementById(NAV_BADGE[k]);
+    if (el) keep[NAV_BADGE[k]] = el.textContent;
+  }
+  let out = '', lastGroup = '';
+  for (const it of (navCfg.items || [])) {
+    if (it.hidden) continue;
+    if (it.group !== lastGroup) {
+      out += `<div class="navgrp${lastGroup ? '' : ' first'}">${esc(NAV_GROUP_NAME[it.group] || '')}</div>`;
+      lastGroup = it.group;
+    }
+    const bg = NAV_BADGE[it.id];
+    out += `<button data-v="${it.id}" data-g="${it.group}"${it.id === v ? ' class="on"' : ''}>`
+      + (NAV_ICONS[it.id] || '') + esc(it.label)
+      + (bg ? `<span class="badge" id="${bg}"></span>` : '') + '</button>';
+  }
+  nav.innerHTML = out;
+  for (const k in keep) {
+    const el = document.getElementById(k);
+    if (el) el.textContent = keep[k];
+  }
+  moveNavPill();
+  wireNavAhead();
+}
+
+/** 后端每 2.6 秒递一份 nav 过来。只有内容真的变了才重建 ——
+ *  重建一次就是拆掉一排按钮再摆回去，胶囊会跟着跳一下，这正是「点按钮闪屏」那一类。 */
+function takeNav(nav) {
+  if (!nav || !nav.items) return;
+  const sig = JSON.stringify(nav.items);
+  navCfg = nav;
+  navHoverOn = nav.hover !== false;
+  applySideMode(nav.sidebar);
+  if (sig !== navSig) { navSig = sig; renderNav(); }
+  if (!navBooted) {
+    navBooted = true;
+    // 重启后落在哪一屏：后端给的是「第一格还露着的入口」。默认那份清单里就是书架，
+    // 所以「每次重启默认显示微信读书主页」这条不用前端再兜一遍。
+    const home = nav.home || 'shelf';
+    if (home !== v && nav.items.some(x => x.id === home && !x.hidden)) setView(home);
+  }
+  paintNavList();
+}
+
+function applySideMode(mode) {
+  const m = mode === 'edge' ? 'edge' : 'open';
+  if (sideMode === m) return;
+  sideMode = m;
+  document.body.classList.toggle('side-edge', m === 'edge');
+  document.body.classList.toggle('side-open', m === 'open');
+  if (m === 'open') document.body.classList.remove('side-peek');
+  try { localStorage.setItem(SIDE_KEY, m); } catch (e) {}
+  // 摊开↔浮层是整块布局的来回，格子行高会变，胶囊那一档得跟着重算
+  requestAnimationFrame(moveNavPill);
+}
+
+// 状态还没回来时先用本机镜像定形态：否则「靠左缘滑出」的用户每次刷新都会看到
+// 侧边栏先占住左列、再抽走，内容区跟着横向抖一下。
+try { applySideMode(localStorage.getItem(SIDE_KEY) || 'open'); } catch (e) {}
+
+/** 靠左缘滑出的开合。收起时侧边栏整块在屏幕外（transform 推出去），
+ *  弹出靠 --pop 那条过冲的贝塞尔：位移冲过头再收住，就是那一下果冻感。 */
+function sidePeek(on) {
+  if (sideMode !== 'edge') on = false;
+  if (!!on === document.body.classList.contains('side-peek')) return;
+  document.body.classList.toggle('side-peek', !!on);
+  if (on) growAvatar();
+  clearTimeout(peekTimer); peekTimer = 0;
+  if (!on) dwellCancel();
+}
+
+/** 左上角那颗头像跟着浮层一起「长」出来一次。重放动画必须先摘 class 再逼一次
+ *  回流，否则同名动画不会重新开始。 */
+function growAvatar() {
+  const b = $('#mebtn');
+  if (!b || prefersReduced()) return;
+  b.classList.remove('grow');
+  void b.offsetWidth;
+  b.classList.add('grow');
+}
+
+$('#edgepad').addEventListener('pointerenter', () => sidePeek(true));
+// 浮层弹着的时候，指针从侧边栏移到内容区 = 「就停在这屏」，浮层自己收回去。
+// 靠这一条判定而不是点遮罩：用户要求整件事不需要任何一次点击。
+document.addEventListener('pointermove', e => {
+  if (sideMode !== 'edge' || navDrag) return;
+  if (!document.body.classList.contains('side-peek')) return;
+  if (e.clientX > PEEK_ZONE) {
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { peekTimer = 0; sidePeek(false); }, 200);
+  } else clearTimeout(peekTimer);
+}, {passive: true});
+
+/* 悬停即切换：指针停在某一格上够久就切过去，不需要点。
+   三条护栏：设置里可以整个关掉；正在拖拽时不切；指针离开侧边栏就取消还没到的那一次。
+   拖拽与切页都由同一批 pointer 事件驱动，所以长按那一格时先取消 dwell。
+
+   只认 pointermove，不认 pointerover：改窗口大小、窄屏断点重排会让另一格滑到原地
+   不动的指针底下，浏览器这时补一个 pointerover —— 那不是用户把指针挪过去，照切就会
+   在改大小的当口把界面跳到别的一屏（真机门禁在 720px 那一档正是这么栽的：最后一次
+   真实移动在 840ms 前，坐标与那个合成事件一模一样）。pointermove 只在指针真的动了
+   才来，用它当唯一入口，这条岔路就没了。 */
+function dwellCancel() {
+  clearTimeout(dwellTimer); dwellTimer = 0; dwellBtn = null;
+}
+$('#nav').addEventListener('pointermove', e => {
+  if (!navHoverOn || navDrag || navPress) return;
+  const b = e.target.closest('button[data-v]');
+  if (!b || b.dataset.v === v) { dwellCancel(); return; }
+  if (b === dwellBtn) return;                 // 还在同一格上：那一次倒计时别重来
+  dwellCancel();
+  dwellBtn = b;
+  dwellTimer = setTimeout(() => {
+    if (!navDrag && navHoverOn && b.isConnected && b.dataset.v !== v) setView(b.dataset.v);
+    dwellBtn = null;
+  }, DWELL);
+});
+$('#nav').addEventListener('pointerleave', dwellCancel);
+
+/* 长按拖拽排序：按满 400ms 才进拖拽态，所以「点一下切页」这件事一点没变。
+   进态先抖一下（.grabbing 那 0.2s），之后跟着指针实时换位，松手才发回后端。
+   换位只限同一组内 —— 空间与工具之间不互插，不然分组的标题会跟着乱。 */
+$('#nav').addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  const b = e.target.closest('button[data-v]');
+  if (!b) return;
+  dwellCancel();
+  clearTimeout(navPress && navPress.timer);
+  navPress = {btn: b, x: e.clientX, y: e.clientY, id: e.pointerId,
+              timer: setTimeout(() => navGrab(b, e), DRAG_HOLD)};
+});
+
+function navGrab(b, e) {
+  navPress = null;
+  navDrag = {btn: b, g: b.dataset.g, id: e.pointerId};
+  document.body.classList.add('navdragging');
+  b.classList.add('grabbing');
+  setTimeout(() => b.classList.remove('grabbing'), 220);
+  b.classList.add('dragsrc');
+  // 捕获到这一颗上：指针滑出侧边栏那一列也还能继续拖，不然半路就松了
+  try { b.setPointerCapture(e.pointerId); } catch (_) {}
+}
+
+$('#nav').addEventListener('pointermove', e => {
+  if (navPress && !navDrag) {
+    // 还没到 400ms 就动了这么多：那是要点别的 / 在滚页面，不是要排序
+    if (Math.abs(e.clientX - navPress.x) > 6 || Math.abs(e.clientY - navPress.y) > 6) {
+      clearTimeout(navPress.timer); navPress = null;
+    }
+    return;
+  }
+  if (!navDrag) return;
+  const nav = $('#nav');
+  const over = document.elementFromPoint(e.clientX, e.clientY);
+  const t = over && over.closest ? over.closest('#nav button[data-v]') : null;
+  if (!t || t === navDrag.btn || t.dataset.g !== navDrag.g) return;
+  const r = t.getBoundingClientRect();
+  // 落在这一格的上半就插到它前面，下半插到它后面
+  if (e.clientY < r.top + r.height / 2) nav.insertBefore(navDrag.btn, t);
+  else nav.insertBefore(navDrag.btn, t === nav.lastElementChild ? null : t.nextSibling);
+  moveNavPill();
+}, {passive: true});
+
+function navRelease() {
+  clearTimeout(navPress && navPress.timer);
+  navPress = null;
+  if (!navDrag) return;
+  const b = navDrag.btn;
+  navDrag = null;
+  document.body.classList.remove('navdragging');
+  b.classList.remove('dragsrc', 'grabbing');
+  navSkipClick = Date.now();
+  postNav({order: navOrderFromDom()}, '顺序已保存');
+}
+document.addEventListener('pointerup', navRelease);
+document.addEventListener('pointercancel', navRelease);
+
+/** 发给后端的顺序 = 看得见的那几格（DOM 现在这个样子）+ 藏起来的那几格。
+ *  藏着的也一起发：后端 nav_view 会把没提到的补在末尾，但按这份发，
+ *  以后把某一格放回来时它还在原来那一拨里。 */
+function navOrderFromDom() {
+  const shown = navBtns().map(b => b.dataset.v);
+  const hid = (navCfg && navCfg.items ? navCfg.items : [])
+    .filter(x => x.hidden).map(x => x.id);
+  return shown.concat(hid);
+}
+
+async function postNav(payload, label) {
+  const r = await gzApi('/api/nav', payload, 12000);
+  if (!r || !r.ok) {
+    // 后端说「不」的时候一定有道理由（比如想把每一格都关掉）。
+    // 界面先照它那份真相画回去，别让拖拽的结果停在页面上变成一笔假账。
+    if (r && r.msg) whisper(r.msg);
+    if (r && r.nav) takeNav(r.nav); else renderNav();
+    return false;
+  }
+  if (r.nav) takeNav(r.nav);
+  if (label) whisper(label);
+  return true;
+}
+
+/* ── 设置里那一栏「导航」 ────────────────────────────────
+   显示方式 / 悬停切换 / 入口显隐三样都在这一栏，值从后端那份 nav 来。
+   每次重画都要先把正在拖拽的可能性排除掉：勾选和拖拽说的是同一件事的两半。 */
+function paintNavList() {
+  if (!navCfg) return;
+  const list = $('#navList');
+  if (list) {
+    list.innerHTML = (navCfg.items || []).map(it =>
+      `<label class="${it.hidden ? '' : 'on'}" title="${esc(it.label)}">`
+      + `<input type="checkbox" data-nav="${it.id}"${it.hidden ? '' : ' checked'}>`
+      + esc(it.label) + '</label>').join('');
+  }
+  const seg = $('#navSideSeg');
+  if (seg) [...seg.children].forEach(b => b.classList.toggle('on', b.dataset.s === (navCfg.sidebar || 'open')));
+  const hov = $('#navHover');
+  if (hov) hov.checked = navCfg.hover !== false;
+}
+
+$('#navSideSeg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-s]');
+  if (!b) return;
+  applySideMode(b.dataset.s);      // 先按下去的样子给看，回执到了再以后端为准
+  postNav({sidebar: b.dataset.s}, '');
+});
+$('#navHover').addEventListener('change', e => postNav({hover: !!e.target.checked}, ''));
+$('#navList').addEventListener('change', e => {
+  const b = e.target.closest('input[data-nav]');
+  if (!b || !navCfg) return;
+  const hidden = [];
+  for (const it of (navCfg.items || [])) {
+    const cb = document.querySelector(`#navList input[data-nav="${it.id}"]`);
+    if (cb && !cb.checked) hidden.push(it.id);
+  }
+  postNav({hidden}, '');
+});
+
+/* 左上角这一颗与侧边栏顶部那一块都是「个人主界面」的入口。
+   原来这里是一颗齿轮，设置从这一层退到个人主界面最下面那一颗。 */
+function toMe() { setView('me'); }
+$('#mebtn').onclick = toMe;
+$('#meHead').onclick = toMe;
+$('#meHead').onkeydown = e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toMe(); }
+};
+
+/** 把头像与名字、简介涂到每一个标了 data-av 的位置。
+ *  一处涂法多处共用：顶栏那颗、侧边栏顶部那一颗、个人主界面那一屏那一大颗，
+ *  三处必须永远长一样，分头画迟早有一天会对不上。 */
+function paintProfile(p, force) {
+  if (!p) return;
+  GZPROF = p;
+  const sig = force ? '' : JSON.stringify([p.name, p.bio, p.avatar, p.v]);
+  if (sig === GZ.prof) return;
+  GZ.prof = sig;
+  const name = (p.name || '归藏').trim() || '归藏';
+  for (const el of document.querySelectorAll('[data-av]')) {
+    if (p.avatar) {
+      el.innerHTML = `<img src="/api/avatar?v=${p.v || 0}" alt="">`;
+    } else {
+      el.textContent = [...name][0] || '归';
+      el.removeAttribute('title');
+    }
+  }
+  const nm = $('#meName'), bio = $('#meBio');
+  if (nm) nm.textContent = name;
+  if (bio) bio.textContent = (p.bio || '').trim() || '个人主界面';
+  const mb = $('#mebtn');
+  if (mb) mb.title = '个人主界面 · ' + name;
+}
+
+/* ═══ 个人主界面：头像 / 名字 / 简介 + 两张热力图 ═══════════════
+
+   这一屏是 1.0.5 新添的「你是谁」：左上角那颗头像和侧边栏顶部那一块都通向这里，
+   原来常驻在左上角的设置入口搬到了这一屏的最下面 —— 设置是低频动作，身份与
+   累计才是每天打开想看的那件事。
+
+   两张热力图的口径按用户那句话来：学习时长按「应用起来之后一直在跑的时间」累计，
+   写作时长按「停在写作平台里的时间」累计。两本账分开记在 cache/activity.json，
+   色阶由后端按每个人自己的峰值算（见 activity.py 的 levels），前端只管涂色。 */
+
+let GZACT = null;         // /api/activity 那份整包（含一年 371 格），只有这一屏要
+let GZACTAT = 0;          // 上一次取它的时间戳
+let GZBRIEF = {};         // 轮询递来的小摘要：今天 / 总计 / 连续
+let GZWR = {};            // 写作那格的两数：稿子数 / 总字数
+const HEAT_KINDS = ['study', 'write'];
+const HEAT_NAMES = {study: '学习时长', write: '写作时长'};
+
+/** 轮询每 2.6 秒递来的小摘要。只有这一屏在眼前才重画数字 ——
+ *  别处没有那些节点，白算一趟。热力图的整年格子不在这里，它走 /api/activity。 */
+function actBrief(a) {
+  if (!a) return;
+  GZBRIEF = a;
+  if (v === 'me') paintMeStats();
+}
+
+/** 一次取整包（含日历格子）。这一屏每进来一次最多取一趟，除非明确要刷新。 */
+async function loadActivity(force) {
+  if (GZACT && !force && Date.now() - GZACTAT < 60000) { paintHeatmaps(); return; }
+  const r = await gzApi('/api/activity', undefined, 15000);
+  if (!r || !r.study || !r.write) { paintHeatError(r && r.msg); return; }
+  GZACT = r;
+  GZACTAT = Date.now();
+  paintHeatmaps();
+}
+
+/** 一列多少像素：格子 11 + 间距 3。月份标和横向滚动都按这个数定位。 */
+const HEAT_COL = 14;
+
+/** 把一年格子铺成 53 列 × 7 行。
+    格子是「从今天往前推 371 天」逐日给的，第一天落在星期几并不对齐，
+    所以第一格自己声明占第几行（grid-row-start），前面那几空位自然留白，
+    比造一堆假格子干净。 */
+function heatGridHtml(kind) {
+  const info = (GZACT && GZACT[kind]) || {cells: []};
+  const cells = info.cells || [];
+  if (!cells.length) return '<div class="heatscroll"><div class="heatgrid"></div></div>';
+  const d0 = cells[0][0].split('-');
+  const first = new Date(Number(d0[0]), Number(d0[1]) - 1, Number(d0[2]));
+  const pad = (first.getDay() + 6) % 7;      // 星期一当作第一行
+  let html = '';
+  cells.forEach((c, i) => {
+    html += `<i class="heatcell${c[2] ? ' lv' + c[2] : ''}" data-d="${c[0]}" data-s="${c[1]}"`
+      + (i === 0 && pad ? ` style="grid-row-start:${pad + 1}"` : '') + '></i>';
+  });
+  // 月份标只放在「这个月 1 号落在哪一列」上 —— 按列平均分配会越标越偏，
+  // 而不看 1 号只看「月份变了」会把跨月那一列标成上个月。
+  const marks = [], seen = {};
+  cells.forEach((c, i) => {
+    if (c[0].slice(8, 10) !== '01') return;
+    const mm = Number(c[0].slice(5, 7));
+    if (seen[mm]) return;
+    seen[mm] = 1;
+    marks.push([Math.floor((i + pad) / 7), mm]);
+  });
+  // 最左那一列通常是上一年的尾巴（371 天不是整月），里面没有 1 号，
+  // 按它自己的月份补一个标，不然整张图会从一个没有名字的月份开始。
+  const m0 = Number(cells[0][0].slice(5, 7));
+  if (!seen[m0]) marks.unshift([0, m0]);
+  const months = marks.map(m => `<span style="left:${m[0] * HEAT_COL}px">${m[1]}月</span>`).join('');
+  return `<div class="heatscroll"><div class="heatmonths">${months}</div>`
+    + `<div class="heatgrid">${html}</div></div>`;
+}
+
+function heatHeadHtml(kind) {
+  const b = GZBRIEF[kind] || {};
+  const info = GZACT ? GZACT[kind] : null;
+  const nm = (info && info.name) || (b.name) || HEAT_NAMES[kind];
+  const unit = kind === 'study' ? '在应用里待着的时长' : '在写作台里的时长';
+  return `<div class="heathd">${esc(nm)}<small>${esc(unit)}</small><span class="grow"></span>`
+    + `<span class="heatlegend">少<i class="heatcell"></i><i class="heatcell lv1"></i>`
+    + `<i class="heatcell lv2"></i><i class="heatcell lv3"></i>`
+    + `<i class="heatcell lv4"></i>多</span></div>`;
+}
+
+/** 只有四格数字要跟着轮询动，格子那一片不重画（371 个节点重排一次是一次掉帧）。 */
+function paintMeStats() {
+  for (const kind of HEAT_KINDS) {
+    const b = GZBRIEF[kind] || {};
+    const info = (GZACT && GZACT[kind]) || {};
+    const set = (sel, txt) => {
+      const el = document.querySelector(`#heat-${kind} ${sel}`);
+      if (el && el.innerHTML !== txt) el.innerHTML = txt;
+    };
+    set('[data-today]', hrs(b.today !== undefined ? b.today : (info.today || 0)));
+    set('[data-week]', hrs(info.week !== undefined ? info.week : (b.today || 0)));
+    set('[data-avg]', hrs(info.avg_day || 0));
+    set('[data-streak]', String(b.streak !== undefined ? b.streak : (info.streak || 0)));
+    set('[data-total]', hrs(b.total !== undefined ? b.total : (info.total || 0)));
+  }
+  const pill = (sel, sec) => {
+    const el = document.querySelector(sel);
+    if (el) el.innerHTML = hrs(sec || 0);   // hrs 回的是带 <small> 的串，只能当 HTML 使
+  };
+  pill('#meToday', ((GZBRIEF.study || {}).today) || 0);
+  pill('#meWriteToday', ((GZBRIEF.write || {}).today) || 0);
+}
+
+function paintHeatmaps() {
+  for (const kind of HEAT_KINDS) {
+    const box = document.querySelector(`#heat-${kind} .heatbody`);
+    if (box) box.innerHTML = heatGridHtml(kind);
+    const st = document.querySelector(`#heat-${kind} [data-busyd]`);
+    if (st && GZACT) st.textContent = String((GZACT[kind] || {}).busy_days || 0);
+  }
+  paintMeStats();
+}
+
+/** 热力图取不到时只换那一块的说法，别把整屏抹了 —— 头像和简介照样能用。 */
+function paintHeatError(msg) {
+  for (const kind of HEAT_KINDS) {
+    const box = document.querySelector(`#heat-${kind} .heatbody`);
+    if (box) box.innerHTML = `<div class="hint" style="padding:6px 0">${
+      esc(msg || '这一年的账这次没读出来')}</div>`;
+  }
+  paintMeStats();
+}
+
+function heatBoxHtml(kind) {
+  return `<div class="heatbox" id="heat-${kind}">`
+    + heatHeadHtml(kind)
+    + `<div class="heatstat">`
+    + `<div class="s"><b data-today>—</b><span>今天</span></div>`
+    + `<div class="s"><b data-week>—</b><span>本周</span></div>`
+    + `<div class="s"><b data-avg>—</b><span>日均</span></div>`
+    + `<div class="s"><b data-streak>—</b><span>连续天数</span></div>`
+    + `<div class="s"><b data-busyd>—</b><span>年内有记录的天</span></div>`
+    + `<div class="s"><b data-total>—</b><span>累计</span></div>`
+    + `</div>`
+    + `<div class="heatbody">${heatGridHtml(kind)}</div>`
+    + `</div>`;
+}
+
+function meMarkup() {
+  const p = GZPROF || {};
+  const lim = p.limits || {};
+  const name = (p.name || '归藏').trim() || '归藏';
+  return `<div class="mehd">
+      <span class="meav" data-av>${p.avatar ? '' : esc([...name][0] || '归')}</span>
+      <div style="min-width:0">
+        <div class="mename" data-mename>${esc(name)}</div>
+        <div class="mebiosub" data-mebio>${esc((p.bio || '').trim() || '还没写简介')}</div>
+      </div>
+    </div>
+    <div class="meops">
+      <button class="deed" id="mePick">换头像</button>
+      <button class="deed" id="meClearAv"${p.avatar ? '' : ' hidden'}>去掉头像</button>
+      <button class="deed" id="meEdit">改名字与简介</button>
+      <input type="file" id="meFile" accept="image/*" hidden>
+    </div>
+    <div class="meform" id="meForm">
+      <label>名字（最多 ${lim.name || 40} 个字）
+        <input id="meNameIn" maxlength="${lim.name || 40}" value="${esc(p.name || '')}" placeholder="归藏"></label>
+      <label>简介（最多 ${lim.bio || 200} 个字）
+        <textarea id="meBioIn" maxlength="${lim.bio || 200}" placeholder="写一句你自己">${esc(p.bio || '')}</textarea></label>
+      <div class="meops" style="padding:2px 0 0">
+        <button class="deed lead" id="meSave">保存</button>
+        <button class="deed" id="meCancel">再说</button>
+      </div>
+    </div>
+    ${heatBoxHtml('study')}
+    ${heatBoxHtml('write')}
+    <div class="mebottom">
+      <button class="deed" id="meSet">设置</button>
+      <span class="mepill">本机稿子<b id="meDrafts">0</b>篇</span>
+      <span class="mepill">今日学习<b id="meToday">0</b></span>
+      <span class="mepill">今日写作<b id="meWriteToday">0</b></span>
+    </div>`;
+}
+
+/** 这一屏只造一次 DOM：再进来（或轮询更数字）只换数字，
+ *  不重铺 371 个格子 —— 那正是「点一下就闪一下」的那一类。 */
+function renderMeView() {
+  const {body, fresh} = viewPane('me', viewHeader('个人主界面'));
+  if (fresh) {
+    body.innerHTML = meMarkup();
+    wireMe();
+  }
+  paintMeStats();
+  const dr = $('#meDrafts');
+  if (dr) dr.textContent = String(GZWR.count || 0);
+  loadActivity();
+}
+
+function wireMe() {
+  $('#mePick').onclick = () => $('#meFile').click();
+  $('#meFile').addEventListener('change', async e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) { whisper('这张图太大（请压到 8MB 以内）'); return; }
+    const dataUrl = await new Promise(res => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.readAsDataURL(f);
+    });
+    whisper('正在存头像…');
+    const r = await gzApi('/api/avatar', {img: dataUrl}, 20000);
+    whisper(r.ok ? (r.msg || '头像已更新') : (r.msg || '头像没存下来'));
+    if (r.profile) paintProfile(r.profile, true);
+    $('#meClearAv').hidden = !!(r.profile && !r.profile.avatar);
+    e.target.value = '';
+  });
+  $('#meClearAv').onclick = async () => {
+    const r = await gzApi('/api/avatar', {clear: true}, 10000);
+    whisper(r.msg || '头像已清除');
+    if (r.profile) paintProfile(r.profile, true);
+    $('#meClearAv').hidden = true;
+  };
+  $('#meEdit').onclick = () => {
+    const f = $('#meForm');
+    f.classList.toggle('on');
+    if (f.classList.contains('on')) $('#meNameIn').focus();
+  };
+  $('#meCancel').onclick = () => {
+    $('#meForm').classList.remove('on');
+    const p = GZPROF || {};
+    $('#meNameIn').value = p.name || '';
+    $('#meBioIn').value = p.bio || '';
+  };
+  $('#meSave').onclick = async () => {
+    const r = await gzApi('/api/profile',
+      {name: $('#meNameIn').value, bio: $('#meBioIn').value}, 10000);
+    whisper(r.msg || (r.ok ? '已保存' : '没保存上'));
+    if (r.ok) {
+      $('#meForm').classList.remove('on');
+      if (r.profile) paintProfile(r.profile, true);
+      const one = r.profile || GZPROF || {};
+      const host = document.querySelector('.vpane[data-pane="me"]');
+      const t = host && host.querySelector('.mename');
+      if (t) t.textContent = (one.name || '归藏').trim() || '归藏';
+      const s2 = host && host.querySelector('.mebiosub');
+      if (s2) s2.textContent = (one.bio || '').trim() || '还没写简介';
+    }
+  };
+  $('#meSet').onclick = e => { e.stopPropagation(); setPop(true); };
+  // 悬停到某一格上才说清那天记了多少：一年 371 格全写出来是糊一片，
+  // 而真正要看数字的时候恰好就是鼠标停住那一刻。
+  const pane = document.querySelector('.vpane[data-pane="me"]');
+  if (pane) pane.addEventListener('pointerover', e => {
+    const c = e.target.closest('.heatcell');
+    if (!c || !c.dataset.d) return;
+    const sec = Number(c.dataset.s || 0);
+    c.title = c.dataset.d + ' · ' + (sec ? Math.round(sec / 60) + ' 分钟' : '没有记录');
+  });
+}
+
+/* ── 时长心跳 ────────────────────────────────────────────────
+   两本账共用一条心跳，一次只记一本：在写作台就记写作，其余时候记学习。
+
+   秒数按「墙上时间差」算，不按「心跳间隔」算 —— 后台标签页的定时器会被浏览器
+   掐到一分钟一次甚至整个冻住，照间隔累加就会漏记；用时间差的话，页面回到前台
+   后下一次心跳一次把落下那段补上。补不出通天柱靠的是后端那两道夹：
+   单次最多计 300 秒、单日封顶 12 小时（见 activity.py 的 MAX_TICK / MAX_DAY）。
+
+   切到后台与关页面前各补发一次，那一段才是真花了的时间。 */
+const BEAT_MS = 30000;
+let beatAt = Date.now();
+let beatBusy = false;
+
+async function beat(force) {
+  const now = Date.now();
+  const sec = Math.round((now - beatAt) / 1000);
+  const flush = force === true;           // 只认真这句：定时器传进来的不是布尔
+  if (sec < (flush ? 1 : 5)) return;      // 零头不值得发一趟请求
+  const kind = v === 'write' ? 'write' : 'study';
+  if (flush) {
+    // 切走 / 关页面：把那半截零头结掉。keepalive 让浏览器在页面已经卸掉之后
+    // 仍把这一小段送完；不用 sendBeacon 是因为后端只收 application/json，
+    // 信标固定带 text/plain，会被那道跨站表单防线挡成 415。
+    beatAt = now;
+    try {
+      fetch('/api/activity/tick', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind, seconds: sec}), keepalive: true});
+    } catch (e) {}
+    return;
+  }
+  // 上一跳还在飞就先不结：beatAt 保持不动，这段时间攒到下一跳一起报。
+  // （放在 beatAt 赋值之后判断的话，这一趟的时长就被悄悄吞了。）
+  if (beatBusy) return;
+  beatAt = now;
+  beatBusy = true;
+  try {
+    const r = await gzApi('/api/activity/tick', {kind, seconds: sec}, 8000);
+    const add = (r && r.added) || 0;
+    if (add) {
+      // 屏幕上的数字加的是「后端真正计入的那一段」，不是自己算的那个 ——
+      // 夹过之后两者会差，取了后端那份才对得上账本。
+      const b = GZBRIEF[kind];
+      if (b) {
+        b.today = (b.today || 0) + add;
+        b.total = (b.total || 0) + add;
+      }
+      if (v === 'me') paintMeStats();
+    }
+  } finally {
+    beatBusy = false;
+  }
+}
+
+/* ── 写作平台 ────────────────────────────────────────────────
+   定位：这是「自己码字」的地方，AI 只在卡住的时候搭手。三条硬规矩都落在代码里：
+
+     · 正文只有用户能让它变。AI 吐的东西先进下面那条坞，按「接进正文」才进正文；
+       润色是一块一块勾、勾了的从段尾往前替换 —— 从段首往前换会让后面每一处的
+       坐标整体错位，改到不该改的字上，那是最伤的一种 bug。
+     · 稿子存在本机书库（书库/写作/<稿号>/），不往任何地方上传。素材原文只进提示词：
+       日志、回执、界面上都不回显，所以这一屏只说「用了哪本书、几条便签」。
+     · 存盘带版本号（rev）。对不上就当场停下来问「用哪一版」，不悄悄覆盖 ——
+       编辑器最容易丢稿的做法就是「我以为还是我读到的那一份」。
+
+   三块：稿列（左）／正文（中）／坞（下）。坞不开新层，稿子在手上时跳出一层，思路就断了。 */
+
+const WR_TABS = {cont: '续写', spark: '灵感', polish: '润色',
+                 mat: '用什么笔记', exp: '导出', ver: '历史快照'};
+let WRA = {templates: [], lengths: [], tones: []};   // 清单里带回来的三张表（档位/改法/模板）
+
+const WR = {
+  docs: [], id: '', rev: 0, title: '', text: '', words: 0, updated: 0,
+  dirty: false, pending: false, saving: false, creating: false, timer: 0,
+  tab: '', len: 'para', hint: '', running: false, seq: 0, reader: null,
+  cont: '', sparks: [], caret: 0, sel: '',
+  tone: 'smooth', polishBusy: false, blocks: [], chosen: [], polishSel: '',
+  tpl: 'plain', brand: true, date: true, lead: true, scale: 2, note: '',
+  mat: {book: '', flomo: [], typed: ''}, flomo: null, books: null, flomoMsg: '',
+  versions: [],
+};
+
+function $wr(id) { return document.getElementById('wr' + id); }
+
+function wrMarkup() {
+  return `<div class="wrapp">
+    <aside class="wrdocs">
+      <button class="deed sure" id="wrNew" style="width:100%">新建稿子</button>
+      <div class="wrdoclist" id="wrDocList"></div>
+    </aside>
+    <section class="wrmain">
+      <div class="wrhead">
+        <input class="wrtitle" id="wrTitleIn" placeholder="无题" spellcheck="false">
+        <div class="wrmeta" id="wrMeta"></div>
+      </div>
+      <div class="wred"><textarea class="wrtext" id="wrTextIn" spellcheck="false"
+        placeholder="从这里开始写。&#10;&#10;Markdown 直接写：# 是标题，- 是列表，&gt; 是引。&#10;写到一半没灵感，选中几句再点下面的「续写」。"></textarea></div>
+      <div class="wrbar">
+        <span class="lab">AI</span>
+        <button class="deed" id="wrBtnCont">续写</button>
+        <button class="deed" id="wrBtnSpark">灵感</button>
+        <button class="deed" id="wrBtnPolish">润色</button>
+        <span class="grow"></span>
+        <button class="deed" id="wrBtnMat">用什么笔记</button>
+        <button class="deed" id="wrBtnExp">导出</button>
+        <button class="deed" id="wrBtnVer">历史</button>
+      </div>
+      <div class="wrres" id="wrRes" hidden>
+        <div class="wrresbar"><span class="lab" id="wrResTitle"></span><span class="grow"></span>
+          <button class="deed" id="wrResClose">收起</button></div>
+        <div class="wrresbody" id="wrResBody"></div>
+      </div>
+    </section>
+  </div>`;
+}
+
+/** 这一屏只造一次 DOM：稿列与坞的内容各自定点换，正文那一个 textarea 从头到尾
+    不重建 —— 重建一次，光标、选区和输入法正在拼的那串拼音就全没了。 */
+async function renderWriteView() {
+  const {body, fresh} = viewPane('write', viewHeader('写作平台'));
+  if (fresh) {
+    body.innerHTML = wrMarkup();
+    wireWrite();
+  }
+  await wrDocs();
+  if (!WR.id && WR.docs.length) await wrOpen(WR.docs[0].id);
+  paintWrMeta();
+}
+
+function wireWrite() {
+  $wr('New').onclick = wrNewDoc;
+  $wr('ResClose').onclick = () => wrSetTab('');
+  // 坞里那六颗动作钮的 id 是 wrBtnXxx（$wr 会自动补 wr 前缀），别按标签名去点。
+  [['BtnCont', 'cont'], ['BtnSpark', 'spark'], ['BtnPolish', 'polish'],
+   ['BtnMat', 'mat'], ['BtnExp', 'exp'], ['BtnVer', 'ver']].forEach(p => {
+    $wr(p[0]).onclick = () => wrTabBtn(p[1]);
+  });
+  const ed = $wr('TextIn'), ti = $wr('TitleIn');
+  ed.addEventListener('input', () => {
+    // 第一句落下时就建稿子：还没命名、没点「新建」的时候打的字最容易蒸发，
+    // 而这时候用户根本不该去想「这篇存在哪」。
+    if (!WR.id) { wrStartDoc(); return; }
+    WR.dirty = true;
+    paintWrMeta();
+    scheduleWrSave();
+  });
+  ti.addEventListener('input', () => {
+    if (!WR.id) return;
+    WR.dirty = true;
+    scheduleWrSave();
+  });
+  ed.addEventListener('blur', () => { if (WR.dirty) wrSave(); });
+  // Cmd / Ctrl + S：写东西的人一只手在键盘上，为存一下去摸鼠标很打断。
+  ed.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 's') {
+      e.preventDefault();
+      wrSave();
+    }
+  });
+  // 坞里所有动作走事件委托：每次换内容都重新接线，切一次 tab 就漏一根线。
+  const box = $wr('ResBody');
+  box.addEventListener('click', wrResClick);
+  box.addEventListener('change', wrResChange);
+  box.addEventListener('input', wrResInput);
+}
+
+/* 清单：稿列 + 表头那两个数 + 三张表（模板 / 续写档位 / 润色改法）。 */
+async function wrDocs() {
+  let r = await preAwait('writer');
+  if (!r) r = await gzApi('/api/writer', undefined, 15000);
+  if (!r || r.ok === false) {
+    setNote('write', (r && r.msg) || '稿子清单没拿到');
+    return;
+  }
+  WR.docs = r.drafts || [];
+  WRA = {templates: r.templates || [], lengths: r.lengths || [], tones: r.tones || []};
+  setNote('write', WR.docs.length + ' 篇 · ' + (r.words || 0) + ' 字');
+  if (!WR.tpl && WRA.templates.length) WR.tpl = WRA.templates[0].id;
+  paintWrDocs();
+}
+
+function paintWrDocs() {
+  const box = $wr('DocList');
+  if (!box) return;
+  if (!WR.docs.length) {
+    setHtml(box, '<div class="wrline"><span class="lab">还没有稿子。在右边直接开始写，第一句落下就会建一篇。</span></div>');
+    return;
+  }
+  box.replaceChildren(...WR.docs.map(d => {
+    const b = document.createElement('button');
+    b.className = 'wrdoc' + (d.id === WR.id ? ' on' : '');
+    b.innerHTML = '<span class="wt">' + esc(d.title || '无题') + '</span>'
+      + '<span class="wm">' + (d.words || 0) + ' 字 · ' + wrDay(d.updated)
+      + (d.versions ? ' · ' + d.versions + ' 份快照' : '') + '</span>';
+    b.onclick = () => { if (d.id !== WR.id) wrOpen(d.id); };
+    return b;
+  }));
+}
+
+async function wrOpen(id) {
+  await wrFlush();
+  const r = await gzApi('/api/writer?id=' + encodeURIComponent(id), undefined, 25000);
+  if (!r || !r.ok) { whisper((r && r.msg) || '这篇稿子打不开'); return; }
+  const m = r.meta || {};
+  WR.id = id;
+  WR.rev = m.rev || 0;
+  WR.title = m.title || '';
+  WR.updated = m.updated || 0;
+  WR.text = r.text || '';
+  WR.words = (r.count || {}).total || 0;
+  WR.dirty = WR.pending = false;
+  WR.versions = r.versions || [];
+  WR.cont = '';                 // 续写攒的是字符串，别和下面那三个数组混一个赋值
+  WR.sparks = [];
+  WR.blocks = [];
+  WR.chosen = [];
+  WR.running = false;
+  WR.creating = false;
+  const ed = $wr('TextIn');
+  if (ed && ed.value !== WR.text) ed.value = WR.text;
+  const ti = $wr('TitleIn');
+  if (ti) ti.value = WR.title;
+  paintWrDocs();
+  paintWrMeta();
+  // 换稿子时把坞收掉：上一稿的续写结果、勾选的润色块对新稿没有意义，留着最容易被按错。
+  wrSetTab('');
+  setHeadTitle('write', WR.title || '写作平台');
+}
+
+async function wrNewDoc() {
+  await wrFlush();
+  const r = await gzApi('/api/writer', {do: 'create', title: '', text: ''}, 20000);
+  if (!r.ok) { whisper(r.msg || '建不出这篇稿子'); return; }
+  const now = Math.floor(Date.now() / 1000);
+  WR.docs.unshift({id: r.id, title: '无题', words: 0, rev: 1, created: now, updated: now, versions: 0});
+  await wrOpen(r.id);
+  $wr('TextIn').focus();
+}
+
+/** 光标停在正文里就开写：不等用户点「新建」，第一句落下就把它落成一篇稿子。 */
+async function wrStartDoc() {
+  if (WR.creating) return;
+  const ed = $wr('TextIn');
+  const text = ed ? ed.value : '';
+  if (!text.trim()) return;
+  WR.creating = true;
+  const r = await gzApi('/api/writer', {do: 'create', title: '', text}, 20000);
+  WR.creating = false;
+  if (!r.ok) { whisper(r.msg || '新稿没建出来，先写的字还留在这一屏上'); return; }
+  const one = r.draft || {};
+  const m = one.meta || {};
+  const now = Math.floor(Date.now() / 1000);
+  WR.id = r.id;
+  WR.rev = m.rev || 1;
+  WR.title = m.title || '';
+  WR.updated = m.updated || now;
+  WR.text = text;
+  WR.words = (one.count || {}).total || wrCount(text).total;
+  WR.dirty = WR.pending = false;
+  WR.docs.unshift({id: r.id, title: WR.title, words: WR.words, rev: WR.rev,
+                   created: WR.updated, updated: WR.updated, versions: 0});
+  const ti = $wr('TitleIn');
+  if (ti && !ti.value) ti.value = WR.title;
+  paintWrDocs();
+  paintWrMeta();
+  whisper('新稿已建好，存在本机书库');
+}
+
+function scheduleWrSave(ms) {
+  clearTimeout(WR.timer);
+  WR.timer = setTimeout(wrSave, ms || 1400);
+}
+
+async function wrSave() {
+  clearTimeout(WR.timer);
+  WR.timer = 0;
+  if (!WR.id) return;
+  if (WR.saving) { WR.pending = true; return; }      // 别和正在飞的那一趟抢同一份正文
+  const ed = $wr('TextIn');
+  const text = ed ? ed.value : WR.text;
+  const title = ($wr('TitleIn') || {}).value;
+  if (!WR.dirty && text === WR.text && title === WR.title) return;
+  WR.saving = true;
+  WR.dirty = false;
+  paintWrMeta();
+  const r = await gzApi('/api/writer', {do: 'save', id: WR.id, text, title, rev: WR.rev}, 30000);
+  WR.saving = false;
+  if (r.ok) {
+    WR.rev = r.rev;
+    WR.text = text;
+    WR.title = title;
+    WR.words = r.words;
+    WR.updated = r.updated;
+    const row = WR.docs.filter(d => d.id === WR.id)[0];
+    if (row) { row.words = r.words; row.updated = r.updated; row.title = title || row.title; }
+    paintWrMeta();
+    setNote('write', WR.docs.length + ' 篇 · ' + WR.docs.reduce((a, d) => a + (d.words || 0), 0) + ' 字');
+    if (WR.pending) { WR.pending = false; await wrSave(); }
+    return;
+  }
+  WR.dirty = true;
+  paintWrMeta();
+  if (r.conflict) wrConflict(r.conflict, text);
+  else whisper(r.msg || '没存上');
+}
+
+/** 版本号对不上：服务端那份是别处改的（另一个窗口、命令行、MCP）。两边都不许悄悄输。 */
+function wrConflict(c, mine) {
+  WR.rev = c.rev || WR.rev;
+  sheet({
+    title: '这篇稿子在别处被改过',
+    text: '为了不把任何一边写丢，这一次没有覆盖。选一个方向：另一版会先存成一份快照，'
+      + '回退到那一版随时可以（写作台 → 历史）。',
+    actions: [
+      {label: '用我这版', lead: true, run: async () => {
+        // 先点名要一份快照，再把服务端的版本号带上 —— 不带的话下一次保存又会撞同一堵墙，
+        // 而带上它等于「我知道你改过，仍然按我这版覆盖」。
+        await gzApi('/api/writer', {do: 'snapshot', id: WR.id}, 15000);
+        const r = await gzApi('/api/writer',
+          {do: 'save', id: WR.id, text: mine, rev: c.rev}, 30000);
+        whisper(r.ok ? '按你这版存好了，另一版在历史里' : (r.msg || '还是没存上'));
+        if (r.ok) { WR.rev = r.rev; WR.text = mine; WR.dirty = false; paintWrMeta(); }
+      }},
+      {label: '看另一版', run: async () => {
+        const at = WR.id;
+        WR.id = '';                 // 绕过「打不开就不动」的那句，重新走一遍读取
+        await wrOpen(at);
+        whisper('已换成机器上那一份，你刚才那版还在输入框之外，先别急着写');
+      }},
+      {label: '再说', keep: true},
+    ],
+  });
+}
+
+/** 离屏 / 切稿子之前把正文结掉。paneEl 那边是不 await 调它的，所以这里自己兜住时序。 */
+async function wrFlush() {
+  clearTimeout(WR.timer);
+  WR.timer = 0;
+  let guard = 0;
+  while (WR.saving && guard++ < 250) await wrWait(120);
+  if (WR.dirty) await wrSave();
+}
+
+function wrWait(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+/* 字数口径和后端那一份对齐（writer.words）：中文按字、英文按词、数字按组，
+   先剥掉 markdown 的行首记号 —— 否则「## 标题」那两个井号会被数进去。 */
+function wrCount(text) {
+  const body = String(text || '').replace(/^\s*(?:#{1,6}\s*|[-*+]\s+|\d+[.)]\s+|>\s*)/gm, '');
+  const hanRe = /[㐀-䶿一-鿿豈-﫿]/g;
+  const han = (body.match(hanRe) || []).length;
+  const latin = (body.replace(/[㐀-䶿一-鿿豈-﫿]/g, ' ').match(/[A-Za-z][A-Za-z'-]*/g) || []).length;
+  const numbers = (body.match(/\d+(?:[.,]\d+)*/g) || []).length;
+  return {han, latin, numbers, total: han + latin + numbers, chars: String(text || '').length};
+}
+
+function wrDay(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return '刚刚';
+  const d = new Date(n * 1000);
+  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const same = (a, b) => a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const now = new Date();
+  if (same(d, now)) return '今天 ' + hm;
+  if (same(d, new Date(now.getTime() - 86400000))) return '昨天 ' + hm;
+  return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日';
+}
+
+function paintWrMeta() {
+  const m = $wr('Meta');
+  if (!m) return;
+  const text = ($wr('TextIn') || {}).value || '';
+  let st = '开始写就会自动存';
+  if (WR.id && WR.saving) st = '存…';
+  else if (WR.id && (WR.dirty || WR.pending)) st = '有改动没存';
+  else if (WR.id) st = '已存好';
+  setHtml(m, '<span>' + wrCount(text).total + ' 字</span><span>' + esc(st) + '</span>'
+    + (WR.updated ? '<span>' + esc(wrDay(WR.updated)) + '</span>' : ''));
+}
+
+/* ── 坞：一条贴着编辑器的结果栏 ─────────────────────────── */
+function wrTabBtn(name) {
+  WR.sel = wrSel();
+  if (WR.tab === name) { wrSetTab(''); return; }
+  wrSetTab(name);
+}
+
+function wrSel() {
+  const ed = $wr('TextIn');
+  if (!ed) return '';
+  const a = ed.selectionStart | 0, b = ed.selectionEnd | 0;
+  return b > a ? String(ed.value || '').slice(a, b) : '';
+}
+
+function wrSetTab(name) {
+  WR.tab = name || '';
+  const box = $wr('Res');
+  if (!box) return;
+  if (!name) { box.hidden = true; return; }
+  box.hidden = false;
+  const t = $wr('ResTitle');
+  if (t) t.textContent = WR_TABS[name] || '';
+  wrPaintRes();
+}
+
+function wrPaintRes() {
+  const body = $wr('ResBody');
+  if (!body || !WR.tab) return;
+  const make = {cont: wrContHtml, spark: wrSparkHtml, polish: wrPolishHtml,
+                mat: wrMatHtml, exp: wrExpHtml, ver: wrVerHtml}[WR.tab];
+  if (!make) return;
+  setHtml(body, make());
+  if (WR.tab === 'ver' && WR.id && !WR.versions.length) wrVersions();
+  if (WR.tab === 'mat') { if (WR.books === null) wrLoadBooks(); if (WR.flomo === null) wrLoadFlomo(); wrMatNote(); }
+}
+
+function wrSeg(items, on, act) {
+  if (!items.length) return '';
+  return '<span class="seg txt">' + items.map(x => '<button data-act="' + act + '" data-v="' + esc(x.id) + '"'
+    + (x.id === on ? ' class="on"' : '') + '>' + esc(x.label) + '</button>').join('') + '</span>';
+}
+
+/** 续写：先问「写多少」，再问「往哪走」，然后才轮到模型开口。
+    档位是用户选的（一句 / 一段 / 三个要点 / 写完这一节），后端按档给上限和终止符。 */
+function wrContHtml() {
+  const seg = wrSeg(WRA.lengths, WR.len, 'len') || '<span class="seg txt"><button class="on">一段</button></span>';
+  let s = '<div class="wrline"><span class="lab">写多少</span>' + seg
+    + '<span class="grow"></span><button class="deed" data-act="run">'
+    + (WR.running ? '停下' : '开始') + '</button></div>';
+  s += '<div class="wrline"><span class="lab">往哪走</span><input class="wrinp" data-act="hint" spellcheck="false" '
+    + 'placeholder="可留空。比如：先给个反例、收到读者那句「这跟我有什么关系」">'
+    + ' value="' + esc(WR.hint) + '"></div>';
+  s += '<div class="wrline"><span class="lab">'
+    + (WR.sel ? '接着你选中的那 ' + WR.sel.length + ' 个字往下写。'
+      : '没选中就接着全篇末尾写；先在正文里选一段再点开始，它只接那一段。')
+    + '</span></div>';
+  s += '<div class="wrout" id="wrContOut">' + esc(WR.cont) + '</div>';
+  if (WR.cont && !WR.running) {
+    s += '<div class="wrline"><button class="deed sure" data-act="paste">接进正文</button>'
+      + '<span class="lab">接在你停笔的那里；不满意点「开始」重来</span></div>';
+  }
+  return s;
+}
+
+async function wrContRun() {
+  if (WR.running) { wrStopCont(); return; }
+  const ed = $wr('TextIn');
+  const sel = wrSel();
+  WR.sel = sel;
+  WR.caret = ed ? (ed.selectionEnd | 0) || String(ed.value || '').length : WR.text.length;
+  const feed = (sel.trim() ? sel : (ed ? ed.value : '')) || '';
+  if (!feed.trim()) { whisper('先写几句，它才有得接'); return; }
+  if (!WR.id) { whisper('这一稿还没落盘：先按 Cmd/Ctrl+S 存一下再续写'); return; }
+  const my = ++WR.seq;
+  WR.running = true;
+  WR.cont = '';
+  wrPaintRes();
+  // 每来一段就重排整块太贵（模型吐字比人眼快得多）：按帧合并，一帧最多写一次文本。
+  let raf = 0;
+  const paint = () => {
+    if (raf || my !== WR.seq) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const el = $wr('ContOut');        // 每帧重新找：中途重排过一次的话旧节点已经不在屏上
+      if (el) el.textContent = WR.cont;
+    });
+  };
+  try {
+    const r = await fetch('/api/writer/ai', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: 'cont', id: WR.id, text: feed, length: WR.len, hint: WR.hint,
+        material: WR.mat.flomo.map(x => 'flomo:' + x), book: WR.mat.book, typed: WR.mat.typed}),
+    });
+    const ctype = r.headers.get('Content-Type') || '';
+    // 没配接口、稿子空着这类话是在流开始之前用普通 JSON 回的（那时还改得动状态码）；
+    // 判流只认 x-ndjson，和本机其它三处流式同一个口径。
+    if (ctype.indexOf('x-ndjson') < 0) {
+      let j = null;
+      try { j = await r.json(); } catch (e) { /* 空体 */ }
+      if (my === WR.seq) { WR.running = false; whisper((j && j.msg) || '本机服务没有响应'); wrPaintRes(); }
+      return;
+    }
+    const rd = r.body.getReader();
+    WR.reader = rd;
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const got = await rd.read();
+      if (got.done || my !== WR.seq) break;
+      buf += dec.decode(got.value, {stream: true});
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let j;
+        try { j = JSON.parse(line); } catch (e) { continue; }
+        if (j.err) { if (my === WR.seq) { WR.cont = ''; whisper(j.err); } }
+        else if (j.d) { WR.cont += j.d; paint(); }
+      }
+    }
+    if (my !== WR.seq) return;
+    if (!WR.cont.trim()) whisper('那边一个字都没回：模型名或地址可能不对');
+  } catch (e) {
+    if (my === WR.seq) { WR.cont = ''; whisper('没问出来：' + ((e && e.message) || e)); }
+  } finally {
+    if (my === WR.seq) { WR.running = false; WR.reader = null; wrPaintRes(); }
+  }
+}
+
+function wrStopCont() {
+  WR.seq++;                 // 在飞的那一趟从此不作数
+  WR.running = false;
+  if (WR.reader) { try { WR.reader.cancel(); } catch (e) { /* 已经断了 */ } WR.reader = null; }
+  WR.cont = '';             // 半截续写不留屏：留着就有人会当成整段直接用
+  wrPaintRes();
+}
+
+/** 接进正文：插在你停笔的那个光标处，前后各留一行空行（段落之间要靠空行分开）。 */
+function wrPasteCont() {
+  const add = (WR.cont || '').trim();
+  const ed = $wr('TextIn');
+  if (!add || !ed) return;
+  const at = Math.min(Math.max(0, WR.caret | 0), ed.value.length);
+  let head = ed.value.slice(0, at);
+  let tail = ed.value.slice(at);
+  if (head && !/\n[ \t]*$/.test(head)) head += '\n\n';
+  if (tail && !/^[ \t]*\n/.test(tail)) tail = '\n\n' + tail;
+  ed.value = head + add + tail;
+  const pos = (head + add).length;
+  ed.focus();
+  ed.setSelectionRange(pos, pos);
+  WR.cont = '';
+  WR.caret = pos;
+  WR.dirty = true;
+  scheduleWrSave(700);
+  paintWrMeta();
+  wrPaintRes();
+  whisper('已接进正文');
+}
+
+/* 灵感：一次三个方向，只给方向不给成稿；不满意就换一批（后端记着已经给过的角度）。 */
+function wrSparkHtml() {
+  if (!WR.sparks.length) {
+    return '<div class="wrline"><span class="lab">给你三个往下写的方向，不满意就换一批。</span>'
+      + '<span class="grow"></span><button class="deed sure" data-act="spark">'
+      + (WR.running ? '想…' : '想三个') + '</button></div>';
+  }
+  let s = WR.sparks.map(x => '<div class="wrcard"><b>' + esc(x) + '</b>'
+    + '<div class="wrline"><button class="deed" data-act="use" data-v="' + esc(x) + '">照这个写</button>'
+    + '<span class="lab">点它就把它放进续写的「往哪走」</span></div></div>').join('');
+  s += '<div class="wrline"><button class="deed" data-act="spark">再来三个</button>'
+    + '<span class="lab">换一批会说已经给过哪些角度，不重复同一件事</span></div>';
+  return s;
+}
+
+async function wrSparkRun() {
+  if (WR.running) return;
+  const feed = (($wr('TextIn') || {}).value || '') || WR.text;
+  if (!feed.trim()) { whisper('先写几句，它才有得想'); return; }
+  WR.running = true;
+  wrPaintRes();
+  const r = await gzApi('/api/writer/ai', {mode: 'spark', id: WR.id, text: feed,
+    material: WR.mat.flomo.map(x => 'flomo:' + x), book: WR.mat.book, typed: WR.mat.typed}, 120000);
+  WR.running = false;
+  WR.sparks = (r && r.sparks) || [];
+  wrPaintRes();
+  if (!WR.sparks.length) whisper((r && r.msg) || '那边没给方向，再刷一次试试');
+}
+
+/* 润色：只改选中的那一段。回来的是差异块，人逐块勾，勾了的才动。 */
+function wrPolishHtml() {
+  const sel = WR.polishSel || wrSel();
+  const tones = WRA.tones.length ? WRA.tones : [];
+  let s = '<div class="wrline"><span class="lab">改法</span><select data-act="tone">'
+    + (tones.length ? tones.map(t => '<option value="' + esc(t.id) + '"'
+        + (t.id === WR.tone ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('')
+        : '<option value="smooth">顺一顺</option>')
+    + '</select><span class="grow"></span><button class="deed" data-act="polish"'
+    + (sel ? '' : ' disabled') + '>' + (WR.polishBusy ? '改…' : '开始') + '</button></div>';
+  s += '<div class="wrline"><span class="lab">'
+    + (sel ? '只动选中的这 ' + sel.length + ' 个字，正文其他地方一个字都不碰。'
+      : '先在正文里选中要改的那一段（一句也行），它才知道改哪儿。')
+    + '</span></div>';
+  if (WR.blocks.length) {
+    s += WR.blocks.map((k, i) => '<div class="wrblk"><span class="wd">' + esc(k.op) + '</span>'
+      + '<label class="wtxt"><input type="checkbox" data-act="pblock" data-v="' + i + '"'
+      + (WR.chosen[i] ? ' checked' : '') + '>'
+      + (k.old ? '<span class="o">' + esc(k.old) + '</span>' : '')
+      + (k.new ? '<span class="n">' + esc(k.new) + '</span>' : '') + '</label></div>').join('');
+    const n = WR.chosen.filter(Boolean).length;
+    s += '<div class="wrline"><button class="deed sure" data-act="papply"' + (n ? '' : ' disabled')
+      + '>应用这 ' + n + ' 处</button><span class="lab">从段尾往前替换，前面的坐标不会错位</span></div>';
+  }
+  return s;
+}
+
+async function wrPolishRun() {
+  const sel = wrSel();
+  if (!sel.trim()) { whisper('先选中要润色的那一段'); return; }
+  WR.polishSel = sel;
+  WR.polishBusy = true;
+  WR.blocks = [];
+  WR.chosen = [];
+  wrPaintRes();
+  const r = await gzApi('/api/writer/ai', {mode: 'polish', id: WR.id, sel, tone: WR.tone,
+    material: WR.mat.flomo.map(x => 'flomo:' + x), book: WR.mat.book, typed: WR.mat.typed}, 120000);
+  WR.polishBusy = false;
+  if (!r || r.ok === false) { wrPaintRes(); whisper((r && r.msg) || '润色没问出来'); return; }
+  WR.blocks = r.blocks || [];
+  WR.chosen = WR.blocks.map(() => true);
+  wrPaintRes();
+  if (!WR.blocks.length) whisper('那边给的还是这一段，没改动');
+}
+
+function wrApplyBlocks() {
+  const base = WR.polishSel || '';
+  const ed = $wr('TextIn');
+  if (!ed || !base) return;
+  const pick = [];
+  WR.blocks.forEach((k, i) => { if (WR.chosen[i]) pick.push(k); });
+  if (!pick.length) { whisper('一处都没勾上'); return; }
+  const at = ed.value.indexOf(base);
+  if (at < 0) { whisper('选中的那一段已经被改过了，先别动它：重新选中再问一次'); return; }
+  let out = ed.value;
+  let delta = 0;
+  // 从后往前换：往前面的块会先把后面那些块的坐标顶偏，改到不该改的字上。
+  pick.slice().sort((a, b) => (b.at | 0) - (a.at | 0)).forEach(k => {
+    const left = at + (k.at | 0);
+    const right = at + ((k.end == null ? k.at : k.end) | 0);
+    out = out.slice(0, left) + String(k.new || '') + out.slice(right);
+    delta += String(k.new || '').length - (right - left);
+  });
+  ed.value = out;
+  const caret = Math.min(out.length, at + base.length + delta);
+  WR.blocks = [];
+  WR.chosen = [];
+  WR.polishSel = '';
+  WR.dirty = true;
+  scheduleWrSave(700);
+  paintWrMeta();
+  wrPaintRes();
+  ed.focus();
+  ed.setSelectionRange(caret, caret);
+  whisper('改好了 ' + pick.length + ' 处');
+}
+
+/* 素材：这一栏决定 AI 「看哪些笔记」。原文只在请求体里走一趟，界面不回显、日志不记。 */
+function wrMatHtml() {
+  const books = (WR.books || []);
+  let s = '<div class="wrmat">';
+  s += '<div class="wrline"><span class="lab">某本书的划线</span><select data-act="book">'
+    + '<option value="">不用</option>'
+    + books.map(b => '<option value="' + esc(b.bookId) + '"'
+      + (String(b.bookId) === String(WR.mat.book) ? ' selected' : '') + '>'
+      + esc(b.title || b.bookId) + '</option>').join('')
+    + '</select></div>';
+  s += '<div class="k">flomo 便签（勾上就当作素材，最多带这一屏列出来的那些）</div>';
+  s += '<div class="wrfmlist">' + wrFlomoHtml() + '</div>';
+  s += '<div class="k">自己写的几句</div>';
+  s += '<textarea class="wrtyped" data-act="typed" spellcheck="false" '
+    + 'placeholder="比如：这篇要给谁看、结论落在哪一句、哪句话别说">' + esc(WR.mat.typed) + '</textarea>';
+  s += '<div class="wrline"><span class="lab" id="wrMatNote"></span></div>';
+  s += '<div class="wrline"><span class="lab">这些原文只进这一次请求的提示词：不写日志、不进回执、也不落到稿子里。</span></div>';
+  s += '</div>';
+  return s;
+}
+
+function wrFlomoHtml() {
+  if (WR.flomo === null) return '<div class="k">便签列表加载中…</div>';
+  if (WR.flomoMsg) return '<div class="k">' + esc(WR.flomoMsg) + '</div>';
+  const list = WR.flomo.memos || [];
+  if (!list.length) return '<div class="k">本机还没有导入过 flomo 便签（用 flomo 那一屏导一次）。</div>';
+  return list.slice(0, 120).map(m => '<label class="wrfm">'
+    + '<input type="checkbox" data-flomo="' + esc(m.id) + '"'
+    + (WR.mat.flomo.indexOf(String(m.id)) >= 0 ? ' checked' : '') + '>'
+    + '<span class="d">' + esc(m.date || '') + '</span>'
+    + '<span>' + esc(String(m.plain || '').replace(/\s+/g, ' ').slice(0, 72)) + '</span></label>').join('');
+}
+
+function wrMatNote() {
+  const el = $wr('MatNote');
+  if (!el) return;
+  const bits = [];
+  if (WR.mat.book) bits.push('一本书的划线');
+  if (WR.mat.flomo.length) bits.push(WR.mat.flomo.length + ' 条便签');
+  if ((WR.mat.typed || '').trim()) bits.push('你手打的那几句');
+  el.textContent = bits.length ? '这次会带上：' + bits.join(' + ') : '这次不带笔记，只看稿子。';
+}
+
+async function wrLoadFlomo() {
+  const r = await gzApi('/api/flomo/notes?limit=120', undefined, 30000);
+  if (!r || r.ok === false) {
+    WR.flomo = {memos: []};
+    WR.flomoMsg = (r && r.msg) || 'flomo 便签没读到';
+  } else {
+    WR.flomo = r;
+    WR.flomoMsg = '';
+  }
+  if (WR.tab === 'mat') wrPaintRes();
+}
+
+async function wrLoadBooks() {
+  WR.books = [];
+  const r = await gzApi('/api/notes_index', undefined, 20000);
+  WR.books = (r && r.books) || [];
+  if (WR.tab === 'mat') wrPaintRes();
+}
+
+/* 导出：四种排版 + 三样可关的标注，预览和成品走的是同一条拼装路径。 */
+function wrExpHtml() {
+  const seg = wrSeg(WRA.templates, WR.tpl, 'tpl')
+    || '<span class="seg txt"><button class="on">黑白简约</button></span>';
+  let s = '<div class="wrline"><span class="lab">排版</span>' + seg + '</div>';
+  s += '<div class="wrline"><span class="lab">标注</span>'
+    + '<label><input type="checkbox" data-act="brand"' + (WR.brand ? ' checked' : '') + '>署名归藏</label>'
+    + '<label><input type="checkbox" data-act="date"' + (WR.date ? ' checked' : '') + '>日期</label>'
+    + '<label><input type="checkbox" data-act="lead"' + (WR.lead ? ' checked' : '') + '>卷首那行</label></div>';
+  s += '<div class="wrline"><span class="lab">图片清晰度</span><select data-act="scale">'
+    + [1, 2, 3].map(n => '<option value="' + n + '"' + (n === WR.scale ? ' selected' : '') + '>'
+      + n + ' 倍</option>').join('')
+    + '</select><span class="grow"></span>'
+    + (WR.id ? '<button class="deed" data-act="prev">预览这一版</button>' : '') + '</div>';
+  s += '<div class="wrprev" id="wrPrevBox" hidden><iframe id="wrPrevFrame" title="导出预览" sandbox=""></iframe></div>';
+  s += '<div class="wrline">'
+    + '<button class="deed" data-act="png"' + (WR.id ? '' : ' disabled') + '>导成图片</button>'
+    + '<button class="deed" data-act="pdf"' + (WR.id ? '' : ' disabled') + '>导成 PDF</button>'
+    + '<button class="deed" data-act="epub"' + (WR.id ? '' : ' disabled') + '>导成电子书</button>'
+    + '<button class="deed" data-act="md"' + (WR.id ? '' : ' disabled') + '>存一份 Markdown</button>'
+    + '<button class="deed" data-act="openexp">打开所在文件夹</button></div>';
+  s += '<div class="wrline"><span class="lab" id="wrExpNote">' + esc(WR.note || '导出的文件落在本机导出文件夹，不进任何云端。') + '</span></div>';
+  return s;
+}
+
+function wrExpQuery(extra) {
+  const q = ['id=' + encodeURIComponent(WR.id), 'tpl=' + encodeURIComponent(WR.tpl),
+    'brand=' + (WR.brand ? '1' : '0'), 'date=' + (WR.date ? '1' : '0'),
+    'lead=' + (WR.lead ? '1' : '0'), 'scale=' + WR.scale];
+  return q.concat(extra || []).join('&');
+}
+
+/** 预览和导出都读机器上那一份稿子，所以先把编辑器里的字结掉 ——
+    预览里看不到刚打的那两句，比预览多出一句更让人困惑。 */
+async function wrPreview() {
+  await wrFlush();
+  const box = $wr('PrevBox'), fr = $wr('PrevFrame');
+  if (!box || !fr) return;
+  if (!WR.id) { whisper('先存一下这一稿'); return; }
+  box.hidden = false;
+  fr.src = '/api/writer?mode=preview&' + wrExpQuery();
+}
+
+async function wrExportDo(kind) {
+  if (!WR.id) { whisper('先存一下这一稿'); return; }
+  await wrFlush();
+  wrExpNote('正在导出…');
+  const r = await gzApi('/api/writer/export?kind=' + kind + '&' + wrExpQuery() + '&json=1',
+    undefined, kind === 'md' ? 30000 : (kind === 'epub' ? 60000 : 120000));
+  if (!r || r.ok === false) {
+    wrExpNote((r && r.msg) || '导出没做成');
+    whisper((r && r.msg) || '导出没做成');
+    return;
+  }
+  WR.note = '已存成 ' + wrBaseName(r.path) + ' · ' + vtBytes(r.size) + (r.note || '');
+  wrExpNote(WR.note);
+  whisper('导好了：' + wrBaseName(r.path));
+}
+
+/** 只报文件名，不报整条路径：路径里有用户名，界面回执和日志都不该带上它。 */
+function wrBaseName(p) {
+  const s = String(p || '');
+  const at = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return at >= 0 ? s.slice(at + 1) : s;
+}
+
+function wrExpNote(text) {
+  const el = $wr('ExpNote');
+  if (el) el.textContent = text;
+}
+
+/* 历史：手动快照 + 每次覆盖前的自动快照，都能回来。 */
+function wrVerHtml() {
+  let s = '<div class="wrline"><button class="deed sure" data-act="snap"' + (WR.id ? '' : ' disabled')
+    + '>存一份快照</button><span class="lab">存到这里，随时能从下面这一列换回去。</span></div>';
+  if (!WR.id) return s + '<div class="wrline"><span class="lab">还没打开稿子。</span></div>';
+  if (!WR.versions.length) return s + '<div class="wrline"><span class="lab">还没有快照：正文每改五版会自动留一份。</span></div>';
+  return s + WR.versions.map(v => '<div class="wrblk"><span class="wd">' + esc(wrDay(v.at)) + '</span>'
+    + '<span class="wtxt">' + (v.words || 0) + ' 字 · ' + esc(vtBytes(v.size)) + '</span>'
+    + '<button class="deed" data-act="back" data-v="' + esc(v.name) + '">回退到这一份</button></div>').join('');
+}
+
+async function wrVersions() {
+  const r = await gzApi('/api/writer', {do: 'versions', id: WR.id}, 20000);
+  WR.versions = (r && r.versions) || [];
+  if (WR.tab === 'ver') wrPaintRes();
+}
+
+async function wrSnapNow() {
+  if (!WR.id) return;
+  await wrFlush();
+  const r = await gzApi('/api/writer', {do: 'snapshot', id: WR.id}, 20000);
+  whisper(r.ok ? '已存一份快照' : (r.msg || '快照没存上'));
+  if (r.ok) { WR.versions = r.versions || []; wrPaintRes(); }
+}
+
+function wrRestore(name) {
+  sheet({
+    title: '回退到这一份快照',
+    text: '现在这一版会先被自动存成快照，回错了还能再回来；正文里未存的改动会并进这一份里存下。',
+    actions: [
+      {label: '回退', lead: true, run: async () => {
+        await wrFlush();
+        const r = await gzApi('/api/writer', {do: 'restore', id: WR.id, name}, 30000);
+        if (!r.ok) { whisper(r.msg || '回退没做成'); return; }
+        const one = r.draft || {};
+        WR.text = one.text || '';
+        WR.rev = (one.meta || {}).rev || WR.rev;
+        WR.words = (one.count || {}).total || wrCount(WR.text).total;
+        WR.updated = (one.meta || {}).updated || WR.updated;
+        WR.dirty = false;
+        const ed = $wr('TextIn');
+        if (ed) ed.value = WR.text;
+        await wrVersions();
+        paintWrMeta();
+        wrPaintRes();
+        whisper('已回退');
+      }},
+      {label: '再说'},
+    ],
+  });
+}
+
+/* 坞里那一片按钮 / 下拉 / 勾选的统一出口。 */
+function wrResClick(e) {
+  const b = e.target.closest('button[data-act]');
+  if (b) {
+    const a = b.dataset.act;
+    const v = b.dataset.v;
+    if (a === 'len') {
+      WR.len = v;
+      if (WR.running) wrStopCont();       // 换档 = 重来：半截的字数上限对不上新档
+      else wrPaintRes();
+      return;
+    }
+    if (a === 'run') { wrContRun(); return; }
+    if (a === 'paste') { wrPasteCont(); return; }
+    if (a === 'spark') { wrSparkRun(); return; }
+    if (a === 'use') { WR.hint = v; wrSetTab('cont'); whisper('已放进「往哪走」，点开始就照这个写'); return; }
+    if (a === 'polish') { wrPolishRun(); return; }
+    if (a === 'papply') { wrApplyBlocks(); return; }
+    if (a === 'tpl') { WR.tpl = v; wrPaintRes(); if (!($wr('PrevBox') || {}).hidden) wrPreview(); return; }
+    if (a === 'prev') { wrPreview(); return; }
+    if (a === 'png' || a === 'pdf' || a === 'epub' || a === 'md') { wrExportDo(a); return; }
+    if (a === 'openexp') { post('openexports').then(r => whisper(r.msg || '没打开')); return; }
+    if (a === 'snap') { wrSnapNow(); return; }
+    if (a === 'back') { wrRestore(v); return; }
+  }
+  const ck = e.target.closest('input[data-flomo]');
+  if (ck) {
+    const id = String(ck.dataset.flomo);
+    const at = WR.mat.flomo.indexOf(id);
+    if (at >= 0) WR.mat.flomo.splice(at, 1);
+    else WR.mat.flomo.push(id);
+    wrMatNote();
+  }
+}
+
+function wrResChange(e) {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const a = el.dataset.act;
+  if (a === 'tone') WR.tone = el.value;
+  else if (a === 'book') { WR.mat.book = el.value; wrMatNote(); }
+  else if (a === 'scale') WR.scale = Number(el.value) || 2;
+  else if (a === 'brand') WR.brand = !!el.checked;
+  else if (a === 'date') WR.date = !!el.checked;
+  else if (a === 'lead') WR.lead = !!el.checked;
+  else return;
+  // 标注一改，预览那一版就该跟着变（导出读的就是这一份拼装结果）
+  if (a === 'brand' || a === 'date' || a === 'lead' || a === 'scale') {
+    if (WR.id && !($wr('PrevBox') || {}).hidden) wrPreview();
+  }
+}
+
+function wrResInput(e) {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  if (el.dataset.act === 'hint') WR.hint = el.value;
+  else if (el.dataset.act === 'typed') { WR.mat.typed = el.value; wrMatNote(); }
 }
 
 /* ── 设置弹层 ───────────────────────────
    从「齿轮旁边长出来的一条下拉」改成居中弹窗：功能一路加下来，纵向拉太长，
    在屏幕矮的机器上能拉到窗外去。现在左栏分类、右栏只显示这一类，
-   地址栏旁边那颗齿轮只管开与关，点遮罩、点右上角叉、按 Esc 都能收。 */
-const pop = $('#pop'), gear = $('#gear'), popmask = $('#popmask');
+   点遮罩、点右上角叉、按 Esc 都能收。
+
+   1.0.5 起左上角那颗齿轮换成了头像（点头像是进个人主界面），设置的入口搬到
+   个人主界面最下面那一颗，所以这里不再有「齿轮只管开关」这一步。 */
+const pop = $('#pop'), popmask = $('#popmask');
 const POPCAT_KEY = 'guizang_popcat_v1';
 
 function setCat(name) {
@@ -4577,10 +6273,13 @@ function setCat(name) {
 function setPop(open, cat) {
   pop.classList.toggle('open', open);
   popmask.classList.toggle('open', open);
-  gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+  // 触发器在个人主界面那一屏里（不常驻），那一屏没建出来时就没有可点亮的那一颗
+  const t = document.querySelector('#meSet');
+  if (t) t.classList.toggle('on', open);
   // 设置弹窗拿到焦点时，右下角那块玻璃先退场 —— 小助手面板比弹窗大、又不要焦点，
   // 两边同时摊开时它会把弹窗的一角压住（窄窗口下整条左栏都点不到）。
-  if (open) agOpen(false);
+  // 靠左缘滑出的侧边栏同理：它弹着的话会把弹窗左边那一列压住，先收回去。
+  if (open) { agOpen(false); sidePeek(false); }
   if (open && cat) setCat(cat);
 }
 
@@ -4593,7 +6292,6 @@ $('#popnav').addEventListener('click', e => {
 });
 $('#popx').onclick = () => setPop(false);
 popmask.onclick = () => setPop(false);
-gear.onclick = e => { e.stopPropagation(); setPop(!pop.classList.contains('open')); };
 pop.onclick = e => e.stopPropagation();
 /* 「界面新、后端旧」那条横幅的两颗按钮。横幅是静态标记，一次绑定就够。
    「先不管」只把话咽回去（GZ.hid），不改判定 —— 下一次请求仍然会认出旧后端，
@@ -4613,12 +6311,15 @@ $('#swapx').onclick = e => {
 document.addEventListener('click', e => {
   setPop(false);
   if (!e.target.closest('.kbtn')) closeAllCards();
+  // 靠左缘滑出的那一档：点页面任何别处都算「我要用页面了」，浮层收回。
+  // 侧边栏那一列之内不收回（在里面挑东西、拖顺序都还得让它摊着）。
+  if (!e.target.closest('#side')) sidePeek(false);
 });
 document.addEventListener('keydown', e => {
   // Esc 先给最上面那一层：弹层开着就只关弹层。
   // 以前只有设置弹层和摊开的卡会退，弹窗（sheet）按 Esc 纹丝不动，
   // 用户只能去点按钮 —— 而弹窗常常是「读一段导出的文本」，点空白才算离开。
-  if (e.key === 'Escape') { setPop(false); agOpen(false); closeAllCards(); closeSheet(); }
+  if (e.key === 'Escape') { setPop(false); agOpen(false); closeAllCards(); closeSheet(); sidePeek(false); }
 });
 
 /* ── 主题 / 设置 / 侧边栏 / 任务栏 交互 ── */
@@ -4706,7 +6407,11 @@ $('#idxRebuild').onclick = () => {
 
 $('#nav').addEventListener('click', e => {
   const b = e.target.closest('button');
-  if (b) setView(b.dataset.v);
+  if (!b) return;
+  // 刚松手完成一次拖拽：浏览器会紧跟着补一次 click，吞掉它，不然页面会跳到
+  // 刚被拖走的那一格上——用户要的是「排完序」，不是「顺便翻到那一屏」。
+  if (Date.now() - navSkipClick < 400) return;
+  setView(b.dataset.v);
 });
 
 $('#batchbar').addEventListener('click', e => {
@@ -5124,6 +6829,7 @@ function paneEl(name) {
   }
   const changed = shownPane !== name;
   if (changed && PANES[shownPane]) paneScroll[shownPane] = window.scrollY;
+  if (changed && shownPane === 'write' && name !== 'write') wrFlush();
   if (changed && shownPane === 'read' && name !== 'read') {
     rdTimeStop();          // 离开阅读器就停表
     rdLayersTuck();        // 顺手把这一本书的浮层收掉（见下面那段注释）
@@ -5134,7 +6840,7 @@ function paneEl(name) {
   document.body.classList.toggle('reading', name === 'read');
   // 订阅 / 视频 / 便签这三屏同理：栏内各自滚，整页不动，翻列表时不会把顶部工具条滚出视野。
   document.body.classList.toggle('feedfit',
-    name === 'feed' || name === 'video' || name === 'flomo');
+    name === 'feed' || name === 'video' || name === 'flomo' || name === 'write');
   if (changed) {
     shownPane = name;
     slideView(slideDir, name);
@@ -5219,6 +6925,7 @@ function wireNavAhead() {
   const jobs = {
     shelf: () => { if (keySet) loadShelf(); },
     notes: () => { if (keySet) preNotebooks(); },
+    write: () => prefetch('writer', () => gzApi('/api/writer')),
     stats: () => { if (keySet) preStats(); },
     pick: () => { if (keySet) prePick(); },
   };
@@ -5273,8 +6980,11 @@ function moveNavPill() {
     pill.setAttribute('aria-hidden', 'true');
     nav.prepend(pill);
   }
-  const on = nav.querySelector('button.on') || nav.querySelector('button[data-v]');
-  if (!on) return;
+  const on = nav.querySelector('button.on');
+  // 覆盖屏（详情、阅读器）与个人主界面、写作台都不在侧边栏那列里。这时候胶囊必须
+  // 消失：原来兜底找「第一颗按钮」，于是回到主界面会看到选中态停在书架上，
+  // 而那一屏显示的其实是别的东西。
+  if (!on) { pill.classList.remove('on'); pill.style.height = '0'; return; }
   pill.style.height = on.offsetHeight + 'px';
   pill.style.transform = `translate3d(0,${on.offsetTop}px,0)`;
   // 淡入只做一次；之后切换只位移，transition 会让它自己滑过去
@@ -5442,10 +7152,12 @@ function renderView() {
   if (v === 'feed') { renderFeedView(); return; }
   if (v === 'video') { renderVideoView(); return; }
   if (v === 'flomo') { renderFlomoView(); return; }
+  if (v === 'write') { renderWriteView(); return; }
   if (v === 'notes') { renderNotebooks(); return; }
   if (v === 'random') { renderRandomView(); return; }
   if (v === 'stats') { renderStatsView(); return; }
   if (v === 'pick') { renderPickView(); return; }
+  if (v === 'me') { renderMeView(); return; }
   renderSearchView();
 }
 
@@ -5891,7 +7603,7 @@ function renderShelfGrid() {
     : '');
   const scnt = pane.querySelector('#scnt');
   if (scnt) scnt.textContent = (window.__sfilter || '').trim() ? `筛出 ${all.length} 本` : '';
-  $('#bgShelf').textContent = all.length ? all.length : '';
+  setBadge('bgShelf', all.length);
 
   const oldMore = wrap.querySelector('.more');
   if (oldMore) oldMore.remove();
@@ -15474,10 +17186,10 @@ async function paintCleanup() {
   if (bk && plan.books) {
     // 把书库的真实路径写出来：点「清除数据」时最怕的就是把书一起清了，
     // 明说「这块地在哪、我不碰」比一句「请放心」有用得多。
-    bk.innerHTML = '清掉的是它自己攒下的那些：登录态、书架清单、设置、阅读时长、'
-      + '笔记索引、订阅条目、剪藏、封面、下载中间件。<b>书一定不动</b> —— 你的书在 '
-      + '<code>' + plan.books + '</code>，这边一律不碰。软件本体（那个 .app）也不归这儿管，'
-      + '不用了直接拖进废纸篓。';
+    bk.innerHTML = '清除的内容包括：登录状态、书架清单、设置、阅读时长、'
+      + '笔记索引、订阅条目、剪藏、封面与下载中间缓存。<b>书籍文件不会被删除</b>，'
+      + '它们位于 <code>' + plan.books + '</code>。软件本体（.app）不在清除范围内，'
+      + '卸载时直接拖入废纸篓即可。';
   }
   return plan;
 }
@@ -15725,6 +17437,13 @@ window.addEventListener('resize', moveNavPill);   // 换宽度时按钮行高会
 wireNavAhead();     // 侧边栏悬停预判：指针停在哪儿，先替那一屏把数据拉起来
 setInterval(() => drawState(), 2600);
 drawState(true);
+/* 计时心跳：学习时长 = 这个页面开着的时间，写作时长 = 停在写作台的时间。
+   间隔 30 秒一跳，每次报「距上一跳真实过了多久」而不是固定 30 —— 后台标签页
+   的定时器会被浏览器压成一分钟一次甚至停掉，按墙上时间算才不会把两小时压成 30 秒。
+   切走和关页面时补一跳，把那半截零头先结掉，不然这部分时长永远丢在最后一片。 */
+setInterval(() => beat(false), BEAT_MS);
+document.addEventListener('visibilitychange', () => { if (document.hidden) beat(true); });
+window.addEventListener('pagehide', () => { beat(true); });
 // 索引状态一上来就报一次：不然设置里那行「笔记索引：—」要等到用户进某个视图才更新；
 // 如果上一轮还在跑（比如刷新前点了建立），顺带把进度轮询接上。
 loadIdxState().then(st => { if (st.running) watchIndex(); });

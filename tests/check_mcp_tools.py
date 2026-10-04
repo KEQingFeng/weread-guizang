@@ -195,8 +195,8 @@ try:
     names = [t["name"] for t in tools]
     chk("握手：tools/list 数出来的工具与 TOOL_DEFS 一致",
         len(names) == len(declared) == len(handlers), (len(names), len(declared), len(handlers)))
-    chk("清单：至少 47 个工具（便签那两条加完的新下限；再往下就是工具被删了却没改这里）",
-        len(names) >= 47, len(names))
+    chk("清单：至少 56 个工具（写作那九个加完的新下限；再往下就是工具被删了却没改这里）",
+        len(names) >= 56, len(names))
     chk("清单：名字唯一", len(names) == len(set(names)))
     missing = sorted(set(handlers) - set(names))
     chk("清单：agent 能看见全部实现", not missing, missing)
@@ -559,6 +559,87 @@ try:
         "轮询" in prompt and "整本覆盖" in prompt and "canvas" in prompt, prompt[-320:])
     chk("接入说明交代了「与笔记有关先读画像、便签只读」这条口径（用户要的流程）",
         "flomo_portrait 再动手" in prompt and "便签一律只读" in prompt, prompt[-520:])
+    chk("接入说明把写作那几个工具也交代了（多了个模块，说明里不能说没有）",
+        all(("· 写作" in prompt, "writer_list" in prompt, "writer_export" in prompt,
+             "writer_ai" in prompt)), prompt[-760:])
+
+    # ── 8. 写作：稿子的建、读、存、回退、导出 ───────────────────
+    # 写作平台是这轮新长的模块，工具这条通路是从零接上去的：界面上有编辑器把着，
+    # agent 这边只有一串 JSON。要盯两件事：用户嘴上说的是「标题」，工具得能按标题
+    # 找到稿子；以及「整篇覆盖」这条语义得在工具层守住（没给正文不许清成空白）。
+    WRITE_DIR = BOOKS / "写作"
+
+    bad, txt = m.call("writer_list")
+    chk("writer_list：账是空的时候不报错，说的是去哪建",
+        not bad and "还没有稿子" in txt and "writer_create" in txt, txt[:200])
+
+    bad, txt = m.call("writer_create", {
+        "title": "工具链试笔",
+        "text": "# 工具链试笔\n\n第一段先说结论。\n\n## 第二节\n第二句补一句为什么。\n"})
+    wid = (re.search(r"\[id: (write_[0-9a-f]+)\]", txt) or [None, ""])[1]
+    chk("writer_create：建出来了，回话带着 id 与标题",
+        not bad and bool(wid) and "工具链试笔" in txt, (txt[:220], wid))
+    if wid:
+        atexit.register(lambda: shutil.rmtree(WRITE_DIR / wid, ignore_errors=True))
+
+    bad, txt = m.call("writer_list")
+    chk("writer_list：新建的稿子在列里，带字数与快照数",
+        not bad and "工具链试笔" in txt and wid in txt and "快照" in txt, txt[:260])
+
+    # 按标题找：用户在对话里说的是标题，不是 write_ 那一长串。
+    bad, txt = m.call("writer_read", {"draft": "工具链试笔"})
+    chk("writer_read：给标题也能读到（先按 id 认，再按标题）",
+        not bad and "第一段先说结论" in txt and "第二节" in txt, txt[:240])
+    chk("writer_read：章节结构按层级缩进给出来（agent 才知道有哪些节）",
+        not bad and "结构：" in txt and "- 工具链试笔" in txt and "  - 第二节" in txt, txt[:320])
+
+    bad, txt = m.call("writer_read", {"draft": "压根没这篇稿子"})
+    chk("标题对不上时回人话并指路 writer_list，不甩 HTTP 码",
+        bad and "writer_list" in txt and "HTTP" not in txt, txt[:200])
+
+    bad, txt = m.call("writer_save", {"draft": wid,
+                                      "text": "# 工具链试笔\n\n改过的第一段。\n\n## 第二节\n第二句补一句为什么。\n"})
+    disk = WRITE_DIR / wid / "draft.md"
+    chk("writer_save：正文落到盘上（不是只在回话里说存了）",
+        not bad and disk.is_file() and "改过的第一段" in disk.read_text(encoding="utf-8"),
+        (txt[:200], disk.exists()))
+    chk("writer_save：回话报字数与版本号", "字" in txt and "第" in txt, txt[:200])
+
+    bad, txt = m.call("writer_save", {"draft": wid})
+    still = disk.read_text(encoding="utf-8") if disk.is_file() else ""
+    chk("护栏：没给正文就拒绝保存（让它落盘等于把稿子清成空白）",
+        bad and "正文" in txt and "改过的第一段" in still, (txt[:200], still[:80]))
+
+    bad, txt = m.call("writer_snapshot", {"draft": wid})
+    chk("writer_snapshot：手动留一份快照，回话报份数",
+        not bad and "快照" in txt, txt[:200])
+    bad, txt = m.call("writer_versions", {"draft": wid})
+    vname = (re.search(r"- (\d{8}-\d{6}[\w-]*\.md)", txt) or [None, ""])[1]
+    chk("writer_versions：列得出刚才那份快照（新的在上）", not bad and bool(vname), txt[:260])
+
+    m.call("writer_save", {"draft": wid, "text": "# 工具链试笔\n\n后来改的，马上要退回去。\n"})
+    bad, txt = m.call("writer_restore", {"draft": wid, "name": vname})
+    back = disk.read_text(encoding="utf-8") if disk.is_file() else ""
+    chk("writer_restore：退回快照之后盘上就是那份旧正文",
+        not bad and "改过的第一段" in back, (txt[:220], back[:120]))
+
+    bad, txt = m.call("writer_export", {"draft": wid, "kind": "md"})
+    pline = next((ln.strip() for ln in txt.split("\n") if ln.strip().startswith("/")), "")
+    chk("writer_export：Markdown 落到导出目录，回话给的是真路径",
+        not bad and pline.endswith(".md") and pathlib.Path(pline).is_file(), (txt[:240], pline))
+    if pline:
+        atexit.register(lambda: pathlib.Path(pline).unlink(missing_ok=True))
+    bad, txt = m.call("writer_export", {"draft": wid, "kind": "docx"})
+    chk("writer_export：格式写错时列出 png / pdf / epub / md 四种，不硬编一个出来",
+        bad and all(x in txt for x in ("png", "pdf", "epub", "md")), txt[:200])
+
+    # AI 三件套：沙盒里没配接口，正确行为是「说清去哪配」，不是崩。
+    bad, txt = m.call("writer_ai", {"mode": "spark", "text": "写到这儿了。"})
+    chk("writer_ai：没配 AI 接口时指路「设置 → 小 Agent」，不是抛栈",
+        bad and "小 Agent" in txt and "HTTP" not in txt and "Traceback" not in txt, txt[:220])
+    bad, txt = m.call("writer_ai", {"mode": "没这个动作", "text": "x"})
+    chk("writer_ai：动作名写错时说清只有 cont / spark / polish 三种",
+        bad and "cont" in txt and "polish" in txt, txt[:200])
 finally:
     if FAIL:
         tail = "".join(m.err[-12:])

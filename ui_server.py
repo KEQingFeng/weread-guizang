@@ -33,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 import platform_compat as pc
+import activity
 import ai_sum
 import board as board_mod
 import book_export
@@ -46,16 +47,18 @@ import ffmpeg_tool
 import flomo_notes
 import media_setup
 import mindmap
+import person
 import sync as cloudsync
 import video_note
 import web_parse
+import writer as writer_mod
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.3"
+VERSION = "1.0.5"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -111,6 +114,11 @@ FLOMO_DIR = os.path.join(CACHE_DIR, "flomo")
 WALL_PATH = os.path.join(CACHE_DIR, "wallpaper.bin")
 # 本机阅读时长账本：界面里翻书的时间按天累计在这儿（微信读书那边的时间另有来源）。
 READSTAT_PATH = os.path.join(CACHE_DIR, "readstat.json")
+# 学习时长 + 写作时长那两本账（个人主界面两张热力图的数源），和阅读时长分开放：
+# 口径不同、清零各清各的，合成一个文件反而容易一删删掉三笔。
+ACTIVITY_PATH = os.path.join(CACHE_DIR, "activity.json")
+# 个人主界面的头像：跟壁纸一样存成文件，不进 localStorage（照片几 MB，那边只有 5MB）。
+AVATAR_PATH = os.path.join(CACHE_DIR, "avatar.bin")
 UI_PATH = os.path.join(REPO, "ui.html")
 # 离线可用的第三方前端库（页面内读正文用的 markdown 渲染器，见 vendor/README.md）
 VENDOR_DIR = os.path.join(REPO, "vendor")
@@ -597,6 +605,569 @@ def readstat_clear():
     with _READSTAT_LOCK:
         save_readstat({"total": 0, "days": {}, "books": {}})
     return True, "本机阅读时长已清零"
+
+
+# ---------- 学习时长与写作时长 ----------
+#
+# 个人主界面那两张热力图唯一的数源。三本账各记各的，谁也不挪用谁：
+#
+#     微信读书官方    只在它自家 App / 网页里读的那些时间
+#     readstat.json   在归藏里翻本地书的阅读时长（上面那一节）
+#     activity.json   学习时长（归藏开着在干活）+ 写作时长（待在写作平台里）
+#
+# 一个行为换一本账是刻意的：这三件事会同时发生，合并成「今日时长」等于什么都没
+# 说清楚。口径（单次最多 300 秒、单日封顶 12 小时、只留 400 天）全写在 activity.py，
+# 这一层只管落盘和一把锁 —— 锁的理由和 _READSTAT_LOCK 一样：账本是读—改—写，
+# 两个心跳并发进来就会互相覆盖，界面点得快一点数字就该对不上了。
+
+_ACTIVITY_LOCK = threading.RLock()
+
+
+def load_activity():
+    with _ACTIVITY_LOCK:
+        try:
+            with open(ACTIVITY_PATH, encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
+        return activity.load(raw)
+
+
+def activity_tick(kind, seconds):
+    """记一段时长进今天这一格，返回真正计入的秒数（0 = 这一笔没记上）。
+
+    给的是计入值而不是 bool：超单日上限、页面被冻结那种「夹过」的部分不能让屏幕上
+    也照原样加一遍，否则一次心跳就能把数字吹出一分钟。
+    """
+    if kind not in activity.KINDS:
+        return 0
+    with _ACTIVITY_LOCK:
+        d = load_activity()
+        add = activity.tick(d, kind, seconds)
+        if add:
+            with _WRITE_LOCK:
+                _write_json(ACTIVITY_PATH, d)
+    return add
+
+
+def activity_summary():
+    """两张热力图要的整包（含 371 格日历）。只在进个人主界面时取一次。"""
+    return activity.summary(load_activity())
+
+
+def activity_brief():
+    """给 /api/state 的那一小撮：今天 + 总计 + 连续，不含日历格子。
+
+    /api/state 是几秒一轮的轮询，把两张热力图的格子塞进去等于每轮多发几十 KB；
+    大数走 /api/activity，进那一屏才取。
+    """
+    d = load_activity()
+    today = time.strftime("%Y-%m-%d")
+    out = {}
+    for kind in activity.KINDS:
+        out[kind] = {"today": activity.day_total(d, kind, today),
+                    "total": int(d[kind].get("total", 0)),
+                    "streak": activity.streak(d, kind, today=today),
+                    "name": activity.KIND_NAMES[kind]}
+    return out
+
+
+def activity_clear(kind=None):
+    if kind is not None and kind not in activity.KINDS:
+        return False, "没有这一本账"
+    with _ACTIVITY_LOCK:
+        d, msg = activity.clear(load_activity(), kind)
+        with _WRITE_LOCK:
+            _write_json(ACTIVITY_PATH, d)
+    return True, msg
+
+
+# ---------- 个人主界面：头像、名字、简介 ----------
+#
+# 三项都只落在这台机器上：cache/avatar.bin + config.json 里那几个键。
+# 不进云同步（sync 那份白名单没它们）、不进日志、不进 git。清洗规则在 person.py：
+# 长度夹住、控制字符去掉、尖括号换掉 —— 名字与简介会被好几处拼进 HTML，
+# 存的时候洗干净比指望每个调用点都记得转义可靠。
+
+AVATAR_MAX = 8 * 1024 * 1024
+
+
+def profile_view():
+    cfg = load_cfg()
+    p = person.normalize(cfg)
+    p["avatar"] = os.path.isfile(AVATAR_PATH)
+    # 带个时间戳当版本号：换了一张头像而文件名没变，浏览器会命中缓存继续显示旧的
+    p["v"] = int(os.path.getmtime(AVATAR_PATH)) if p["avatar"] else 0
+    p["limits"] = {"name": person.NAME_MAX, "bio": person.BIO_MAX}
+    return p
+
+
+def save_profile(name, bio):
+    """存名字与简介。None = 这一项保持原样，"" = 清空 —— 界面上两个框一次提交，
+    不分清楚就会「只想改简介，把名字抹了」。"""
+    cfg = load_cfg()
+    changed, cfg = person.set_profile(cfg, name, bio)
+    save_cfg(cfg)
+    return True, ("已保存：" + "、".join(changed)) if changed else "没有改动"
+
+
+def save_avatar(data_url):
+    """和壁纸同一套路：base64 → 按魔数认类型 → 落文件。认不出来就拒收，
+    不要存一个打不开的「头像」，那比拒绝更麻烦。"""
+    m = re.match(r"^data:(image/[a-z+]+);base64,(.+)$", (data_url or "").strip(), re.S)
+    if not m:
+        raise RuntimeError("只认 base64 的图片数据")
+    try:
+        raw = base64.b64decode(m.group(2), validate=False)
+    except Exception:
+        raise RuntimeError("图片数据解不开")
+    mime = person.sniff_image(raw)
+    if not mime:
+        raise RuntimeError("这不是 PNG / JPEG / GIF / WEBP 图片")
+    if len(raw) > AVATAR_MAX:
+        raise RuntimeError("图片太大了（请压到 8 MB 以内）")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (AVATAR_PATH, os.getpid(), uuid.uuid4().hex[:8])
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    os.replace(tmp, AVATAR_PATH)
+    cfg = load_cfg()
+    cfg["avatar_mime"] = mime
+    save_cfg(cfg)
+    return len(raw)
+
+
+def clear_avatar():
+    try:
+        os.remove(AVATAR_PATH)
+    except OSError:
+        pass
+    cfg = load_cfg()
+    cfg.pop("avatar_mime", None)
+    save_cfg(cfg)
+
+
+def avatar_file():
+    """(路径, mime)，没头像给 None。类型读的是 cfg，丢了就现读头 16 个字节。"""
+    if not os.path.isfile(AVATAR_PATH):
+        return None
+    mime = str(load_cfg().get("avatar_mime") or "").strip()
+    if mime not in person_mime_ok():
+        try:
+            with open(AVATAR_PATH, "rb") as f:
+                mime = person.sniff_image(f.read(16)) or ""
+        except OSError:
+            mime = ""
+    return AVATAR_PATH, (mime or "image/jpeg")
+
+
+def person_mime_ok():
+    return {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+# ---------- 侧边导航：入口顺序、显隐、触发方式 ----------
+#
+# 界面 `<nav id="nav">` 里那几颗按钮的 `data-v` 就是这里的 id，两边一一对得上
+# （tests/check_nav.py 逐条比页面与这张表，页面加一颗而后端漏一行就会红）。
+#
+# 顺序与显隐存在 config.json：它说的是「这台机器上这个人怎么用」，和主题、磨砂
+# 浓度同一类，不该跟着书走，也不该进云同步（换台机器强迫症重犯一遍才算数）。
+
+NAV_ITEMS = [
+    ("shelf", "我的书架", "space"),
+    ("local", "本地书架", "space"),
+    ("clip", "剪藏文章", "space"),
+    ("feed", "订阅", "space"),
+    ("video", "视频转笔记", "space"),
+    ("flomo", "便签", "space"),
+    ("write", "写作", "space"),
+    ("notes", "划线笔记", "tool"),
+    ("random", "随机漫步", "tool"),
+    ("stats", "阅读统计", "tool"),
+    ("pick", "为我推荐", "tool"),
+    ("search", "搜索书籍", "tool"),
+]
+NAV_IDS = [i for i, _l, _g in NAV_ITEMS]
+NAV_LABEL = {i: l for i, l, _g in NAV_ITEMS}
+NAV_GROUP = {i: g for i, _l, g in NAV_ITEMS}
+SIDEBAR_MODES = ("open", "edge")      # 摊开 / 靠边触发（鼠标移近左边缘才弹）
+
+
+def nav_view():
+    """按用户存的顺序与显隐整理一遍：缺的补在末尾，不认识的丢掉。
+
+    「新入口排在后面」这条是升级最容易踩的坑 —— 这一版多了「写作」，如果按存的
+    顺序表找不到就丢，老用户更新完会发现某一格凭空没了。
+    """
+    cfg = load_cfg()
+    saved = [x for x in (cfg.get("nav_order") or []) if x in NAV_IDS]
+    order = saved + [x for x in NAV_IDS if x not in saved]
+    hidden = {x for x in (cfg.get("nav_hidden") or []) if x in NAV_IDS}
+    items = [{"id": i, "label": NAV_LABEL[i], "group": NAV_GROUP[i],
+              "hidden": i in hidden} for i in order]
+    visible = [x["id"] for x in items if not x["hidden"]]
+    mode = cfg.get("sidebar_mode")
+    return {"items": items,
+            "sidebar": mode if mode in SIDEBAR_MODES else "open",
+            "hover": bool(cfg.get("sidebar_hover", True)),
+            # 重启后落在哪一屏：第一格可见的入口，全关掉那种情况兜回书架
+            "home": visible[0] if visible else "shelf"}
+
+
+def save_nav(order=None, hidden=None, sidebar=None, hover=None):
+    cfg = load_cfg()
+    if order is not None:
+        want = [x for x in (order if isinstance(order, list) else []) if x in NAV_IDS]
+        cfg["nav_order"] = want + [x for x in NAV_IDS if x not in want]
+    if hidden is not None:
+        keep = {x for x in (hidden if isinstance(hidden, list) else []) if x in NAV_IDS}
+        # 至少要留一颗：全关掉之后主界面没有能点的东西，那不是「隐藏入口」是把自己锁在门外
+        if len(keep) >= len(NAV_IDS):
+            return False, "至少保留一个入口，不然主界面就没有能看的东西了"
+        cfg["nav_hidden"] = [x for x in NAV_IDS if x in keep]
+    if sidebar in SIDEBAR_MODES:
+        cfg["sidebar_mode"] = sidebar
+    if hover is not None:
+        cfg["sidebar_hover"] = bool(hover)
+    save_cfg(cfg)
+    return True, "已保存"
+
+
+# ---------- 写作平台 ----------
+#
+# 一篇稿子 = 书库第七格（写作/）里的一个书号，所以这一段几乎没有「新东西」：
+# 目录、分类账、标签、封面、AI 小结、清理白名单、MCP 那几十号工具、safe_book_dir
+# 那道路径闸，全都按「书库里一个书号」在工作。这里只做四件事：按 id 找到稿子目录
+# （并且只认 write_ 前缀）、把正文读进读出、拼 AI 提示词、把成品导成图片/PDF/EPUB。
+#
+# 一条红线：素材（便签与划线原文）只进提示词。日志、回执、界面上都不回显 ——
+# 落进日志就等于落进仓库，那是用户的私货。
+
+def draft_dir(book_id):
+    """这篇稿子在哪。前缀不对就当不存在：写作这一格的接口不该顺手改到别的模块的书。"""
+    if not writer_mod.ok_id(book_id):
+        return None
+    return safe_book_dir(book_id)
+
+
+def writer_list():
+    """稿子清单 + 两个总数（写作平台表头那行「N 篇 · M 字」）。"""
+    drafts = writer_mod.list_drafts(OUT_DIR)
+    return {"drafts": drafts, "count": len(drafts),
+            "words": sum(int(d.get("words") or 0) for d in drafts),
+            "templates": [{"id": k, "label": l} for k, l in writer_mod.TPL_LABELS
+                          if k in writer_mod.TEMPLATES],
+            "lengths": [{"id": k, "label": l} for k, l, _t, _s in writer_mod.LENGTHS],
+            "tones": [{"id": k, "label": l} for k, l in writer_mod.POLISH_TONES]}
+
+
+def writer_read(book_id):
+    """整篇读出来（正文 + 大纲 + 字数 + 快照列表）。编辑器进来取一次，不是轮询的。"""
+    d = draft_dir(book_id)
+    if not d:
+        return None
+    m = writer_mod.load_meta(d)
+    if not m:
+        return None
+    text = writer_mod.read_text(d)
+    return {"ok": True,
+            "meta": {k: m.get(k) for k in ("id", "title", "rev", "words",
+                                           "created", "updated")},
+            "text": text, "outline": writer_mod.outline(text),
+            "count": writer_mod.words(text),
+            "versions": writer_mod.versions(d),
+            "dir": d}
+
+
+def writer_material(ids=(), book="", typed=""):
+    """攒「这次用哪些笔记」：勾选的便签 / 某本书的划线 / 用户手打的那几行。
+
+    ids 的形状是 `flomo:<条号>` 或 `marks:<书号>`（整本划线一起给，最多 60 条）。
+    回的是**原文列表**，不是拼好的那段提示词：夹多长、加不加「〔作者的笔记素材〕」
+    那句抬头，归 writer.material_block 一处管。这里先包一次、那边再包一次，
+    提示词里就会套出两层抬头，模型看到的是套娃。
+    """
+    items = []
+    if isinstance(ids, str):
+        ids = [ids]
+    data = None
+    pool = list(ids or [])
+    if book:
+        pool.append("marks:" + str(book))
+    for raw in pool[:60]:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        if s.startswith("flomo:"):
+            if data is None:
+                data = flomo_notes.load(FLOMO_DIR)
+            m = flomo_notes.one(data, s[6:].strip())
+            if m:
+                txt = flomo_notes.strip_inline_tags(m.get("md"), m.get("tags"))
+                if str(txt or "").strip():
+                    items.append(str(txt).strip()[:800])
+        elif s.startswith("marks:"):
+            d = safe_book_dir(s[6:].strip())
+            if d:
+                doc = book_notes.load_notes(d)
+                for mk in (doc.get("marks") or [])[:60]:
+                    t = str((mk or {}).get("text") or "").strip()
+                    if t:
+                        items.append(t[:400])
+        else:
+            items.append(s[:800])
+    if str(typed or "").strip():
+        items.append(str(typed).strip()[:2000])
+    return items
+
+
+def writer_do(body):
+    """POST /api/writer：建、存、改名、拍快照、回退，一个口五种动作。"""
+    do = str((body or {}).get("do") or "")
+    book = str((body or {}).get("id") or (body or {}).get("book") or "")
+
+    if do == "create":
+        title = str((body or {}).get("title") or "")[:80]
+        text = (body or {}).get("text")
+        out = writer_mod.create(OUT_DIR, title, text if isinstance(text, str) else "")
+        if not out:
+            return {"ok": False, "msg": "建不出这篇稿子（书库写不进去）"}
+        book_id, _meta = out
+        log("--- 新稿：%s ---" % book_id)      # 只书号，不正文
+        return {"ok": True, "id": book_id, "draft": writer_read(book_id) or {}}
+
+    if do in ("save", "rename"):
+        d = draft_dir(book)
+        if not d:
+            return {"ok": False, "msg": "这篇稿子不在了"}
+        if do == "rename":
+            text = writer_mod.read_text(d)
+        else:
+            text = (body or {}).get("text")
+            if not isinstance(text, str):
+                # 没有正文的「保存」必须挡下来：让它落盘就会把稿子清成空白
+                return {"ok": False, "msg": "没收到正文，没有覆盖"}
+        rev = (body or {}).get("rev")
+        ok, out = writer_mod.save(OUT_DIR, book, text,
+                                  title=(body or {}).get("title"),
+                                  rev=rev if rev is not None else None)
+        if not ok:
+            return {"ok": False, "msg": out.get("msg") or "没存上",
+                    "conflict": out.get("conflict") or None}
+        return {"ok": True, "rev": int(out.get("rev", 0)),
+                "words": int(out.get("words", 0)),
+                "updated": int(out.get("updated", 0)), "id": book}
+
+    if do == "snapshot":
+        d = draft_dir(book)
+        if not d:
+            return {"ok": False, "msg": "这篇稿子不在了"}
+        name = writer_mod.snapshot_now(d, writer_mod.read_text(d))
+        return {"ok": True, "name": name, "versions": writer_mod.versions(d)}
+
+    if do == "versions":
+        d = draft_dir(book)
+        if not d:
+            return {"ok": False, "msg": "这篇稿子不在了"}
+        return {"ok": True, "versions": writer_mod.versions(d)}
+
+    if do == "restore":
+        d = draft_dir(book)
+        if not d:
+            return {"ok": False, "msg": "这篇稿子不在了"}
+        ok, out = writer_mod.restore(OUT_DIR, book, str((body or {}).get("name") or ""))
+        if not ok:
+            return {"ok": False, "msg": (out or {}).get("msg") or "回退没做成"}
+        return {"ok": True, "draft": writer_read(book) or {}}
+
+    return {"ok": False, "msg": "没说要干什么：建、存、改名、快照还是回退"}
+
+
+WRITER_AI_MODES = ("cont", "spark", "polish")
+
+
+def writer_ai_args(body):
+    """把界面上那三个按钮的请求整理成上游要的形状，返回 (messages, extra)。
+
+    三个动作共用「先看用户的笔记」，不同之处只在要它产出多少、能不能碰原文：
+
+      · 续写（cont）  流式往外吐。写多长由用户点那一档决定，`max_tokens` 和
+        `stop` 由后端按档位给 —— 各家模型对「继续写一段」的理解差得太远，
+        只有换成明确的上限和终止符才拿得住。
+      · 灵感（spark） 一次给 3 个方向，不满意再刷新。只给方向，不给成稿；
+        已经给过的角度会带回去，让下一批别再说同一件事。
+      · 润色（polish）只改选中的那一段。回来以后按差异切成一块一块，人逐块
+        接受 —— 这一段路径上没有任何一步会直接覆盖用户的正文。
+
+    素材原文只进 messages：日志、回执、界面上都不回显，落进日志就等于落进仓库。
+    """
+    mode = str((body or {}).get("mode") or "")
+    if mode not in WRITER_AI_MODES:
+        raise RuntimeError("写作助手只有续写、灵感、润色这三种动作")
+    text = str((body or {}).get("text") or "")
+    sel = str((body or {}).get("sel") or "")
+    material = writer_material((body or {}).get("material") or (),
+                               (body or {}).get("book") or "",
+                               (body or {}).get("typed") or "")
+    # 手上这份稿子的角度只在 id 合法时才记账：临时起意的一段话不该写进任何稿子
+    did = str((body or {}).get("id") or "")
+    tracked = did if writer_mod.ok_id(did) and draft_dir(did) else ""
+
+    if mode == "cont":
+        if not (text or sel).strip():
+            raise RuntimeError("先写几句，它才有得接")
+        length = str((body or {}).get("length") or "para")
+        if length not in writer_mod.LENGTH_OF:
+            length = "para"
+        msgs, extra = writer_mod.cont_messages(text or sel, material, length,
+                                               str((body or {}).get("hint") or ""))
+        return msgs, extra
+    if mode == "spark":
+        if not (text or sel).strip():
+            raise RuntimeError("先写几句，它才有得想")
+        seen = writer_mod.seen_sparks(OUT_DIR, tracked) if tracked else []
+        return writer_mod.spark_messages(text or sel, material, seen, 3), {}
+    tone = str((body or {}).get("tone") or "smooth")
+    if tone not in dict(writer_mod.POLISH_TONES):
+        tone = "smooth"
+    if not sel.strip():
+        raise RuntimeError("先选中要润色的那一段")
+    return writer_mod.polish_messages(sel, tone, material), {}
+
+
+def writer_ai_after(mode, raw, body):
+    """上游回完之后的收尾：灵感要解析成 3 张卡并记下角度，润色要切成差异块。
+
+    放在后端而不是页面上：切块对不对，决定「接受」和「回退」是不是可信，
+    而这段逻辑在 Python 里能直接单测（difflib 是标准库）。
+    """
+    if mode == "spark":
+        angles = writer_mod.parse_sparks(raw, 3)
+        did = str((body or {}).get("id") or "")
+        if angles and writer_mod.ok_id(did) and draft_dir(did):
+            writer_mod.remember_sparks(OUT_DIR, did, angles)
+        return {"ok": bool(angles), "sparks": angles,
+                "msg": "" if angles else "那边没给方向，再刷一次试试"}
+    blocks = writer_mod.diff_blocks(str((body or {}).get("sel") or ""), raw)
+    return {"ok": True, "blocks": blocks, "raw": raw}
+
+
+def writer_export_html(book_id, opts):
+    """按模板把那篇稿子拼成一份完整的 HTML（导出与预览共用这一份）。"""
+    d = writer_mod.read(OUT_DIR, book_id)
+    if not d:
+        return None
+    tpl = str(opts.get("tpl") or "plain")
+    date_str = time.strftime("%Y-%m-%d") if str(opts.get("date", "1")) != "0" else ""
+    brand = "归藏" if str(opts.get("brand", "1")) != "0" else ""
+    lead = ""
+    if str(opts.get("lead", "1")) != "0":
+        n = int((d.get("count") or {}).get("total") or 0)
+        stamp = time.strftime("%Y年%m月%d日", time.localtime(int(d.get("updated") or 0)))
+        lead = "%d 字 · %s" % (n, stamp) if n or stamp else ""
+    return writer_mod.export_html(d["text"], title=d.get("title") or "",
+                                 tpl=tpl, brand=brand, date_str=date_str, lead=lead)
+
+
+def file_stem(name):
+    """当文件名用的一串字：只留中日韩字、字母数字与 . _ -，别的换成下划线。
+
+    标题是用户自己起的，里面有 `/`、引号、表情都不奇怪；拼进路径前不洗一遍，
+    轻则写不出文件，重则写出一个到别处去的相对路径。
+    """
+    s = re.sub(r"[^0-9A-Za-z._\-\u3400-\u9fff ]+", "_", str(name or "").strip())
+    s = re.sub(r"^[.\s]+", "", s).replace("..", "_")
+    return s[:60] or "稿子"
+
+
+def writer_export(kind, book_id, opts):
+    """导成 png / pdf / epub / md，都落在 DOWNLOAD_DIR，返回 (路径, 备注)。
+
+    三种渲染格式共用同一份 HTML：先导出一次再各自渲染，比各写一套模板容易对齐 ——
+    「屏幕上预览的」和「存下来的」必须是同一个东西，否则用户会以为导出丢了格式。
+    md 不用渲染，落的是正文原文；也放同一个文件夹，四颗按钮的文件才在一处。
+    """
+    html = writer_export_html(book_id, opts)
+    if html is None:
+        raise RuntimeError("这篇稿子不在了")
+    d = writer_mod.read(OUT_DIR, book_id)
+    stem = file_stem((d or {}).get("title") or book_id)
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    note = ""
+    if kind == "png":
+        scale = max(1, min(int(opts.get("scale") or 2), 3))
+        tpl = str(opts.get("tpl") or "plain")
+        width = writer_mod.tpl_width(tpl)
+        dest = os.path.join(DOWNLOAD_DIR, "%s.png" % stem)
+        _p, font_ok = writer_mod.export_image(html, dest, width=width, scale=scale)
+        if not font_ok:
+            note = "（系统里没找到 PingFang SC，中文按替代字形排的）"
+    elif kind == "pdf":
+        dest = os.path.join(DOWNLOAD_DIR, "%s.pdf" % stem)
+        writer_mod.export_pdf(html, dest)
+    elif kind == "epub":
+        dest = os.path.join(DOWNLOAD_DIR, "%s.epub" % stem)
+        tmp = tempfile.mkdtemp(prefix="guizang-write-")
+        try:
+            one = writer_mod.as_book_dir(OUT_DIR, book_id, tmp)
+            if not one:
+                raise RuntimeError("这篇稿子不在了")
+            book_export.build_epub(one, dest,
+                                   title=(d or {}).get("title") or "未命名稿",
+                                   author=profile_view()["name"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    elif kind == "md":
+        # 也在导出文件夹里落一份，四颗按钮的文件才在同一个地方 ——
+        # 单独走浏览器下载的话，「打开所在文件夹」翻不到它。
+        dest = os.path.join(DOWNLOAD_DIR, "%s.md" % stem)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(((d or {}).get("text") or ""))
+    else:
+        raise RuntimeError("没有这一种导出格式")
+    return dest, note
+
+
+def writer_view(q):
+    """GET /api/writer 那几种问法的共同出口（回 JSON 的那些）。
+
+    不带 id 给清单，带 id 给整篇，mode=versions 只看快照列表。页面上「写作」
+    那一格进来先取清单，点开某一篇才取整篇 —— 正文可能几万字，全量轮询会把
+    这台机器的人等成看幻灯片。
+    """
+    did = str(q.get("id", [""])[0] or "")
+    mode = str(q.get("mode", [""])[0] or "")
+    if not did:
+        return writer_list()
+    if mode == "versions":
+        d = draft_dir(did)
+        if not d:
+            return {"ok": False, "msg": "这篇稿子不在了"}
+        return {"ok": True, "versions": writer_mod.versions(d)}
+    one = writer_read(did)
+    if not one:
+        return {"ok": False, "msg": "这篇稿子不在了"}
+    return one
+
+
+_WRITER_TOTALS = {"at": 0.0, "v": {"count": 0, "words": 0}}
+
+
+def writer_totals():
+    """给 /api/state 的两个总数：几篇稿子、一共多少字。
+
+    整个模块目录每 2.6 秒走一遍是不划算的（每篇都要读一次 meta.json），所以留
+    15 秒的缓存：这一份只是「写作」那一格标题上的概数，进那一屏时 /api/writer
+    会取一份准的。
+    """
+    now = time.time()
+    if now - _WRITER_TOTALS["at"] > 15:
+        drafts = writer_mod.list_drafts(OUT_DIR)
+        _WRITER_TOTALS["v"] = {"count": len(drafts),
+                               "words": sum(int(d.get("words") or 0) for d in drafts)}
+        _WRITER_TOTALS["at"] = now
+    return _WRITER_TOTALS["v"]
+
 
 
 # ---------- 云同步 ----------
@@ -1193,8 +1764,11 @@ def mcp_prompt():
         "· 画板：board_list、board_show、board_new、board_save、board_delete",
         "· 便签（flomo）：flomo_notes（读，按标签 / 关键字筛，带 id 取全文）、",
         "  flomo_portrait（读「用户记忆画像」，只有数字与标签，不含原文）",
+        "· 写作：writer_list（列稿）、writer_read（读全文，超 6000 字加 full: true）、writer_create（新建）、",
+        "  writer_save（整篇存，存前自动留快照）、writer_versions / writer_snapshot / writer_restore（回退）、",
+        "  writer_export（导出图片 / PDF / 电子书 / Markdown）、writer_ai（续写 / 灵感方向 / 润色建议）",
         "",
-        "五点注意，都是这个工具的设计口径，请照着做：",
+        "六点注意，都是这个工具的设计口径，请照着做：",
         "1. 取书、转写、批量取书、刷新订阅都是分钟到小时级的长任务：调用会立即返回，",
         "   进度用 app_status / task_log 轮询，不要在调用里等它跑完。",
         "2. 改转写请只用 video_transcript_save 的 edits / drop / add —— 只说改了哪几段，",
@@ -1205,6 +1779,8 @@ def mcp_prompt():
         "5. 只要这件事和用户的笔记有关，先调一次 flomo_portrait 再动手：那份画像是",
         "   「他怎么记东西」的账（节奏、标签层级、长短、常打的标签），读完再决定翻几条、",
         "   按哪个标签找、回复写多长。便签一律只读 —— 改笔记是用户自己的事，没有写口。",
+        "6. writer_save 是整篇覆盖：改一篇稿子要先 writer_read 拿回全文，改完整篇存回去；",
+        "   别只发一句「把第二段改一下」。writer_ai 的润色只给差异建议，要不要用由用户定。",
         "",
         "弄好后用 shelf_list 试一下，能读出书架就说明通了。",
     ])
@@ -1488,13 +2064,19 @@ def agent_deltas(resp):
         raise AgentStreamCut("上游话说一半就断了线，这次这份没存（上一次的那份还在）")
 
 
-def agent_once(messages, timeout=90):
+def agent_once(messages, timeout=90, extra=None):
     """问一次、等整段答案（不流式）。要 JSON 的那些活儿用它 —— 导图、画像这类，
-    半棵树在屏幕上蹦出来没有意义，拼完整了才能解析。失败抛人话，由调用方翻成提示。"""
+    半棵树在屏幕上蹦出来没有意义，拼完整了才能解析。失败抛人话，由调用方翻成提示。
+
+    `extra` 是给上游 body 补的那几项（`max_tokens`、`stop` 之类）。写作平台的
+    灵感与润色用它把长度摁住：不限制的话，一句「给三个方向」能回出一整篇文章。
+    """
     url, key, model = agent_cfg()
     if not url or not model:
         raise RuntimeError("还没配 AI 接口：设置 → 读书小助手，填地址和模型名")
     body = {"model": model, "messages": messages, "stream": False}
+    if extra:
+        body.update(extra)
     with agent_open({"url": url, "key": key, "body": body},
                     stream=False, timeout=timeout) as r:
         j = json.loads(r.read().decode("utf-8", "replace"))
@@ -3373,6 +3955,52 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
+    def _writer_ai(self, body):
+        """写作平台那三个按钮的出口：续写流式，灵感与润色一次问完再回。
+
+        流式那条一旦转成流就改不了状态码，所以「没配接口」「先写几句」这类问题
+        全部在 _sse_start 之前挡掉（和小 Agent、AI 小结同一条规矩）。
+        续写失败要当场把已经吐出来的字作废：半截续写当成品接进正文，比没接更糟。
+        """
+        mode = str((body or {}).get("mode") or "")
+        url, key, model = agent_cfg()
+        if not url or not model:
+            return self._json({"ok": False,
+                               "msg": "还没配 AI 接口：设置 → 小 Agent，填地址和模型名"})
+        try:
+            msgs, extra = writer_ai_args(body)
+        except Exception as e:
+            return self._json({"ok": False, "msg": str(e)[:200]})
+        if mode == "cont":
+            # 不接 SSE 的调用方（MCP 适配器）走这条：整段回来，不吐分片。界面上那颗
+            # 按钮永远是流式的（要的是字一个个出来），所以默认不动，得显式说 stream=0。
+            if str((body or {}).get("stream") or "").lower() in ("0", "false", "no"):
+                try:
+                    raw = agent_once(msgs, 180, extra or None)
+                except Exception as e:
+                    return self._json({"ok": False, "msg": str(e)[:200]})
+                return self._json({"ok": True, "text": raw})
+            self._sse_start()
+            payload = {"url": url, "key": key,
+                       "body": dict({"model": model, "messages": msgs, "stream": True},
+                                    **(extra or {}))}
+            try:
+                with agent_open(payload) as r:
+                    for piece in agent_deltas(r):
+                        self._chunk(json.dumps({"d": piece}, ensure_ascii=False) + "\n")
+                self._chunk('{"done":true}\n')
+            except Exception as e:
+                # 只记错，不记素材也不记正文：那两头都是用户的私货
+                log("--- 续写断了：%s ---" % str(e)[:120])
+                self._chunk(json.dumps({"err": str(e)[:300]}, ensure_ascii=False) + "\n")
+            self._chunk_end()
+            return
+        try:
+            raw = agent_once(msgs, 120, extra or None)
+        except Exception as e:
+            return self._json({"ok": False, "msg": str(e)[:200]})
+        return self._json(writer_ai_after(mode, raw, body))
+
     def do_GET(self):
         u = urlparse(self.path)
         # keep_blank_values：空的 group= / tag= 是「未分组」「不限标签」这一档筛选，
@@ -3440,6 +4068,14 @@ class Handler(BaseHTTPRequestHandler):
                           "at": fm["at"]},
                 "wallpaper": {"set": os.path.isfile(WALL_PATH),
                               "v": int(os.path.getmtime(WALL_PATH)) if os.path.isfile(WALL_PATH) else 0},
+                # 个人主界面那三样：名字、简介、有没有头像（图本身走 /api/avatar）。
+                # 导航这一份决定侧边栏摆哪几颗、什么顺序、怎么触发 —— 页面每次
+                # 起来照它渲染，不在浏览器里存一份「第二个真相」。
+                "profile": profile_view(),
+                "nav": nav_view(),
+                # 两张热力图的常驻摘要（今天 / 总计 / 连续），日历格子走 /api/activity
+                "activity": activity_brief(),
+                "writer": writer_totals(),
                 "export": {"dir": export_dir()},
                 "agent": agent_state(),
                 "sync": sync_state(),
@@ -3485,6 +4121,73 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/readstat":
             return self._json(readstat_summary())
+
+        if path == "/api/activity":
+            # 两张热力图的整包（含日历格子）。进个人主界面才取，不在轮询里带 ——
+            # 一年 371 格 × 两本账，每 2.6 秒发一次纯属浪费。
+            return self._json(activity_summary())
+
+        if path == "/api/avatar":
+            hit = avatar_file()
+            if not hit:
+                return self._send(404, "text/plain; charset=utf-8", "no avatar")
+            fp, mime = hit
+            with open(fp, "rb") as f:
+                # 认 URL 上那个 ?v= 时间戳换缓存（和壁纸同一办法）：文件路径固定，
+                # 不带版本的话换一张脸，浏览器会继续显示上一张。
+                return self._send(200, mime, f.read(),
+                                  {"Cache-Control": "private, max-age=86400"})
+
+        if path == "/api/writer":
+            did = q.get("id", [""])[0]
+            mode = q.get("mode", [""])[0]
+            # 这两种要法回的是字节不是 JSON：预览那份 HTML 就是导出用的同一条拼装
+            # 路径，所以「对话框里看到的」和「存下来的」必然一致。
+            if mode == "preview" and did:
+                html = writer_export_html(did, {k: v[0] for k, v in q.items()})
+                if html is None:
+                    return self._send(404, "text/plain; charset=utf-8", "这篇稿子不在了")
+                return self._send(200, "text/html; charset=utf-8", html,
+                                  {"Cache-Control": "no-store"})
+            if mode == "md" and did:
+                one = writer_read(did)
+                if not one:
+                    return self._send(404, "text/plain; charset=utf-8", "这篇稿子不在了")
+                return self._send(200, "text/markdown; charset=utf-8", one["text"],
+                                  {"Content-Disposition":
+                                   content_disp(file_stem(one["meta"].get("title") or did), "md")})
+            return self._json(writer_view(q))
+
+        if path == "/api/writer/export":
+            kind = q.get("kind", [""])[0]
+            if kind not in ("png", "pdf", "epub", "md"):
+                return self._send(400, "text/plain; charset=utf-8", "没有这一种导出格式")
+            if kind in ("png", "pdf") and not chromium_ready():
+                # 和书本导出同一道前置拦：铬内核没装好就当场说，别让人等半分钟才见红
+                return self._send(400, "text/plain; charset=utf-8",
+                                  "导出图片和 PDF 要用到内置的铬内核，它还没装好")
+            try:
+                dest, note = writer_export(kind, q.get("id", [""])[0],
+                                           {k: v[0] for k, v in q.items()})
+            except Exception as e:
+                return self._send(500, "text/plain; charset=utf-8",
+                                  "导出没做成：%s" % str(e)[:200])
+            size = os.path.getsize(dest)
+            stem = os.path.splitext(os.path.basename(dest))[0]
+            if q.get("json", [""])[0] in ("1", "true"):
+                return self._json({"ok": True, "path": dest, "size": size,
+                                   "kind": kind, "note": note})
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             {"png": "image/png", "pdf": "application/pdf",
+                              "epub": "application/epub+zip",
+                              "md": "text/markdown; charset=utf-8"}[kind])
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", content_disp(stem, kind))
+            self.end_headers()
+            with open(dest, "rb") as f:
+                shutil.copyfileobj(f, self.wfile)
+            return
 
         if path == "/api/log":
             with _lock:
@@ -4056,6 +4759,52 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = readstat_clear()
             return self._json({"ok": ok, "msg": msg})
 
+        if u.path == "/api/activity/tick":
+            # 心跳。回的是「真正计入的秒数」不是 ok：单次夹 300 秒、单日封顶 12 小时，
+            # 页面拿这个数更新自己的读数，屏幕上的数字和账本里的数才会永远对得上。
+            add = activity_tick((body or {}).get("kind"), (body or {}).get("seconds"))
+            return self._json({"ok": add > 0, "added": add})
+
+        if u.path == "/api/activity/clear":
+            kind = (body or {}).get("kind")
+            ok, msg = activity_clear(kind if kind in activity.KINDS else None)
+            return self._json({"ok": ok, "msg": msg})
+
+        if u.path == "/api/profile":
+            # 只认字符串：没带这一项 = 保持原样，带空串 = 清空。界面上两个框一次提交，
+            # 不区分这两种就会「只想改简介，把名字抹了」。
+            name = (body or {}).get("name")
+            bio = (body or {}).get("bio")
+            _ok, msg = save_profile(name if isinstance(name, str) else None,
+                                    bio if isinstance(bio, str) else None)
+            return self._json({"ok": True, "msg": msg, "profile": profile_view()})
+
+        if u.path == "/api/avatar":
+            if (body or {}).get("clear"):
+                clear_avatar()
+                return self._json({"ok": True, "msg": "头像已清除",
+                                   "profile": profile_view()})
+            try:
+                size = save_avatar((body or {}).get("img"))
+            except Exception as e:
+                return self._json({"ok": False, "msg": str(e)[:200]})
+            log("--- 头像换了一张：%d 字节 ---" % size)      # 只有字节数，图片本身不落日志
+            return self._json({"ok": True, "msg": "头像已更新",
+                               "size": size, "profile": profile_view()})
+
+        if u.path == "/api/nav":
+            ok, msg = save_nav(order=(body or {}).get("order"),
+                               hidden=(body or {}).get("hidden"),
+                               sidebar=(body or {}).get("sidebar"),
+                               hover=(body or {}).get("hover"))
+            return self._json({"ok": ok, "msg": msg, "nav": nav_view()})
+
+        if u.path == "/api/writer":
+            return self._json(writer_do(body))
+
+        if u.path == "/api/writer/ai":
+            return self._writer_ai(body)
+
         if u.path == "/api/sync/save":
             ok, msg = sync_save((body or {}).get("cfg") or {})
             return self._json({"ok": ok, "msg": msg, "sync": sync_state()})
@@ -4506,6 +5255,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "msg": "目录不存在"})
             pc.open_in_file_manager(d)
             return self._json({"ok": True, "msg": "已在文件管理器打开"})
+
+        if action == "openexports":
+            # 写作台导出的图片 / PDF / 电子书落在下载格（DOWNLOAD_DIR），不在稿子目录里，
+            # 所以这一屏的「打开所在文件夹」开的是那一处 —— 开了稿目录等于没开。
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            pc.open_in_file_manager(DOWNLOAD_DIR)
+            return self._json({"ok": True, "msg": "已打开导出文件所在的文件夹"})
 
         # 打开整个书库根目录，或某个模块那一格：界面上每屏的「打开所在文件夹」
         # 各开各的，剪藏那一屏不必把微信读书那一大堆一起摊在访达里。

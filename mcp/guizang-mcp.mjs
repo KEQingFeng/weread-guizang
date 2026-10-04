@@ -501,6 +501,29 @@ function fmtFlomoMemo(m, full = false) {
   return head + "\n  " + text.replace(/\n/g, "\n  ");
 }
 
+/** 稿子 id 或标题片段 → 一篇稿子。写作平台的号是 write_xxxxxxxxxxxx 这种，用户嘴上
+ *  说的是标题，所以两种都收：先按 id 认，再按标题（先全等、再包含）。 */
+async function resolveDraft(key) {
+  const k = String(key || "").trim();
+  if (!k) throw new Error("请给出稿子的 id 或标题");
+  const d = await api("/api/writer");
+  const list = d.drafts || [];
+  const hit = list.find(x => String(x.id) === k)
+    || list.find(x => (x.title || "").toLowerCase() === k.toLowerCase())
+    || list.find(x => (x.title || "").includes(k))
+    || list.find(x => k.includes(x.title || "\u0000"));
+  if (!hit) {
+    if (!list.length) throw new Error("本机还没有稿子，用 writer_create 新建一篇。");
+    throw new Error(`没有匹配「${k}」的稿子，先用 writer_list 看看有哪些`);
+  }
+  return hit;
+}
+
+/** [{id,label}] → 「一句（sent）、一段（para）」这种一行，给 Agent 认枚举值用。 */
+function chips(items) {
+  return (items || []).map(x => `${x.label}（${x.id}）`).join("、") || "无";
+}
+
 const tools = {
   async shelf_list() {
     const s = await getState();
@@ -1443,6 +1466,158 @@ const tools = {
             "口径：这份画像只由条数、字数、日期与标签算出，不含任何一条笔记原文。",
             "替这位用户做事之前先读它 —— 它决定该一次给多少条、按哪套标签去找、回复写多长。"].join("\n");
   },
+
+  async writer_list() {
+    const d = await api("/api/writer");
+    const list = d.drafts || [];
+    if (!list.length) return "本机还没有稿子。用 writer_create 新建一篇，再用 writer_save 存正文。";
+    const out = [`共 ${list.length} 篇，合计 ${fmtChars(d.words)}`];
+    for (const x of list) {
+      out.push(`- ${x.title || "（未题名）"}  [id: ${x.id}]`);
+      out.push(`  ${fmtChars(x.words)} · 改于 ${fmtWhen(x.updated)} · ${x.versions} 个快照`);
+    }
+    out.push("", `排版模板：${chips(d.templates)}`,
+             `续写档位：${chips(d.lengths)}`,
+             `润色风格：${chips(d.tones)}`);
+    return out.join("\n");
+  },
+
+  async writer_read({ draft, full = false, outline: wantOutline = true }) {
+    const b = await resolveDraft(draft);
+    const d = await api(`/api/writer?id=${encodeURIComponent(b.id)}`);
+    if (!d.ok) throw new Error(d.msg || "读不到这篇稿子");
+    const c = d.count || {}, m = d.meta || {};
+    const out = [`《${m.title || "未题名"}》  [id: ${m.id}]`,
+                 `${c.total || 0} 字（中文 ${c.han || 0} · 英文 ${c.latin || 0}）· `
+                 + `改于 ${fmtWhen(m.updated)} · 第 ${m.rev} 版`];
+    if (wantOutline && (d.outline || []).length) {
+      out.push("", "结构：");
+      for (const h of d.outline) {
+        out.push(`${"  ".repeat(Math.max(0, (h.level || 1) - 1))}- ${h.title}`);
+      }
+    }
+    const text = d.text || "";
+    out.push("", "── 正文 ──");
+    if (!full && text.length > 6000) {
+      out.push(text.slice(0, 6000),
+               `…（还差 ${text.length - 6000} 字。要全文就再调一次，加 full: true）`);
+    } else {
+      out.push(text || "（还是空的）");
+    }
+    return out.join("\n");
+  },
+
+  async writer_create({ title = "", text = "" }) {
+    const r = await api("/api/writer", { method: "POST", body: { do: "create", title, text } });
+    if (!r.ok) throw new Error(r.msg || "建不出这篇稿子");
+    const m = (r.draft && r.draft.meta) || {};
+    return [`已建稿：${m.title || title || "（未题名）"}  [id: ${r.id}]`,
+            "空稿已经在这里了。接着用 writer_save 写正文，或 writer_ai 让它起个头。"].join("\n");
+  },
+
+  async writer_save({ draft, text, title, rev }) {
+    const b = await resolveDraft(draft);
+    if (typeof text !== "string") throw new Error("请给出要保存的正文 text");
+    const body = { do: "save", id: b.id, text };
+    if (typeof title === "string" && title) body.title = title;
+    if (rev != null) body.rev = rev;
+    const r = await api("/api/writer", { method: "POST", body });
+    if (!r.ok) {
+      if (r.conflict) throw new Error("这篇稿子在你读过之后又被改过。先 writer_read 取回最新正文，改完再存。");
+      throw new Error(r.msg || "没存上");
+    }
+    return `已存《${b.title || "未题名"}》：${r.words} 字 · 第 ${r.rev} 版。`;
+  },
+
+  async writer_versions({ draft }) {
+    const b = await resolveDraft(draft);
+    const d = await api(`/api/writer?id=${encodeURIComponent(b.id)}&mode=versions`);
+    if (!d.ok) throw new Error(d.msg || "读不到这篇稿子");
+    const vs = d.versions || [];
+    if (!vs.length) return `《${b.title || "未题名"}》还没有快照。每次存稿前都会自动留一份，手动留用 writer_snapshot。`;
+    const out = [`《${b.title || "未题名"}》的快照（新的在上，最多留 30 份）`];
+    for (const v of vs) out.push(`- ${v.name}  ·  ${v.words} 字 · ${fmtWhen(v.at)}`);
+    out.push("", "回退用 writer_restore，把 name 原样给它。");
+    return out.join("\n");
+  },
+
+  async writer_snapshot({ draft }) {
+    const b = await resolveDraft(draft);
+    const r = await api("/api/writer", { method: "POST", body: { do: "snapshot", id: b.id } });
+    if (!r.ok) throw new Error(r.msg || "留快照没做成");
+    return `已为《${b.title || "未题名"}》留一份快照：${r.name}（现共 ${(r.versions || []).length} 份）。`;
+  },
+
+  async writer_restore({ draft, name }) {
+    const b = await resolveDraft(draft);
+    if (!name) throw new Error("请给出要回退到哪一份快照（writer_versions 里的 name）");
+    const r = await api("/api/writer", { method: "POST", body: { do: "restore", id: b.id, name } });
+    if (!r.ok) throw new Error(r.msg || "回退没做成");
+    const m = (r.draft && r.draft.meta) || {};
+    return `《${m.title || b.title || "未题名"}》已回退到 ${name}，现在是第 ${m.rev} 版、${m.words} 字。`
+      + "回退前的正文也留了一份快照，改错了还能再退回来。";
+  },
+
+  async writer_export({ draft, kind = "md", tpl, brand, date, lead, scale }) {
+    const b = await resolveDraft(draft);
+    const k = String(kind || "md").toLowerCase();
+    if (!["png", "pdf", "epub", "md"].includes(k)) {
+      throw new Error("导出格式只有 png / pdf / epub / md 这四种");
+    }
+    const q = new URLSearchParams({ kind: k, id: b.id, json: "1" });
+    if (tpl) q.set("tpl", tpl);
+    // 三个「标不标」是开关：给 false / 0 就关掉，其余一律按开（与界面默认一致）。
+    for (const [key, val] of [["brand", brand], ["date", date], ["lead", lead]]) {
+      if (val !== undefined) q.set(key, (val === false || val === 0 || val === "0") ? "0" : "1");
+    }
+    if (scale !== undefined) q.set("scale", String(Math.max(1, Math.min(Number(scale) || 2, 3))));
+    const r = await api(`/api/writer/export?${q.toString()}`, { ms: 180000 });
+    if (!r.ok) throw new Error(r.msg || "导出没做成");
+    const mb = (r.size || 0) / 1048576;
+    return [`已导出《${b.title || "未题名"}》的 ${k.toUpperCase()}：`,
+            `  ${r.path}`,
+            `  ${mb >= 0.1 ? mb.toFixed(1) + " MB" : Math.round((r.size || 0) / 1024) + " KB"}`
+            + (r.note ? `  ${r.note}` : "")].join("\n");
+  },
+
+  async writer_ai({ mode, draft, text, sel, length, tone, hint }) {
+    const m = String(mode || "").trim();
+    if (!["cont", "spark", "polish"].includes(m)) {
+      throw new Error("写作助手只有三种动作：cont（续写）/ spark（灵感方向）/ polish（润色）");
+    }
+    const body = { mode: m, text: String(text || ""), sel: String(sel || "") };
+    if (draft) body.id = (await resolveDraft(draft)).id;
+    if (hint) body.hint = String(hint).slice(0, 200);
+    if (m === "cont") {
+      body.length = length || "para";
+      if (!(body.text || body.sel).trim()) throw new Error("先给一段前文，它才有得接");
+      body.stream = "0";   // MCP 不接 SSE：整段回来
+    } else if (m === "spark") {
+      if (!(body.text || body.sel).trim()) throw new Error("先给一段稿子，它才有得想");
+    } else {
+      body.tone = tone || "smooth";
+      if (!body.sel.trim()) throw new Error("先给出要润色的那一段（放 sel 里）");
+    }
+    const r = await api("/api/writer/ai", { method: "POST", body, ms: 180000 });
+    if (!r.ok) throw new Error(r.msg || "这趟没问成");
+    if (m === "cont") return (r.text || "").trim() || "（它没接上，再试一次）";
+    if (m === "spark") {
+      const s = r.sparks || [];
+      if (!s.length) return r.msg || "那边没给方向，再调一次试试。";
+      return ["往下写的三个方向：", ...s.map((x, i) => `${i + 1}. ${x}`)].join("\n");
+    }
+    const blocks = r.blocks || [];
+    if (!blocks.length) return "这段已经很顺，没提出改动。";
+    const out = [`润色建议：共 ${blocks.length} 处改动（原文一个字都没动，下面是差异）`];
+    for (const b of blocks) {
+      const del = String(b.old || "").replace(/\n/g, " ");
+      const add = String(b.new || "").replace(/\n/g, " ");
+      out.push(`- 原文：${del.slice(0, 200)}`);
+      out.push(`  改为：${add.slice(0, 200)}`);
+    }
+    out.push("", "这些都是「建议」，要不要用由作者定；要落笔就把改完的整段交给 writer_save。");
+    return out.join("\n");
+  },
 };
 
 const TOOL_DEFS = [
@@ -1982,6 +2157,121 @@ const TOOL_DEFS = [
     name: "flomo_portrait",
     description: "读「用户记忆画像」：从全部 flomo 便签算出体量与节奏、标签层级、长短分布、记笔记的高峰时段和已深加工的条数，写成半页中文，并给出它落在本机的位置。只含数字与标签，不含任何一条原文。替用户做与笔记有关的事之前先调它一次，比翻几十条便签便宜得多。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "writer_list",
+    description: "列出写作平台里的全部稿子（标题、字数、改动时间、快照数），并给出可用的排版模板、续写档位与润色风格的取值。动任何稿子前先用它拿到 id。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "writer_read",
+    description: "读一篇稿子的标题、字数、章节结构与正文。正文默认最多给 6000 字，超了要全文再加 full: true。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draft: { type: "string", description: "稿子的 id 或标题（writer_list 里有）" },
+        full: { type: "boolean", description: "要不要给全文（默认只给前 6000 字）" },
+        outline: { type: "boolean", description: "要不要带上章节结构，默认要" },
+      },
+      required: ["draft"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_create",
+    description: "新建一篇稿子（写操作）。可同时给标题与初始正文；不给正文就是一张白纸。返回新稿的 id。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "标题，可留空" },
+        text: { type: "string", description: "初始正文，可留空" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_save",
+    description: "把一篇稿子的正文整篇存下（写操作）。存之前后端会自动留一份快照，改坏了能回退。若带了 rev 且与服务端对不上，这次会拒绝写入，需先 writer_read 取回最新正文。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draft: { type: "string", description: "稿子的 id 或标题" },
+        text: { type: "string", description: "整篇正文（这是覆盖，不是追加）" },
+        title: { type: "string", description: "顺手改标题，可留空" },
+        rev: { type: "number", description: "你读到的是第几版；不传就是直接覆盖" },
+      },
+      required: ["draft", "text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_versions",
+    description: "列一篇稿子的历史快照（文件名、字数、时间），新的在上，最多 30 份。回退前先用它拿 name。",
+    inputSchema: {
+      type: "object",
+      properties: { draft: { type: "string", description: "稿子的 id 或标题" } },
+      required: ["draft"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_snapshot",
+    description: "手动给一篇稿子留一份快照（写操作，不受自动留档的版本间隔限制）。想在某处手打一个存档点时用它。",
+    inputSchema: {
+      type: "object",
+      properties: { draft: { type: "string", description: "稿子的 id 或标题" } },
+      required: ["draft"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_restore",
+    description: "把一篇稿子回退到某一份快照（写操作）。回退前也会先留一份当前正文的快照，所以退错了还能再退回来。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draft: { type: "string", description: "稿子的 id 或标题" },
+        name: { type: "string", description: "快照文件名（writer_versions 里有）" },
+      },
+      required: ["draft", "name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_export",
+    description: "把一篇稿子导成图片（PNG）/ PDF / 电子书（EPUB）/ Markdown，存到本机下载目录。图片可换排版模板并叠加工具名与日期。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draft: { type: "string", description: "稿子的 id 或标题" },
+        kind: { type: "string", description: "png / pdf / epub / md，默认 md" },
+        tpl: { type: "string", description: "排版模板：plain（黑白简约）/ business（商务蓝）/ verdant（青翠）/ letter（米白书简）" },
+        brand: { type: "boolean", description: "图片上是否标注工具名「归藏」，默认标注；给 false 去掉" },
+        date: { type: "boolean", description: "图片上是否标注日期，默认标注；给 false 去掉" },
+        lead: { type: "boolean", description: "图片上是否标注字数与日期那行抬头，默认标注；给 false 去掉" },
+        scale: { type: "number", description: "图片清晰度倍数 1-3，默认 2" },
+      },
+      required: ["draft"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_ai",
+    description: "写作助手，三种动作：cont（接一段，长度由 length 定）/ spark（往下写的三个方向）/ polish（把 sel 那一段按 tone 润色，只给差异建议，不动原文）。续写与润色都要先给文字：续写给整篇或前文（text），润色给选中的那一段（sel）。需要已配置 AI 接口。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: { type: "string", description: "cont / spark / polish" },
+        draft: { type: "string", description: "稿子的 id 或标题；给灵感时会用它记下已给过的角度，避免重复" },
+        text: { type: "string", description: "续写或灵感的前文" },
+        sel: { type: "string", description: "要润色的那一段" },
+        length: { type: "string", description: "续写档位：sent（一句）/ para（一段，默认）/ points（三个要点）/ section（写完这一节）" },
+        tone: { type: "string", description: "润色风格：smooth（顺一顺，默认）/ tight（删掉水分）/ concrete（写得更具体）/ formal（收得正式）" },
+        hint: { type: "string", description: "这次续写的意图，一句话，可留空" },
+      },
+      required: ["mode"],
+      additionalProperties: false,
+    },
   },
 ];
 

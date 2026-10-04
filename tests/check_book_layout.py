@@ -144,8 +144,8 @@ seed_book(BOOKS, "imp_mine", "local", fmt="epub")
 io.open(os.path.join(BOOKS, "36000000000000000b000c01.md"), "w", encoding="utf-8").write("合并稿\n")
 
 ui_server.ensure_books_dir()
-chk("B1 启动归置：六个模块文件夹都在（含便签那一格）",
-    len(book_layout.ORDER) == 6
+chk("B1 启动归置：七个模块文件夹都在（含便签与写作那两格）",
+    len(book_layout.ORDER) == 7
     and all(os.path.isdir(os.path.join(BOOKS, book_layout.DIR_OF[x])) for x in book_layout.ORDER))
 chk("B2 平铺的旧书各回各家",
     os.path.isdir(os.path.join(BOOKS, "剪藏", "clip_post")) and
