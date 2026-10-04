@@ -5,7 +5,8 @@
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-PORT=8770
+# 端口可以按 GUIZANG_PORT 改（8770 被别的应用占着时用得上）；MCP 适配器读的是同一个变量。
+PORT="${GUIZANG_PORT:-8770}"
 cd "$DIR" || exit 1
 
 echo
@@ -34,19 +35,56 @@ if [ ! -x "$DIR/.venv/bin/python" ]; then
   echo
 fi
 
-# 端口已经起着：说明服务在跑，直接开界面，不再起第二个
-if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "  归藏已在运行 → http://127.0.0.1:$PORT"
+# 端口上有人：先问它是谁，再决定「直接开界面」还是「换个新进程接手」。
+# 原来这里只看端口有没有人听 —— 一个几周前留下的旧后端就会把新代码挡住：
+# 界面是从磁盘现读的新的，路由表却是旧进程装进内存的旧的，新功能一律 404，
+# 页面却报「后端没启动」，把人带去查一件本来没事的事（2026-10-04 报的三条 bug）。
+RES="$("$PY" platform_compat.py verdict "$PORT" 2>/dev/null)"
+ACT="${RES%%|*}"
+NOTE="${RES#*|}"
+
+# 问不出话（解释器坏了、脚本被挪走）就退回老行为：别把本来能用的界面挡住。
+if [ -z "$ACT" ]; then
+  echo "  问不出端口上是哪份代码，按原样开界面 → http://127.0.0.1:$PORT"
   open "http://127.0.0.1:$PORT" 2>/dev/null || xdg-open "http://127.0.0.1:$PORT" 2>/dev/null
   exit 0
 fi
 
-echo "  归藏启动中 → http://127.0.0.1:$PORT"
-nohup "$PY" ui_server.py --port "$PORT" > /tmp/guizang_server.log 2>&1 &
+if [ "$ACT" = "reuse" ]; then
+  echo "  ${NOTE:-归藏已在运行} → http://127.0.0.1:$PORT"
+  open "http://127.0.0.1:$PORT" 2>/dev/null || xdg-open "http://127.0.0.1:$PORT" 2>/dev/null
+  exit 0
+fi
 
-# 轮询就绪，最多等 15 秒（用项目自己的解释器探 HTTP，不依赖 curl）
-for _ in $(seq 1 30); do
-  if "$PY" -c "import urllib.request as u; u.urlopen('http://127.0.0.1:$PORT/', timeout=1).read(1)" >/dev/null 2>&1; then
+if [ "$ACT" = "busy" ]; then
+  echo "  $NOTE"
+  echo "  界面还是在这儿开 → http://127.0.0.1:$PORT；跑完任务后页顶会出现「换新后端」，点一下就好。"
+  open "http://127.0.0.1:$PORT" 2>/dev/null || xdg-open "http://127.0.0.1:$PORT" 2>/dev/null
+  exit 0
+fi
+
+if [ "$ACT" = "stranger" ]; then
+  echo "  $NOTE"
+  echo "  要么把占用 $PORT 的程序退掉，要么换个端口：GUIZANG_PORT=8899 ./启动归藏.command"
+  read -r -p "  回车关闭…"
+  exit 1
+fi
+
+# free：直接起；takeover：带着 --takeover 起，让新进程把旧后端那份端口接过来。
+if [ "$ACT" = "takeover" ]; then
+  echo "  $NOTE"
+  echo "  归藏换新后端中 → http://127.0.0.1:$PORT"
+  FLAG="--takeover"
+else
+  echo "  归藏启动中 → http://127.0.0.1:$PORT"
+  FLAG=""
+fi
+nohup "$PY" ui_server.py --port "$PORT" $FLAG > /tmp/guizang_server.log 2>&1 &
+
+# 轮询就绪，最多等 20 秒。认的是代码指纹而不是「端口通了」：
+# 交接那几秒旧后端还可能答话，只看通不通会把界面开在旧进程上。
+for _ in $(seq 1 40); do
+  if "$PY" platform_compat.py ready "$PORT" >/dev/null 2>&1; then
     open "http://127.0.0.1:$PORT" 2>/dev/null || xdg-open "http://127.0.0.1:$PORT" 2>/dev/null
     exit 0
   fi

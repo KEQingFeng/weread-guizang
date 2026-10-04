@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -54,7 +55,16 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.1"
+VERSION = "1.0.3"
+
+# 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
+# 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
+# 2026-10-04 用户报「画板、思维导图点了没反应」就是这个坑（详见 platform_compat）。
+CODE_HASH = pc.code_fingerprint(os.path.abspath(__file__))
+
+# 实际绑上的端口（默认口被占时 main() 会往后挪）。/api/restart 得让接班人绑同一个口，
+# 不然用户那个页面就跟着挪丢了 —— 界面和适配器认的都是这一个端口。
+LISTEN_PORT = 0
 
 
 def py():
@@ -3276,6 +3286,45 @@ def flomo_do(body):
 
 # ---------- http ----------
 
+def restart_backend():
+    """换个新进程接手同一个端口，然后自己退掉。
+
+    为什么需要这一键：界面每次请求都从磁盘现读，路由表却是进程起来那一刻装进内存的。
+    代码更新了、旧进程还在跑，新功能一律 404 —— 用户看到的只有「点了没反应」，
+    还要他理解「进程」这件事才能自救，这不合理。2026-10-04 那三条「后端没启动」
+    的工单全是这个：端口上挂着 0.9.8，界面写着 1.0.1。
+
+    接班人带着 --handoff（等本机这个 pid 退出）和 --takeover（万一中间又被别的旧进程
+    抢占），绑的还是本机这个端口，所以用户的页面、MCP 适配器都不用改地址。
+    起不来也不要把人晾在原地：回一句明话，让他知道得退出重开。
+    """
+    port = LISTEN_PORT or 8770
+    exe = sys.executable
+    script = os.path.abspath(__file__)
+    if not exe or not os.path.isfile(script):
+        return {"ok": False, "msg": "认不出该用哪个解释器和脚本，换不了：请退出归藏再打开"}
+    # 局部变量千万别叫 log：本文件顶层有个 log() 写日志函数，叫 log 就把它能调的
+    # 那份顶成了字符串，下面 log("…") 当场 TypeError —— 2026-10-04 真机跑出来过一次，
+    # 表现是「连接被对方掐了」，而换班其实已经成功（接班人照常起来绑端口）。
+    logfile = os.path.join(tempfile.gettempdir(), "guizang_server.log")
+    try:
+        with open(logfile, "ab") as fd:
+            child = subprocess.Popen([exe, script, "--port", str(port),
+                                      "--handoff", str(os.getpid()), "--takeover"],
+                                     cwd=REPO, stdin=subprocess.DEVNULL,
+                                     stdout=fd, stderr=fd, env=dict(os.environ),
+                                     **pc.spawn_kwargs())
+    except Exception as e:
+        return {"ok": False, "msg": "新后端起不来（%s）：先退出归藏再打开" % type(e).__name__}
+    # 回执得先送出去，再让本进程退 —— 所以延迟一拍。os._exit 不等收尾，
+    # 因为正在跑的取书任务本来也留不住（界面会提前提示这一点）。
+    threading.Timer(0.8, lambda: os._exit(0)).start()
+    log("--- 后端换班：本进程（pid %d，%s）退，接班人 pid %d 绑端口 %d ---"
+        % (os.getpid(), VERSION, child.pid, port))
+    return {"ok": True, "pid": child.pid, "port": port, "from": VERSION,
+            "msg": "后端正在换成新进程，页面几秒后自己刷新（在跑的任务会中断）"}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -3372,6 +3421,9 @@ class Handler(BaseHTTPRequestHandler):
                 "repo": REPO,
                 "out": OUT_DIR,
                 "version": VERSION,
+                # 代码指纹：让启动器、MCP 适配器和界面能认出「端口上那个进程
+                # 是不是手上这份代码」，光比版本号比不出来（改代码不改号）
+                "code": CODE_HASH,
                 "weread": {"key_set": bool(weread_key()),
                            "key_tail": weread_key()[-4:] if weread_key() else ""},
                 "flomo": {"url_set": bool(load_cfg().get("flomo_url")),
@@ -4148,6 +4200,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/feed":
             return self._json(feed_do(body))
 
+        if u.path == "/api/restart":
+            # 「界面是新的、后端是旧的」这一类毛病，就靠这一键自救。
+            # 只接本机点过来的请求（这个服务本来就只听 127.0.0.1），不做鉴权。
+            return self._json(restart_backend())
+
         if u.path == "/api/flomo/notes":
             # 注意方向：/api/flomo 是「把内容发去 flomo」（写用户的 webhook），
             # /api/flomo/notes 才是反过来「把 flomo 导进来」（只动本机）。
@@ -4630,9 +4687,31 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global LISTEN_PORT
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8770)
+    # --takeover：端口上要是挂着「别的代码」写的归藏后端，停掉它、自己接管。
+    #   启动器（.command / 壳 / MCP 适配器）都带上它 —— 用户装的、改的都是新代码，
+    #   点开却只有旧功能，根因就是旧进程一直供在那个端口上，新进程只好往后挪端口，
+    #   而浏览器和适配器只认 8770。
+    # --handoff：/api/restart 用的交接 —— 等那个 pid 退出再绑同一个端口，
+    #   不抢、也不另找端口（另找的话用户那个页面就断了）。
+    ap.add_argument("--takeover", action="store_true")
+    ap.add_argument("--handoff", type=int, default=0)
     args = ap.parse_args()
+    if args.handoff and args.handoff != os.getpid():
+        if pc.wait_pid_gone(args.handoff, wait=12.0):
+            print(f"  交接    : 旧后端（pid {args.handoff}）已退出，接管端口 {args.port}", flush=True)
+        else:
+            print(f"  交接    : pid {args.handoff} 迟迟没退，直接试着绑端口", flush=True)
+    if args.takeover:
+        ok, msg = pc.take_over_port(args.port, CODE_HASH)
+        if msg:
+            print(f"  接管    : {msg}", flush=True)
+        if not ok:
+            # 没接管成也别把服务弄死：照旧往后找一个空端口，功能还是全的，
+            # 只是适配器/浏览器认的那个口还是旧进程 —— 这句要告诉用户。
+            print(f"  接管    : 先用别的端口顶着，旧的那个得手动退出才干净", flush=True)
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     ensure_books_dir()
     # 先把这几行打出来：平台不对时，一眼就能看出用的是哪个解释器、浏览器装在哪
@@ -4642,9 +4721,10 @@ def main():
     for p in range(args.port, args.port + 20):
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)
+            LISTEN_PORT = p
             # 绑到哪个口就写哪个口：默认端口被占时上面这个循环会自己往后挪，
             # 而 MCP 适配器只拿得到我们请它用的那个数。不写下来，挪完就没人找得着。
-            pc.write_runtime(REPO, p, version=VERSION)
+            pc.write_runtime(REPO, p, version=VERSION, code=CODE_HASH)
             print(f"  微信读书导出 → http://127.0.0.1:{p}", flush=True)
             # 进门之后自动补视频那条线的组件：引擎缺就装、模型缺就在后台下（1.6GB 那个）。
             # 只有壳（安装包）会设 GUIZANG_AUTO_MEDIA=1 —— 源码直接跑时不该因为起了一下

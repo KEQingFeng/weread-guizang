@@ -10,7 +10,7 @@
 诊断出的就是这个症状：点「连接」→ 后端 Popen 找不到 `.venv/bin/python` →
 异常逃出请求处理函数 → 连接被掐断 → 前端 await 直接 reject → 页面毫无反应。
 """
-import json
+import hashlib
 import json
 import os
 import signal
@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from urllib.parse import urlparse
 from urllib.request import getproxies
 
@@ -283,18 +284,259 @@ def runtime_file(repo):
     return os.path.join(data_dir(repo), "runtime.json")
 
 
-def write_runtime(repo, port, pid=None, version=""):
+def write_runtime(repo, port, pid=None, version="", code=""):
     """记下当前端口。写失败不影响服务本身，所以只尽力而为，不抛异常。"""
     try:
         os.makedirs(data_dir(repo), exist_ok=True)
         tmp = runtime_file(repo) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"port": int(port), "pid": int(pid or os.getpid()),
-                       "version": version, "started_at": int(time.time())}, f)
+                       "version": version, "code": code,
+                       "started_at": int(time.time())}, f)
         os.replace(tmp, runtime_file(repo))   # 先写临时再改名：别让读到半截的 JSON
         return True
     except Exception:
         return False
+
+
+def code_fingerprint(path):
+    """这份后端代码的指纹（内容变了就变），用来认出「端口上那个进程是哪份代码」。
+
+    为什么不用版本号比：源码直接跑的人改完代码重启，版本号多半还没跟着改，
+    于是旧进程和新代码写着同一个 1.0.1，谁也不认谁是旧的。2026-10-04 用户报
+    「画板、思维导图点了没反应」，真因就是这个：界面对象是从磁盘现读的新的，
+    路由表是进程起来那刻装进内存的旧的，新接口一律 404。
+    """
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def port_is_heard(port, timeout=1.2):
+    """127.0.0.1:port 有没有人听。通回 True，不通回 False，别把「连不上」当成「活着」。
+
+    这函数原先叫 _free_port —— 名字说的和做的正好相反（True 是「不 free」）。
+    接管端口这种护栏里，一个反着的名字就够把「有人占着」读成「空的，直接起」，
+    所以 2026-10-04 顺手改成 port_is_heard：读起来是什么就是什么。
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def backend_identity(port, timeout=1.5):
+    """问端口上那个进程「你是哪份代码」：回 {"version","code"}，没答腔回 None。
+
+    旧后端（0.9.8 那批）认不出 `code` 这个字段 —— 它压根没这功能。回空串正好
+    让调用方判断成「跟我不一样」，该接管就接管，不会因为对方太老就放过它。
+    走无代理的 opener：本机回环不该被 Clash 那类全局代理绕出去（绕出去就连不上，
+    然后被误判成「服务没在跑」）。
+    """
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open("http://127.0.0.1:%d/api/state" % int(port), timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {"version": str(data.get("version") or ""),
+            "code": str(data.get("code") or ""),
+            # 旧后端也认 task 这个字段，顺手把它带回来：接管前得知道有没有活儿在跑
+            "running": bool((data.get("task") or {}).get("running"))}
+
+
+def port_listener_pid(port):
+    """谁在听这个端口。认不出来回 0 —— 宁可不动，也不猜着杀。"""
+    if IS_WIN:
+        # netstat 的第四列是本地地址:端口，第五列是 PID；拿不到就回 0
+        try:
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, text=True, timeout=10).stdout
+        except Exception:
+            return 0
+        for line in out.splitlines():
+            cols = line.split()
+            if len(cols) >= 5 and cols[3].startswith("LISTENING") \
+                    and cols[1].rsplit(":", 1)[-1] == str(port):
+                try:
+                    return int(cols[4])
+                except ValueError:
+                    return 0
+        return 0
+    try:
+        out = subprocess.run(["lsof", "-nP", "-iTCP:%d" % int(port), "-sTCP:LISTEN", "-t"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return 0
+    pids = [int(x) for x in out.split() if x.strip().isdigit()]
+    return pids[0] if pids else 0
+
+
+def is_our_backend(pid, script="ui_server.py"):
+    """确认那个 PID 真是归藏自己的后端，不是别的应用恰好占着 8770。
+
+    这是接管唯一的护栏：命令行里必须有那个脚本名。查不到就当不是，不动它。
+    """
+    if not pid or pid == os.getpid():
+        return False
+    if IS_WIN:
+        cmd = ""
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine" % int(pid)],
+                capture_output=True, text=True, timeout=10).stdout
+            cmd = out
+        except Exception:
+            return False
+    else:
+        try:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))],
+                                 capture_output=True, text=True, timeout=10).stdout
+        except Exception:
+            return False
+    return script in cmd
+
+
+def stop_backend(pid, wait=6.0):
+    """请那个旧后端退出：先 SIGTERM 让它自己收尾，等不到再硬杀。回是否真退了。"""
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except OSError:
+        return False
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            return True                 # 没了，好好走的
+        time.sleep(0.2)
+    hard_kill_pid(int(pid))
+    return not _pid_alive(int(pid))
+
+
+def hard_kill_pid(pid):
+    """连子孙一起收 —— 只杀 python 不够，它开的浏览器还握着 profile 锁。"""
+    try:
+        if IS_WIN:
+            subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                           capture_output=True, timeout=20)
+        else:
+            os.killpg(os.getpgid(int(pid)), signal.SIGKILL)
+    except Exception:
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except Exception:
+            pass
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def take_over_port(port, my_code, wait=6.0):
+    """端口被「别的代码」占着时接管它：认出旧进程 → 确认是自家后端 → 停掉。
+
+    回 (这个端口能不能用, 一句给人看的话)。四种情况绝不动手：端口没人听（直接起）、
+    听的就是同一份代码（已经是对的，再起一个只是多开一份）、对方不是归藏（占着端口的
+    别的应用）、认不出那是谁的进程（宁可留着旧的，也不能误杀别人）。
+    """
+    if not port_is_heard(port, 0.6):
+        return True, ""                                  # 空的，直接起
+    who = backend_identity(port)
+    if who is None:
+        return False, "端口 %d 被别的程序占着，没动它" % port
+    if who.get("code") and who.get("code") == my_code:
+        return True, "同一份代码已经在 %d 上跑着（%s），这次只是又开一个" % (
+            port, who.get("version") or "版本未报")
+    if who.get("running"):
+        # 有活儿在跑就不动手：取书一中断开，章节虽然段段落盘，但那本书得重头再点一次。
+        # 界面是新的、后端是旧的 —— 页顶那条横幅会让用户等跑完再点「换新后端」。
+        return False, "端口 %d 上的旧后端（%s）正在跑任务，不打断它" % (
+            port, who.get("version") or "更老的一版")
+    pid = port_listener_pid(port)
+    if not pid or not is_our_backend(pid):
+        return False, "端口 %d 上是 %s，但认不出是哪个进程，没敢动" % (
+            port, who.get("version") or "更老的版本")
+    stop_backend(pid, wait=wait)
+    deadline = time.time() + wait
+    while time.time() < deadline and port_is_heard(port, 0.3):
+        time.sleep(0.2)                                  # 等它把端口真放下
+    if port_is_heard(port, 0.3):
+        return False, "停不掉端口 %d 上的旧后端（pid %d），先用着旧的" % (port, pid)
+    return True, "已停掉旧后端 %s（pid %d），端口 %d 让出来了" % (
+        who.get("version") or "更老的版本", pid, port)
+
+
+def is_this_code_on(port, script_path):
+    """端口上应答的，是不是手上这份代码。启动器轮询「新后端起来了没有」就靠这一句。
+
+    只用 HTTP 通不通来判断是不够的：旧后端也通、也答话 —— 得认指纹。
+    """
+    mine = code_fingerprint(os.path.abspath(script_path))
+    who = backend_identity(port)
+    return bool(who and mine and who.get("code") == mine)
+
+
+def port_verdict(port, script_path):
+    """启动器 / MCP 适配器复用端口前该问的一句话：回 (动作, 给人看的说明)。
+
+    动作五种：
+      free     —— 没人听，正常起
+      reuse    —— 正是手上这份代码，直接开界面
+      takeover —— 是自家的旧后端且没在跑任务，让它退、换新进程起（ui_server --takeover 会办）
+      busy     —— 是自家的旧后端，但任务正在跑：不起第二个，直接开界面（页顶会提示换后端）
+      stranger —— 不是归藏，或者问不出话：绝不动它
+
+    为什么要有这个函数：原来 .command 和 MCP 适配器都是「8770 有人听就当它是我」，
+    于是更新过的安装被一个几周前留下的旧进程挡住 —— 界面是新的、后端是旧的，
+    新功能全 404，报出来的却是「后端没启动」。2026-10-04 那三条 bug 就是这么来的。
+    """
+    if not port_is_heard(port, 0.8):
+        return "free", ""
+    who = backend_identity(port)
+    if who is None:
+        return "stranger", "端口 %d 被别的程序占着（它不答归藏的话），没动它" % port
+    mine = code_fingerprint(os.path.abspath(script_path))
+    if not mine:
+        # 读不到自己的源码就没法判断，退回老行为：当成同一个，别把好服务赶走
+        return "reuse", "读不到 %s，按原样用端口上那个后端" % os.path.basename(script_path)
+    if who.get("code") == mine:
+        return "reuse", "归藏 %s 已在 %d 上跑着" % (who.get("version") or "这一版", port)
+    pid = port_listener_pid(port)
+    if pid and is_our_backend(pid):
+        if who.get("running"):
+            # 旧后端手上还有任务在跑：别起第二个、也别打断它，让用户继续用当前这个，
+            # 跑完了页顶那条横幅一点「换新后端」就干净了。
+            return "busy", "端口 %d 上的旧后端 %s 正在跑任务，先不打断" % (
+                port, who.get("version") or "更老的一版")
+        return "takeover", "端口 %d 上是旧后端 %s，换个新进程接手" % (
+            port, who.get("version") or "更老的一版")
+    return "stranger", "端口 %d 上答的是归藏的话（%s），却认不出是哪个进程，没敢动" % (
+        port, who.get("version") or "版本未报")
+
+
+def wait_pid_gone(pid, wait=12.0):
+    """等某个进程退出（重启交接用：接班人得等老人把端口放下）。"""
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            return True
+        time.sleep(0.15)
+    return False
 
 
 def open_in_file_manager(path):
@@ -303,3 +545,26 @@ def open_in_file_manager(path):
         os.startfile(path)                     # 仅 Windows 提供
         return
     subprocess.Popen(["open" if IS_MAC else "xdg-open", path])
+
+
+if __name__ == "__main__":
+    # 给启动脚本一个不必拼 `python -c` 的入口（.bat 里拼一行 Python 太容易踩引号和括号）：
+    #   python platform_compat.py verdict 8770   → 打印「动作|说明」，动作是
+    #       free / reuse / takeover / busy / stranger
+    #   python platform_compat.py ready 8770     → 端口上是不是手上这份代码（退出码 0/1）
+    argv = sys.argv[1:]
+    verb = argv[0] if argv else ""
+    try:
+        pnum = int(argv[1]) if len(argv) > 1 else 8770
+    except ValueError:
+        pnum = 8770
+    here = os.path.dirname(os.path.abspath(__file__))
+    target = argv[2] if len(argv) > 2 else os.path.join(here, "ui_server.py")
+    if verb == "verdict":
+        act, note = port_verdict(pnum, target)
+        sys.stdout.write("%s|%s\n" % (act, note.replace("\n", " ")))
+        sys.exit(0 if act in ("free", "reuse", "takeover", "busy") else 3)
+    if verb == "ready":
+        sys.exit(0 if is_this_code_on(pnum, target) else 1)
+    sys.stderr.write("用法: python platform_compat.py verdict|ready <端口> [后端脚本]\n")
+    sys.exit(2)

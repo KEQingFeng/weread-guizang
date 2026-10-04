@@ -496,6 +496,36 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         }
     }
 
+    /// 问一句「这个端口上是不是手上这份代码」，动作在第一个 '|' 前面：
+    /// free / reuse / takeover / busy / stranger，读不出来算 unknown。
+    /// 上限 8 秒：探端口这种事一旦挂住，宁可当成不知道照常起后端，
+    /// 也不能让窗口卡在白屏 —— 用户等的是一本书，不是一次体检。
+    private func portVerdict(_ py: String) -> (String, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: py)
+        p.arguments = [appDir.appendingPathComponent("platform_compat.py").path,
+                       "verdict", String(PREFERRED_PORT),
+                       appDir.appendingPathComponent("ui_server.py").path]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return ("unknown", "") }
+
+        let deadline = Date().addingTimeInterval(8)
+        while p.isRunning && Date() < deadline { usleep(50_000) }
+        if p.isRunning {
+            p.terminate()
+            usleep(200_000)
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+            return ("unknown", "")
+        }
+        let raw = String(data: out.fileHandleForReading.readDataToEndOfFile(),
+                         encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let bar = raw.firstIndex(of: "|") else { return ("unknown", raw) }
+        return (String(raw[..<bar]), String(raw[raw.index(after: bar)...]))
+    }
+
     /// 起后端，就绪后把 WebView 导航过去。
     private func startServer() {
         if let url = serverURL, server?.isRunning == true {
@@ -507,10 +537,29 @@ final class Shell: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             return
         }
 
+        // 8770 上已经跑着「同一份代码」时直接用它，别再养一个进程：
+        // 新起的那个会被挤到 8771，而浏览器和 MCP 适配器只认 8770，
+        // 于是同一个库里出现两套前后端 —— 用户看到的就是「点了没反应」。
+        // 指纹不由壳自己算，交给应用包里那份 platform_compat.py：
+        // 启动脚本、MCP 适配器、这个壳三处拿同一把尺子量，才不会各判各的。
+        let (act, note) = portVerdict(py)
+        if act == "reuse" || act == "busy" {
+            let url = URL(string: "http://127.0.0.1:\(PREFERRED_PORT)/")!
+            dbg(act == "busy" ? "旧后端正在跑任务，先接着用它：\(note)" : "复用 8770：\(note)")
+            serverURL = url
+            web.load(URLRequest(url: url))
+            return
+        }
+        // takeover = 端口上是自家认得的旧后端，而且闲着：让新进程把端口接过来，
+        // 不是往后挪。挪了界面是新的、别人（浏览器/适配器）打的还是那个旧后端，
+        // 新功能一律 404 —— 这一轮修的就是它。busy 已经在上面拦住了，不会打断任务。
+        let extra = act == "takeover" ? ["--takeover"] : []
+        dbg("起新后端（端口判断 \(act)）\(note.isEmpty ? "" : "｜" + note)")
+
         let p = Process()
         p.executableURL = URL(fileURLWithPath: py)
         p.arguments = [appDir.appendingPathComponent("ui_server.py").path,
-                       "--port", String(PREFERRED_PORT)]
+                       "--port", String(PREFERRED_PORT)] + extra
         p.currentDirectoryURL = dataDir
         var env = ProcessInfo.processInfo.environment
         env["GUIZANG_DATA"] = dataDir.path
