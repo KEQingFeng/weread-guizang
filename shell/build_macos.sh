@@ -42,11 +42,14 @@ APP_FILES=(
   shelf_add.py
   book_export.py
   book_import.py
+  book_layout.py
   book_notes.py
+  ai_sum.py
   clip_article.py
   web_parse.py
   feed.py
   video_note.py
+  flomo_notes.py
   ffmpeg_tool.py
   media_setup.py
   cleanup.py

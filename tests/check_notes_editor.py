@@ -11,11 +11,13 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import selftest  # noqa: E402
+from seed import book_dir as where  # noqa: E402
 from playwright.sync_api import sync_playwright
 
 BASE = selftest.need_base(1)
 BOOK = "GAPBOOK1"
-BDir = pathlib.Path(selftest.BOOKS) / BOOK
+# 书目录按 id 现找：1.0.1 起书库按模块分了文件夹，写死平铺路径的套件会指到空目录。
+BDir = pathlib.Path(where(BOOK))
 selftest.SHOTS.mkdir(parents=True, exist_ok=True)
 SHOTS = [str(selftest.SHOTS / (n + ".png")) for n in ("notes-editor", "notes-template",
                                                 "notes-mindmap", "notes-panel")]
@@ -165,14 +167,31 @@ def main():
         #
         # 动它之前得先 hover 那一行：动作条平时是 max-height:0 收着的，按钮虽然
         # 有几何尺寸，却整条被裁掉、点不着 —— 直接按收起时的矩形去点会打空。
+        #
+        # 但只 hover 还不够。划线刚落下去时存盘防抖（900ms）还没跑完，它一落地清单就
+        # 重铺一次、行会往上挪 —— 先按旧坐标 hover、隔 460ms 才断言，点的其实是已经挪走
+        # 的那一行，动作条当场收回去，套件就报「写想法点不着」。这条假失败实测跑一次红
+        # 一次绿，所以先把防抖等干净（settled），再量坐标、再 hover，最后把「点得着」
+        # 做成有上限的轮询而不是固定一枪。
         page.evaluate("() => rdSetPane('notes', true)")
         page.wait_for_timeout(200)
+        settled()
         row_q = page.evaluate("""() => {
           const r = document.querySelector('#ntList .ntrow[data-mk] .q').getBoundingClientRect();
           return [Math.round(r.x + 40), Math.round(r.y + r.height / 2)];
         }""")
         page.mouse.move(row_q[0], row_q[1])
         page.wait_for_timeout(460)                     # 等动作条浮出来（.18s 展开）
+        try:
+            page.wait_for_function("""() => {
+              const b = document.querySelector('#ntList .ntrow[data-mk] button[data-act=memo]');
+              if (!b) return false;
+              const r = b.getBoundingClientRect();
+              return document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                               Math.round(r.y + r.height / 2)) === b;
+            }""", timeout=2500)
+        except Exception:
+            pass                                       # 没等到也照原样断言，让失败如实报出来
         memo_btn = page.evaluate("""() => {
           const b = document.querySelector('#ntList .ntrow[data-mk] button[data-act=memo]');
           if (!b) return null;
@@ -335,6 +354,11 @@ def main():
         }""")
         chk("笔记栏：行上按删除 = 删掉这条，且给一次「撤销」",
             ds["marks"] == n0 - 1 and ds["rows"] == 0 and ds["label"] == "撤销", ds)
+        # 先把这一刀的存盘等干净（900ms 防抖 + 一次往返）再量坐标。不等的话，防抖一过
+        # 请求就出发、清单在回执里重铺一次，撤销钮会跟着挪位 —— 整轮门禁里这条偶发红
+        # 过一次（marks/rows/ink 全 0）。回执在半路把撤销抹掉这件事另有一条专门的断言
+        # （往下几条），这里不该靠运气区分两种原因。
+        settled()
         # 那颗钮得真的点得着：.whisper 是淡入进场（visibility 参与过渡），动画还没走完
         # 的时候 elementFromPoint 会从它身上穿过去。所以等它可命中了再点。
         hittable = wait_js("""() => {
@@ -366,6 +390,48 @@ def main():
           ink: document.querySelectorAll('#rdBody mark.gzmk').length})""")
         chk("笔记栏：点「撤销」把划线与正文里的墨迹都放回去",
             back["marks"] == n0 and back["rows"] == 1 and back["ink"] == 1, back)
+
+        # ── 撤销撞上「还在路上的存盘回执」──────────────────────────
+        # 删掉那一刀过 900ms 会发一次存盘，回执里带的是出发那一刻的快照（里面没这道线）。
+        # 早先的写法拿回执无条件覆盖本地，于是「回执在半路落地、撤销在它之后点下去」这一串
+        # 时序会把刚放回来的线又抹掉：界面上凭空少一条，运气差时后一笔存盘还会把「没有」
+        # 写进书文件夹。现在按版本号认回执。这里把那一笔的回执人为压住 1.5 秒（延迟放在
+        # 回执这一侧 —— 请求必须照原样先出发，否则出去的那一份已经带着撤销之后的线，
+        # 就测不出这回事了），把竞态固定摆出来，不再靠整轮里偶发。
+        page.evaluate("""() => {
+          window.__held = 0;
+          const of = window.fetch;
+          window.fetch = function (...a) {
+            const body = (a[1] || {}).body;
+            if (String(a[0]).indexOf('/api/mynotes') < 0 || !body || window.__held) return of(...a);
+            window.__held = 1;
+            const p = of.apply(this, a);
+            return new Promise(res => setTimeout(() => res(p), 1500));
+          };
+        }""")
+        page.evaluate("() => document.querySelector('#ntList .ntrow[data-mk]').focus()")
+        page.keyboard.press("Delete")
+        sent = wait_js("() => window.__held === 1", 6000)       # 这一刀的存盘已出发、回执还悬着
+        box2 = page.evaluate("""() => {
+          const b = document.querySelector('.whisper .wa');
+          if (!b) return null;
+          const r = b.getBoundingClientRect();
+          return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)];
+        }""")
+        if sent and box2:
+            page.mouse.click(box2[0], box2[1])
+        just = page.evaluate("() => (NT.doc && NT.doc.marks || []).length")
+        page.wait_for_timeout(2200)                            # 让压住的那份回执落地
+        after = page.evaluate("""() => ({
+          marks: (NT.doc && NT.doc.marks || []).length,
+          rows: document.querySelectorAll('#ntList .ntrow[data-mk]').length,
+          ink: document.querySelectorAll('#rdBody mark.gzmk').length})""")
+        settled()
+        server = get("/api/mynotes?book=" + BOOK).get("counts") or {}
+        chk("撤销不会被半路的存盘回执抹掉（回执按版本号认）",
+            bool(sent) and bool(box2) and just == n0 and after["marks"] == n0
+            and after["rows"] == 1 and after["ink"] == 1 and server.get("marks") == n0,
+            {"sent": sent, "just": just, "after": after, "server": server})
 
         # ── 开编辑器 ─────────────────────────────────────
         page.evaluate("() => document.querySelector('#rdBody mark.gzmk').click()")

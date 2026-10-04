@@ -155,7 +155,9 @@ with sync_playwright() as pw:
             if r.status == 404 and "/api/cover" not in r.url else None)
     page.goto(BASE + "/", wait_until="networkidle")
     page.wait_for_timeout(1200)
-    page.evaluate("() => document.querySelector('[data-v=local]').click()")
+    # 1.0.1 起三格各摆各的：这三本取证书没有 clip_/imp_/video_ 前缀，归微信读书那一格。
+    # 以前点「本地书架」也能看见它们（那时五格是一整摊），现在点过去就是空的。
+    page.evaluate("() => document.querySelector('[data-v=shelf]').click()")
     page.wait_for_timeout(600)
     flush(page)
 
@@ -173,7 +175,7 @@ with sync_playwright() as pw:
     chk("半本不当取全", full["halfFull"] is False, full)
     chk("done=true 但章数不够照样不当取全（第二道锁）", full["lieFull"] is False, full)
     chk("短了这件事本身认得出来", full["lieShort"] is True, full)
-    chk("本地书库里看得见这两本", full["cards"] >= 2, full)
+    chk("微信读书那一格里看得见这两本", full["cards"] >= 2, full)
 
     # 详情页：半本书必须同时给「接着取」和「清掉重取」
     detail = page.evaluate("""async () => {

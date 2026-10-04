@@ -32,14 +32,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 import platform_compat as pc
+import ai_sum
 import board as board_mod
 import book_export
 import book_import
+import book_layout
 import book_notes
 import cleanup
 import clip_article
 import feed as feed_mod
 import ffmpeg_tool
+import flomo_notes
 import media_setup
 import mindmap
 import sync as cloudsync
@@ -51,7 +54,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def py():
@@ -92,6 +95,9 @@ DOWNLOAD_DIR = os.path.join(CACHE_DIR, "downloads")
 LIB_PATH = os.path.join(CACHE_DIR, "library.json")
 CFG_PATH = os.path.join(CACHE_DIR, "config.json")
 COVER_DIR = os.path.join(CACHE_DIR, "covers")
+# flomo 导进来的那份账（笔记条目 + 附件）单独一格：它是「一条条笔记」而不是「一本书」，
+# 收进书架才变成 书库/便签/ 下的目录。账本放缓存里，删了可以重新导，用户的数据源在 flomo。
+FLOMO_DIR = os.path.join(CACHE_DIR, "flomo")
 WALL_PATH = os.path.join(CACHE_DIR, "wallpaper.bin")
 # 本机阅读时长账本：界面里翻书的时间按天累计在这儿（微信读书那边的时间另有来源）。
 READSTAT_PATH = os.path.join(CACHE_DIR, "readstat.json")
@@ -197,12 +203,52 @@ def read_login_state():
 
 
 def safe_book_dir(book_id):
+    """这本书在磁盘上的目录 —— 全后端唯一的一道「按 id 找书」的闸。
+
+    1.0.1 起书库按模块分了文件夹（`书库/微信读书/<id>`、`书库/剪藏/<id>` …），
+    所以这里不能再拼 `OUT_DIR/<id>`：改成问 `book_layout.resolve()`，它按「先猜
+    模块、再退到没搬动的平铺旧位置」找一遍。id 里带 `../` 之类的仍然先被形状闸挡掉。
+    """
     if not book_id or not re.fullmatch(r"[A-Za-z0-9_\-]+", book_id):
         return None
-    d = os.path.realpath(os.path.join(OUT_DIR, book_id))
-    if not d.startswith(os.path.realpath(OUT_DIR) + os.sep):
-        return None
-    return d if os.path.isdir(d) else None
+    return book_layout.resolve(OUT_DIR, book_id)
+
+
+# 模块 id → 界面上那格的名字。回话里要说「已打开「剪藏」的文件夹」而不是笼统一句
+# 「已打开书库文件夹」—— 三格独立以后，用户点的就是其中一格，答复也得落到那一格。
+MODULE_NAME = dict(book_layout.MODULES)
+
+
+def module_dir(module):
+    """要往某个模块里写东西之前先建出来：`<书库>/<模块文件夹>`。
+
+    四个写入方（取书引擎 / 剪藏 / 订阅 / 导入）拿它当「书库」用，各自内部仍是
+    `<给定的根>/<书号>` 那一层平铺 —— 于是一次目录结构的改动只落在这一个文件里，
+    那些引擎与脚本一行不用跟着改。
+    """
+    return book_layout.book_dir(OUT_DIR, module)
+
+
+def task_env(module, extra=None):
+    """起子进程时要塞进环境的那一份：把 `GUIZANG_OUTPUT` 指到该模块的文件夹。
+
+    引擎与图片脚本里写的都是 `output/<书号>`（它们不该知道书库分了层），
+    所以「分层」这件事在启动任务这一刻由环境变量兜住：谁的书谁回自己那格。
+    """
+    env = {"GUIZANG_OUTPUT": module_dir(module)}
+    if extra:
+        env.update(extra)
+    return env
+
+
+def book_module(book_id):
+    """这本书属于哪个模块（界面上分区、进度分母、写盘位置都问它）。"""
+    d = safe_book_dir(book_id)
+    if d:
+        name = os.path.basename(os.path.dirname(d))
+        if book_layout.is_module_dir(name):
+            return book_layout.MODULE_OF[name]
+    return book_layout.module_of(book_id, book_meta(book_id) if d else None)
 
 
 def ensure_books_dir():
@@ -212,33 +258,128 @@ def ensure_books_dir():
     用户基本找不到。0.9.3 起改存用户文档下的「归藏」，取过的书一眼可见。
     升级时若新位置还空着、老位置却有书，就整目录搬过去；不搬的话用户升完级
     会以为「我的书全没了」。只在新书库不存在（或为空）时搬，绝不动已有内容的书库。
+
+    1.0.1 再加一刀：把还平铺在书库根上的书按模块归进各自的文件夹（`book_layout`）。
+    同样只在「目标位是空的」时搬，全程不删不覆盖；搬不动的留在原地也照样读得到。
     """
     try:
         os.makedirs(OUT_DIR, exist_ok=True)
     except OSError:
         return
     old = os.path.join(DATA_DIR, "output")
-    if os.path.realpath(old) == os.path.realpath(OUT_DIR) or not os.path.isdir(old):
-        return
+    if os.path.realpath(old) != os.path.realpath(OUT_DIR) and os.path.isdir(old):
+        try:
+            if not os.listdir(OUT_DIR):   # 新书库已经有东西，别去覆盖
+                moved = 0
+                for name in os.listdir(old):
+                    if name.startswith("."):
+                        continue
+                    try:
+                        shutil.move(os.path.join(old, name), os.path.join(OUT_DIR, name))
+                        moved += 1
+                    except OSError:
+                        pass
+                if moved:
+                    log(f"--- 已把 {moved} 项旧书从数据目录搬进书库：{OUT_DIR} ---")
+        except OSError:
+            pass
+    for mod in book_layout.ORDER:         # 六个模块文件夹一次建出来，访达里一眼能认
+        try:
+            os.makedirs(book_layout.module_path(OUT_DIR, mod), exist_ok=True)
+        except OSError:
+            pass
     try:
-        if os.listdir(OUT_DIR):          # 新书库已经有东西，别去覆盖
-            return
-        moved = 0
-        for name in os.listdir(old):
-            if name.startswith("."):
-                continue
-            try:
-                shutil.move(os.path.join(old, name), os.path.join(OUT_DIR, name))
-                moved += 1
-            except OSError:
-                pass
+        moved = book_layout.migrate(OUT_DIR, log)
         if moved:
-            log(f"--- 已把 {moved} 项旧书从数据目录搬进书库：{OUT_DIR} ---")
-    except OSError:
-        pass
+            log(f"--- 书库按模块归置：{len(moved)} 本搬进了各自的文件夹 ---")
+    except OSError as e:
+        log("--- 书库归置没跑完（不影响阅读）：%s ---" % str(e)[:120])
 
 
-# ---------- 书架（文件夹 / 归类 / 排序） ----------
+# ---------- 书架（文件夹 / 归类 / 排序 / 标签） ----------
+#
+# 1.0.0 只有一套夹子、一套状态标签、一条排序，五个模块（微信读书、本地书架、剪藏、
+# 订阅、视频）挤在一起用：给公众号文章建的「随笔」夹子会出现在整本书的分组里，
+# 挪一下剪藏的顺序会连带改动微信读书那一堆。1.0.1 起账本按模块分格存：
+#
+#     {"modules": {"weread": {"folders":…,"assign":…,"order":…,"state":…,"tags":…},
+#                  "clip": {…}, "feed": {…}, "video": {…}, "local": {…}, "flomo": {…}}}
+#
+# 老版把四样摊在顶层，`load_lib()` 读进来时按书号折进各自那一格（前缀认得出的都归对，
+# 认不出的算微信读书），落盘后顶层不再留副本 —— 一份数据只有一个地方能改，
+# 免得「两处各写一半、下次读哪都对」。
+
+LIB_KEYS = ("folders", "assign", "order", "state", "tags")
+
+
+def empty_scope():
+    return {"folders": [], "assign": {}, "order": [], "state": {}, "tags": {}}
+
+
+def normalize_lib(d):
+    mods = d.get("modules")
+    if not isinstance(mods, dict):
+        mods = {}
+    legacy = {}
+    for k in LIB_KEYS:
+        v = d.pop(k, None)
+        if v not in (None, [], {}, ""):
+            legacy[k] = v
+    for m in book_layout.ORDER:
+        s = mods.get(m)
+        if not isinstance(s, dict):
+            s = {}
+        for k in LIB_KEYS:
+            if k in ("folders", "order"):
+                if not isinstance(s.get(k), list):
+                    s[k] = []
+            elif not isinstance(s.get(k), dict):
+                s[k] = {}
+        mods[m] = s
+    if legacy:
+        for bid, fid in (legacy.get("assign") or {}).items():
+            if isinstance(fid, str):
+                mods[book_layout.module_of(bid)]["assign"].setdefault(str(bid), fid)
+        for bid in (legacy.get("order") or []):
+            s = mods[book_layout.module_of(str(bid))]
+            if bid not in s["order"]:
+                s["order"].append(bid)
+        for bid, st in (legacy.get("state") or {}).items():
+            if isinstance(st, str):
+                mods[book_layout.module_of(bid)]["state"].setdefault(str(bid), st)
+        for bid, tg in (legacy.get("tags") or {}).items():
+            if isinstance(tg, list):
+                mods[book_layout.module_of(bid)]["tags"].setdefault(str(bid), tg)
+        # 顶层那套夹子是「所有模块共用」的：被谁引用就抄给谁；一个都没被引用的
+        # （刚建好还没放书）留在微信读书那格，别让它凭空消失。
+        defs = [f for f in (legacy.get("folders") or [])
+                if isinstance(f, dict) and f.get("id")]
+        used_by = {fid: {m for m in book_layout.ORDER if fid in mods[m]["assign"].values()}
+                   for fid in [f["id"] for f in defs]}
+        for f in defs:
+            takers = used_by.get(f["id"]) or {"weread"}
+            for m in takers:
+                have = {x.get("id") for x in mods[m]["folders"]}
+                if f["id"] not in have:
+                    mods[m]["folders"].append(dict(f))
+    d["modules"] = mods
+    return d
+
+
+def lib_scope(lib, module=None):
+    """某模块那一格账；模块名不认识就退回微信读书那格（与旧界面行为一致）。"""
+    mods = lib.get("modules") or {}
+    key = module if module in book_layout.DIR_OF else "weread"
+    s = mods.get(key)
+    if not isinstance(s, dict):
+        s = empty_scope()
+        mods[key] = s
+        lib["modules"] = mods
+    for k in LIB_KEYS:
+        if k not in s:
+            s[k] = [] if k in ("folders", "order") else {}
+    return s
+
 
 def load_lib():
     try:
@@ -248,11 +389,7 @@ def load_lib():
         d = {}
     if not isinstance(d, dict):
         d = {}
-    d.setdefault("folders", [])
-    d.setdefault("assign", {})
-    d.setdefault("order", [])
-    d.setdefault("state", {})
-    return d
+    return normalize_lib(d)
 
 
 # 服务多线程跑，几个小账本（书架、配置、阅读时长）都会落盘。原来它们共用
@@ -280,14 +417,31 @@ def save_lib(d):
 
 
 def prune_lib(lib):
-    """丢掉已经不存在的书留下的记录。"""
-    alive = set()
-    if os.path.isdir(OUT_DIR):
-        alive = {n for n in os.listdir(OUT_DIR)
-                 if os.path.isdir(os.path.join(OUT_DIR, n))}
-    lib["assign"] = {k: v for k, v in lib["assign"].items() if k in alive}
-    lib["order"] = [x for x in lib["order"] if x in alive]
-    lib["state"] = {k: v for k, v in (lib.get("state") or {}).items() if k in alive}
+    """丢掉已经不存在的书留下的记录（每个模块那一格各自清，认的是同一份「还在的书」）。"""
+    alive = {bid for bid, _d, _m in book_layout.walk(OUT_DIR)}
+    for m in book_layout.ORDER:
+        s = lib_scope(lib, m)
+        s["assign"] = {k: v for k, v in s["assign"].items() if k in alive}
+        s["order"] = [x for x in s["order"] if x in alive]
+        s["state"] = {k: v for k, v in s["state"].items() if k in alive}
+        s["tags"] = {k: v for k, v in s["tags"].items() if k in alive}
+        # 空夹子不裁：刚建好还没放东西的文件夹被这一刀削掉，界面上就是
+        # 「点了新建、闪了一下没影」；夹子只能由人自己删。
+    return lib
+
+
+def lib_forget(lib, book_id, module=None):
+    """把一本书从账本上抹干净（删书、或书换了模块时用）。
+
+    不指定模块就五格都清一遍：一本书只住一格，多清几格是空操作，
+    但漏清一格就会留下「一个不存在的书还占着夹子和排序」的幽灵记录。
+    """
+    for m in ([module] if module in book_layout.DIR_OF else book_layout.ORDER):
+        s = lib_scope(lib, m)
+        s["assign"].pop(book_id, None)
+        s["order"] = [x for x in s["order"] if x != book_id]
+        s["state"].pop(book_id, None)
+        s["tags"].pop(book_id, None)
     return lib
 
 
@@ -927,6 +1081,18 @@ def ensure_cover(book_id):
     return None
 
 
+def cache_meta_cover(book_id):
+    """按 meta.json 里那个远端封面地址，把图落到 cache/covers/<id>.jpg。
+
+    为什么单列一层：剪藏入库、订阅入库、视频转完、后台补封面，四处都要做同一件事
+    ——「这本书的封面地址写在 meta 里，去取回来」。以前只有剪藏和订阅那两处显式调了
+    cache_cover，视频那条线转完就没人管，于是用户点名要的「视频封面当笔记封面」落不了地。
+    """
+    if not book_id:
+        return False
+    return cache_cover(book_id, str((book_meta(book_id) or {}).get("cover") or ""))
+
+
 def warm_covers(limit=80):
     """后台把书架上还没有封面的书补齐（需要 Key）。不阻塞请求。"""
     def job():
@@ -934,9 +1100,16 @@ def warm_covers(limit=80):
         for b in list_books():
             if n >= limit:
                 break
-            if not b.get("cover"):
-                if ensure_cover(b["id"]):
+            if b.get("cover"):
+                continue
+            if book_layout.module_of(b["id"]) != "weread":
+                # 剪藏 / 视频 / 订阅的封面本来就是 meta.json 里那个远端地址：入库时取过
+                # 一次，失败过的（当时没网、图床抽风）在这里补上，旧书也能长出封面。
+                if cache_meta_cover(b["id"]):
                     n += 1
+                continue
+            if ensure_cover(b["id"]):
+                n += 1
         if n:
             log(f"--- 已补齐 {n} 张封面 ---")
     threading.Thread(target=job, daemon=True).start()
@@ -1008,8 +1181,10 @@ def mcp_prompt():
         "  video_transcript（读，每段带 id）、video_transcript_save（改）、video_rebuild（重建正文）、video_export（导字幕）",
         "· 思维导图：map_show、map_from_notes（只给不存）、map_save",
         "· 画板：board_list、board_show、board_new、board_save、board_delete",
+        "· 便签（flomo）：flomo_notes（读，按标签 / 关键字筛，带 id 取全文）、",
+        "  flomo_portrait（读「用户记忆画像」，只有数字与标签，不含原文）",
         "",
-        "四点注意，都是这个工具的设计口径，请照着做：",
+        "五点注意，都是这个工具的设计口径，请照着做：",
         "1. 取书、转写、批量取书、刷新订阅都是分钟到小时级的长任务：调用会立即返回，",
         "   进度用 app_status / task_log 轮询，不要在调用里等它跑完。",
         "2. 改转写请只用 video_transcript_save 的 edits / drop / add —— 只说改了哪几段，",
@@ -1017,6 +1192,9 @@ def mcp_prompt():
         "3. map_save 不给 nodes 就只改标题 / 形态，board_save 不带 canvas 就不动画面 ——",
         "   用户手画的图和涂鸦覆盖不了第二次。",
         "4. 删除类要显式确认：cache_delete 带 confirm=true 才真删，board_delete 是不可恢复的。",
+        "5. 只要这件事和用户的笔记有关，先调一次 flomo_portrait 再动手：那份画像是",
+        "   「他怎么记东西」的账（节奏、标签层级、长短、常打的标签），读完再决定翻几条、",
+        "   按哪个标签找、回复写多长。便签一律只读 —— 改笔记是用户自己的事，没有写口。",
         "",
         "弄好后用 shelf_list 试一下，能读出书架就说明通了。",
     ])
@@ -1258,16 +1436,34 @@ def agent_open(payload, stream=True, timeout=120):
         raise RuntimeError("连不上那个地址：%s" % str(e)[:160])
 
 
+class AgentStreamCut(RuntimeError):
+    """上游话说一半就断了线。
+
+    单独一个类，是为了让调用方能把它和「连不上」「回 500」分开处理：那两种一个字
+    都没收到，这一种屏幕上半截都在 —— 半截不能当成品存盘，否则上一次那份好的被
+    覆盖掉，用户以为内容还在，其实已经少了尾巴。
+    """
+
+
 def agent_deltas(resp):
     """把上游的 SSE 拆成一段段正文。上游字段缺失/半行 JSON 都直接跳过 ——
-    宁可少吐几个字，也不能因为一行脏数据把整段对话打断。"""
+    宁可少吐几个字，也不能因为一行脏数据把整段对话打断。
+
+    但收尾必须认账：连接结束之前既没见过 data: [DONE]、也没见过 finish_reason，
+    那就是中途拔线，不是答完了。实测（/tmp/probe_cut.py）这种断法不抛任何异常，
+    urllib 把 EOF 读成「正常结束」，所以只能自己记 —— 不记的话调用方会把半截
+    当完整答案存进 _ai/，界面上还写着「小结好了」。
+    """
+    ended = False        # 见过 data: [DONE]（OpenAI 系的标准收尾）
+    finished = False     # 见过 finish_reason（有些中转不发 [DONE]，只发这个，不能当断了）
     for raw in resp:
         line = raw.decode("utf-8", "replace").strip()
         if not line.startswith("data:"):
             continue
         data = line[5:].strip()
         if data == "[DONE]":
-            return
+            ended = True
+            break
         try:
             j = json.loads(data)
         except Exception:
@@ -1276,6 +1472,30 @@ def agent_deltas(resp):
             piece = (ch.get("delta") or {}).get("content")
             if piece:
                 yield piece
+            if ch.get("finish_reason"):
+                finished = True
+    if not (ended or finished):
+        raise AgentStreamCut("上游话说一半就断了线，这次这份没存（上一次的那份还在）")
+
+
+def agent_once(messages, timeout=90):
+    """问一次、等整段答案（不流式）。要 JSON 的那些活儿用它 —— 导图、画像这类，
+    半棵树在屏幕上蹦出来没有意义，拼完整了才能解析。失败抛人话，由调用方翻成提示。"""
+    url, key, model = agent_cfg()
+    if not url or not model:
+        raise RuntimeError("还没配 AI 接口：设置 → 读书小助手，填地址和模型名")
+    body = {"model": model, "messages": messages, "stream": False}
+    with agent_open({"url": url, "key": key, "body": body},
+                    stream=False, timeout=timeout) as r:
+        j = json.loads(r.read().decode("utf-8", "replace"))
+    try:
+        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    except Exception:
+        say = ""
+    say = str(say).strip()
+    if not say:
+        raise RuntimeError("那边没给出内容，模型名或地址可能不对")
+    return say
 
 
 def agent_test():
@@ -1355,15 +1575,110 @@ def agent_quick(mode, text, ctx=""):
     return (True, say) if say else (False, "那边没给出内容，换个模型名试试")
 
 
-def list_books():
+# ---------- AI 小结：读书 / 剪藏 / 视频共用一个入口 ----------
+#
+# 界面上只有一个「小结」，范围和模式都由 ai_sum 定：读书一次只读当前这一章，
+# 剪藏 / 订阅 / 视频这类「本来就是一篇」的整篇读。这里只负责三件事 ——
+# 把正文取出来、把流转到用户屏幕上、把结果存回这本书的 _ai/。
+# 规则本身不写在这儿，免得前后端各写一套「什么算一章」。
+
+def ai_source(book_id, chapter=""):
+    """这一次小结要读什么。返回 (True, {正文,标题,范围,来路,章}) 或 (False, 人话)。"""
+    meta = book_meta(book_id)
+    module = ai_sum.module_of(meta, book_id)
+    scope, ch = ai_sum.scope_for(module, chapter)
+    if not scope:
+        return False, "读书这类一次只小结当前这一章：先在阅读页翻到要读的那一章"
+    if scope == "chapter":
+        text = chapter_text(book_id, ch)
+        miss = "没找到这一章的正文（%s）" % (ch or "")
+    else:
+        text = merged_markdown(book_id)
+        miss = "这篇内容还没在本地落成文件，先重新入库一次"
+    if not text or not text.strip():
+        return False, miss
+    return True, {"text": text, "title": meta.get("title") or book_id,
+                  "scope": scope, "module": module, "chapter": ch}
+
+
+def ai_summary_stream(book_id, style, chapter, emit):
+    """边生成边往外递，收完存进这本书的 _ai/。返回 (ok, 一句话)。
+
+    存盘只在拿到内容之后：半路失败时留下上一次的旧结果比留一个空文件好 ——
+    用户重开这一页还能看见上次那份，不会以为笔记被自己点没了。
+    """
+    ok, src = ai_source(book_id, chapter)
+    if not ok:
+        return False, src
+    url, key, model = agent_cfg()
+    if not url or not model:
+        return False, "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"
+    msgs = ai_sum.messages(style, src["scope"], src["title"], src["text"], src["module"])
+    body = {"model": model, "messages": msgs, "stream": True}
+    got = []
+    try:
+        with agent_open({"url": url, "key": key, "body": body}) as r:
+            for piece in agent_deltas(r):
+                got.append(piece)
+                emit(piece)
+    except Exception as e:
+        return False, str(e)[:200]
+    text = "".join(got).strip()
+    if not text:
+        return False, "那边一个字都没回，模型名或地址可能不对"
+    d = safe_book_dir(book_id)
+    if d:
+        ai_sum.save_result(d, src["scope"], style, src["chapter"], text)
+    return True, "小结好了（已存进这本书的 _ai/）"
+
+
+def ai_mindmap(book_id, chapter=""):
+    """这篇内容 → 一棵导图树 → 直接存成这本书可编辑的那张图。返回 (ok, 给界面的话 + doc)。
+
+    和「从笔记生成」不同，这一步不先问一遍：用户点的是「让 AI 画一张」，等的就是图。
+    覆盖前 mindmap 那边会把旧的一份换成 .prev 留着（见 _write_json），手画的那张因此
+    不是点一下就没了；界面另有一句「已覆盖，原来那张还在 .prev 里」的提示兜底。
+    """
+    ok, src = ai_source(book_id, chapter)
+    if not ok:
+        return False, {"msg": src}
+    url, _, model = agent_cfg()
+    if not url or not model:
+        return False, {"msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"}
+    msgs = ai_sum.map_messages(src["title"], src["text"], src["scope"])
+    try:
+        raw = agent_once(msgs, 180)
+    except Exception as e:
+        return False, {"msg": "没能问出导图：%s" % str(e)[:160]}
+    tree, warn = ai_sum.parse_map(raw, src["title"], src["text"])
+    d = safe_book_dir(book_id)
+    if not d:
+        return False, {"msg": "没找到这本书，图没地方放"}
+    doc = mindmap.from_note_tree(tree, src["title"])
+    try:
+        res = mindmap.save_map(d, doc)
+    except Exception as e:
+        return False, {"msg": "这张图存不下去：%s" % str(e)[:140]}
+    if not res.get("ok"):
+        return False, {"msg": res.get("error") or "这张图没存进去"}
+    saved = mindmap.load_map(d)
+    msg = "AI 画好了（%d 个节点）" % res.get("nodes", 0)
+    if warn:
+        msg = "%s，%d 个节点" % (warn, res.get("nodes", 0))
+    return True, {"doc": saved, "layout": mindmap.layout(saved),
+                  "nodes": res.get("nodes", 0), "msg": msg}
+
+
+def list_books(module=None):
+    """书库清单。给 `module` 就只列那一个模块（界面上每个模块各问各的，
+    剪藏的文章不会再混进微信读书那一堆）。"""
     books = []
     lib = prune_lib(load_lib())
-    if not os.path.isdir(OUT_DIR):
-        return books
-    for name in sorted(os.listdir(OUT_DIR)):
-        d = os.path.join(OUT_DIR, name)
-        if not os.path.isdir(d):
+    scopes = {m: lib_scope(lib, m) for m in book_layout.ORDER}
+    for name, d, mod in book_layout.walk(OUT_DIR):
+        if module and mod != module:
             continue
+        s = scopes[mod]
         ch_dir = os.path.join(d, "chapters")
         raw_dir = os.path.join(d, "raw")
         img_dir = os.path.join(d, "images")
@@ -1439,16 +1754,24 @@ def list_books():
                          ("pages", "chapters", "session_chars", "running",
                           "budget_left", "stalled", "stale", "updated_at")
                          if progress.get(k) is not None},
-            "folder": lib["assign"].get(name) or "",
-            "state": (lib.get("state") or {}).get(name) or "",
+            "folder": s["assign"].get(name) or "",
+            "state": (s.get("state") or {}).get(name) or "",
+            "tags": s["tags"].get(name) or [],
+            # 这本书住在哪个模块文件夹里：前端分区、MCP 按模块问话都靠它，
+            # 不再拿 source/format 在前端自己猜一遍（猜错过一次：视频和订阅漏进「全部」）
+            "module": mod,
             # 深链：微信书回原书阅读器，剪藏的文章回它的原文，导入的本地书没有来路
             "deep": book_deep_link(name, meta),
             # 前端据此决定要不要请求封面：没有就不请求，免得满屏 404
             "cover": os.path.isfile(cover_path(name)),
         })
-    # 书架顺序：先在 order 里的按位置排，其余按最近更新排在后面
-    pos = {bid: i for i, bid in enumerate(lib["order"])}
-    books.sort(key=lambda b: (pos.get(b["id"], 10 ** 9), -b["updated_at"]))
+    # 书架顺序：先在 order 里的按位置排，其余按最近更新排在后面。
+    # 每个模块一条自己的顺序 —— 拖剪藏的第 3 张不该把微信读书那堆一起挪了。
+    pos = {}
+    for m in book_layout.ORDER:
+        for i, bid in enumerate(lib_scope(lib, m)["order"]):
+            pos.setdefault((m, bid), i)
+    books.sort(key=lambda b: (pos.get((b["module"], b["id"]), 10 ** 9), -b["updated_at"]))
     return books
 
 
@@ -1761,6 +2084,35 @@ RESIDUE_DIRS = ("chapters", "raw", "images")
 RESIDUE_FILES = ("_catalog.json", "_progress.json")
 
 
+def drop_stray_md(book_id, title=""):
+    """清掉书库里属于这本书的「合并稿」，返回删掉的个数。
+
+    引擎跑完整本会在它写书的目录旁再落一份 `<书名>.md`（早期叫 `<书号>.md`），
+    那是可再生的副本，不是唯一的一份。两处都要看：新结构在模块文件夹里，
+    没搬动的老书和命令行直接跑出来的还在书库根上。只删书库内的普通文件，
+    名字按 `os.path.realpath` 再核一遍归属 —— 书名是用户可控的字符串，
+    带 `../` 的那种不能拼成「一路删到书库外面」。
+    """
+    root = os.path.realpath(OUT_DIR)
+    places = [os.path.join(root, book_layout.DIR_OF[book_module(book_id)]), root]
+    names = {str(title or ""), str(book_id or "")}
+    gone = 0
+    for place in places:
+        for nm in names:
+            if not nm:
+                continue
+            p = os.path.join(place, re.sub(r'[<>:"/\\|?*]', "_", nm) + ".md")
+            real = os.path.realpath(p)
+            if not (real.startswith(root + os.sep) and os.path.isfile(real)):
+                continue
+            try:
+                os.remove(real)
+                gone += 1
+            except OSError:
+                pass
+    return gone
+
+
 def reset_book_output(book_id):
     """抹掉一本「取到一半」的书的残稿，给「清掉重取」让路。
 
@@ -1786,15 +2138,7 @@ def reset_book_output(book_id):
             os.remove(p)
             removed += 1
     # 合并稿有两份可能的名字：按书名的和早期按书号的，都清掉，免得留一份过期的全本假象
-    for name in (meta_title(book_id), book_id):
-        stray = os.path.join(OUT_DIR, re.sub(r'[<>:"/\\|?*]', "_", str(name)) + ".md")
-        if (os.path.isfile(stray)
-                and os.path.realpath(stray).startswith(os.path.realpath(OUT_DIR) + os.sep)):
-            try:
-                os.remove(stray)
-                removed += 1
-            except OSError:
-                pass
+    removed += drop_stray_md(book_id, meta_title(book_id))
     mp = os.path.join(d, "meta.json")
     meta = {}
     if os.path.exists(mp):
@@ -1842,6 +2186,15 @@ def _reader(proc):
         book = TASK["book"]
     if TASK.get("kind") in ("export",) and book:
         write_meta(book, title, author, done)
+    if TASK.get("kind") == "video":
+        # 视频封面落到 cache/covers/<id>.jpg：书架只在本地有文件时才请求 /api/cover，
+        # 不顺手取一次，视频那一格里就永远是生成色块 —— 用户要的是「视频封面当笔记封面」。
+        bid = str((TASK.get("result") or {}).get("book_id") or "").strip()
+        if bid:
+            if cache_meta_cover(bid):
+                log(f"--- 视频封面已存下：{bid} ---")
+            else:
+                log(f"--- 视频封面没取到（{bid}），书架先用生成式封面 ---")
     log(f"--- 任务结束（退出码 {proc.returncode}）---")
 
 
@@ -2023,6 +2376,10 @@ def cache_cover(book_id, url):
     """
     u = (url or "").strip()
     if not (book_id and re.match(r"^https?://", u)):
+        return False
+    # 地址是别人网页里写的 og:image / 正文首图 / 视频缩略图，不是用户自己粘的链接，
+    # 所以内网与本机地址必须在下载前挡掉（clip_article 里那套规则，一处说了算）。
+    if not clip_article.safe_image_url(u):
         return False
     p = cover_path(book_id)
     if os.path.isfile(p) and os.path.getsize(p) > 800:
@@ -2483,7 +2840,7 @@ def feed_do(body):
                                len(r.get("failed") or [])))}
         if act == "shelf":
             eid = str(body.get("id") or "")
-            info = feed_mod.to_shelf(eid, OUT_DIR)
+            info = feed_mod.to_shelf(eid, module_dir("feed"))
             cache_cover(info["id"], (book_meta(info["id"]) or {}).get("cover") or "")
             log(f"订阅入库：{info['title']}（{info.get('site') or ''}，"
                 f"{info.get('chars') or 0} 字）")
@@ -2544,11 +2901,8 @@ def video_books():
     「有没有带时间戳的转写、多少段、重建过没有」，全文等用户点进某一本书再说。
     """
     out = []
-    if not os.path.isdir(OUT_DIR):
-        return out
-    for name in sorted(os.listdir(OUT_DIR)):
-        d = safe_book_dir(name)
-        if not d:
+    for name, d, mod in book_layout.walk(OUT_DIR):
+        if mod != "video":
             continue
         m = book_meta(name)
         if (m.get("source") or "") != "video":
@@ -2741,11 +3095,183 @@ def video_do(body):
                 "language": str(body.get("language") or "").strip()[:8]}
         ok, msg = start_task(
             "video", [py(), script("video_note.py"), "--task", url],
-            env_extra={"GUIZANG_VIDEO_OPTS": json.dumps(opts, ensure_ascii=False)})
+            env_extra=task_env("video",
+                               {"GUIZANG_VIDEO_OPTS": json.dumps(opts, ensure_ascii=False)}))
         return {"ok": ok, "msg": msg}
     except Exception as e:
         log(f"--- 视频任务失败（{act}）：{type(e).__name__}: {e} ---")
         return {"ok": False, "msg": "这个操作没做成：%s" % str(e)[:140]}
+
+
+# ---------- flomo 便签 ----------
+
+_FLOMO_EMPTY = {"memos": 0, "days": 0, "first": "", "last": "", "words": 0,
+                "tags": 0, "images": 0, "top_tags": [], "busiest": []}
+_FLOMO_STATS = {"k": None, "v": None}
+
+
+def flomo_stats():
+    """导入进来的骨架数字（多少条、多少天、多少个标签）。
+
+    和 feed_summary 一个理由：/api/state 两秒轮一次，几百上千条笔记的账不该每次都
+    重算，按 (mtime, size) 缓一份。数字里本来就不含笔记正文，写日志、做记忆画像
+    都安全（用户明确要求个人信息不许留在源码与日志里）。
+    """
+    try:
+        st = os.stat(flomo_notes.path_in(FLOMO_DIR))
+    except OSError:
+        return dict(_FLOMO_EMPTY, at=0)
+    key = (int(st.st_mtime), st.st_size)
+    if _FLOMO_STATS["k"] == key and _FLOMO_STATS["v"] is not None:
+        return _FLOMO_STATS["v"]
+    try:
+        out = flomo_notes.summary_stats(flomo_notes.load(FLOMO_DIR))
+    except Exception:
+        out = dict(_FLOMO_EMPTY)
+    out["at"] = int(st.st_mtime)
+    _FLOMO_STATS["k"], _FLOMO_STATS["v"] = key, out
+    return out
+
+
+def flomo_att_path(name):
+    """附件名 → 本地路径。只认 cache/flomo/att 那一层里的真实文件。
+
+    界面里 `<img src=/api/flomo/att/xxx.jpg>` 拼的是导入时算好的哈希名，理论上没有
+    路径符号；但这是读磁盘的口子，还是按 board_file 那套来：字符白名单 + realpath
+    前缀校验，`..` 和子目录一概进不来。
+    """
+    if not name or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,80}", str(name)):
+        return None
+    root = os.path.realpath(flomo_notes.att_dir(FLOMO_DIR))
+    p = os.path.realpath(os.path.join(root, os.path.basename(str(name))))
+    if not p.startswith(root + os.sep) or not os.path.isfile(p):
+        return None
+    return p
+
+
+def flomo_view(q):
+    """GET /api/flomo/notes?mode=… —— 时间线 / 单条 / 标签 / 画像，全部只读。"""
+    mode = (q.get("mode", ["list"])[0] or "list").strip()
+
+    def one(key, default=""):
+        return (q.get(key, [default])[0] or default)
+
+    try:
+        if mode == "one":
+            m = flomo_notes.one(flomo_notes.load(FLOMO_DIR), one("id"))
+            return {"ok": True, "memo": flomo_notes.public(m) if m else None}
+        if mode == "stats":
+            return {"ok": True, "stats": flomo_stats()}
+        if mode == "tags":
+            data = flomo_notes.load(FLOMO_DIR)
+            return {"ok": True, "tags": flomo_notes.tag_counts(data),
+                    "recent": flomo_notes.recent_tags(data)}
+        if mode == "portrait":
+            # 给 Agent 的那一份「用户记忆画像」：只有数字与标签，没有一条原文。
+            # 顺手落盘到 cache/flomo/portrait/ —— 用户要的「首次操作时生成、存在存储目录
+            # 下的指定文件夹里」就在这一下发生，之后 Agent 每次做事前读的是同一份。
+            data = flomo_notes.load(FLOMO_DIR)
+            wrote = flomo_notes.write_portrait(FLOMO_DIR, data)
+            p = wrote["portrait"]
+            return {"ok": True, "portrait": p, "stats": flomo_stats(),
+                    "md": flomo_notes.portrait_markdown(p),
+                    "file": wrote["md"], "json": wrote["json"]}
+        data = flomo_notes.load(FLOMO_DIR)
+        picked = flomo_notes.pick(
+            data, tag=one("tag"), q=one("q"),
+            limit=max(1, min(500, int(one("limit", "80") or 80))),
+            offset=max(0, int(one("offset", "0") or 0)),
+            order=one("order", "desc"))
+        return {"ok": True, "memos": picked["memos"], "total": picked["total"],
+                "offset": picked["offset"], "count": picked["count"],
+                "stats": flomo_stats(), "tags": flomo_notes.tag_counts(data)}
+    except Exception as e:
+        return {"ok": False, "msg": "读便签出错：%s" % str(e)[:140]}
+
+
+def flomo_do(body):
+    """POST /api/flomo/notes —— 导入 / 收成书 / 忘条 / 清空 / 打标签。"""
+    act = str((body or {}).get("act") or "").strip()
+    try:
+        if act == "import":
+            raw = (body or {}).get("data") or ""
+            name = str((body or {}).get("name") or "").strip()
+            if not raw:
+                return {"ok": False, "msg": "没有收到文件内容"}
+            try:
+                blob = base64.b64decode(raw, validate=False)
+            except Exception:
+                return {"ok": False, "msg": "文件内容解码失败"}
+            # 2MB 的导出包 base64 后约 2.7MB；放到 60MB 是给「多年全量 + 一堆图」留余量，
+            # 同时不至于让一个误传的整盘备份把内存吃掉。
+            if len(blob) > 60 * 1024 * 1024:
+                return {"ok": False, "msg": "这份文件太大了（60MB 封顶），按时间分批导吧"}
+            res = flomo_notes.import_notes(FLOMO_DIR, blob, name, log)
+            _FLOMO_STATS["k"] = None
+            log("--- flomo 导入：%d 条（新 %d · 图 %d）---"
+                % (res["total"], res["added"], res["atts"]))
+            return dict({"ok": True, "stats": flomo_stats()}, **res)
+        if act == "shelf":
+            mid = str(body.get("id") or "")
+            if not mid:
+                return {"ok": False, "msg": "没说要收哪一条"}
+            info = flomo_notes.to_shelf(FLOMO_DIR, mid, module_dir("flomo"))
+            # 便签的封面就是它自己那张图（用户要的「以视频封面/文章首图当封面」同理）；
+            # 没图就不硬塞，让书架用生成式封面兜着。
+            atts = flomo_notes.one(flomo_notes.load(FLOMO_DIR), mid)
+            for nm in ((atts or {}).get("atts") or []):
+                p = flomo_att_path(nm)
+                if p:
+                    try:
+                        os.makedirs(COVER_DIR, exist_ok=True)
+                        with open(p, "rb") as f:
+                            raw = f.read(4 * 1024 * 1024)
+                        if len(raw) > 800:
+                            tmp = cover_path(info["id"]) + ".tmp"
+                            with open(tmp, "wb") as f:
+                                f.write(raw)
+                            os.replace(tmp, cover_path(info["id"]))
+                        break
+                    except OSError:
+                        pass
+            msg = ("已收进书架：《%s》" % info.get("title")) if info.get("existed") \
+                else ("已收成一本：《%s》" % info.get("title"))
+            return {"ok": True, "book": info, "msg": msg, "memo": flomo_notes.public(atts)}
+        if act == "tag":
+            mid = str(body.get("id") or "")
+            tag = str(body.get("tag") or "").strip()[:40].lstrip("#")
+            if not (mid and tag):
+                return {"ok": False, "msg": "要给哪条打哪个标签？"}
+            data = flomo_notes.load(FLOMO_DIR)
+            m = flomo_notes.one(data, mid)
+            if not m:
+                return {"ok": False, "msg": "没有这条笔记"}
+            tags = list(m.get("tags") or [])
+            remove = bool(body.get("remove"))
+            if remove:
+                tags = [t for t in tags if t != tag]
+            elif tag not in tags:
+                tags.append(tag)
+            m["tags"] = tags
+            flomo_notes.save(FLOMO_DIR, data)
+            _FLOMO_STATS["k"] = None
+            return {"ok": True, "tags": tags, "msg": "标签已更新"}
+        if act == "forget":
+            mid = str(body.get("id") or "")
+            ok = flomo_notes.forget(FLOMO_DIR, mid)
+            _FLOMO_STATS["k"] = None
+            return {"ok": ok, "msg": "本机已忘掉这条（flomo 那边一个字没动）"
+                    if ok else "没有这条笔记"}
+        if act == "clear":
+            n = flomo_notes.clear(FLOMO_DIR)
+            _FLOMO_STATS["k"] = None
+            log("--- flomo 便签已清空（%d 条）---" % n)
+            return {"ok": True, "n": n, "msg": "已清掉本机导入的 %d 条" % n}
+        return {"ok": False, "msg": "不认得这个操作：%s" % act[:30]}
+    except Exception as e:
+        msg = str(e)[:200]
+        log("--- flomo 便签失败：%s ---" % msg)
+        return {"ok": False, "msg": msg or "便签这事儿没成"}
 
 
 # ---------- http ----------
@@ -2825,21 +3351,41 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 task = {k: v for k, v in TASK.items() if k != "proc"}
             lib = load_lib()
+            # 每个模块一套自己的夹子 / 状态 / 标签（1.0.1 起）。顶层那两个字段
+            # 保留 = 微信读书那一格，老的 MCP 适配器与「我的书架」还按老样子读。
+            libs = {m: {"folders": lib_scope(lib, m)["folders"],
+                        "states": lib_scope(lib, m)["state"],
+                        "tags": lib_scope(lib, m)["tags"]}
+                    for m in book_layout.ORDER}
+            fm = flomo_stats()
             return self._json({
                 "chromium": chromium_ready(),
                 "login": read_login_state(),
                 "task": task,
                 "books": list_books(),
-                "folders": lib["folders"],
+                "libs": libs,
+                "modules": [{"id": m, "name": book_layout.DIR_OF[m]}
+                            for m in book_layout.ORDER],
+                "folders": lib_scope(lib, "weread")["folders"],
                 # 状态标签可能打在还没抓取的书上，所以整张表也给前端
-                "states": lib.get("state") or {},
+                "states": lib_scope(lib, "weread")["state"],
                 "repo": REPO,
                 "out": OUT_DIR,
                 "version": VERSION,
                 "weread": {"key_set": bool(weread_key()),
                            "key_tail": weread_key()[-4:] if weread_key() else ""},
                 "flomo": {"url_set": bool(load_cfg().get("flomo_url")),
-                          "tail": (load_cfg().get("flomo_url") or "")[-8:]},
+                          "tail": (load_cfg().get("flomo_url") or "")[-8:],
+                          # 导入侧的计数（条数 / 天数 / 标签数 / 最后导入时间）。
+                          # 只有数字，没有一条笔记原文 —— 这个字段是轮询的，日志和
+                          # 界面都会读到，隐私口径按「清除本地数据」那条红线来。
+                          "notes": fm["memos"],
+                          "days": fm["days"],
+                          "tags": fm["tags"],
+                          "images": fm["images"],
+                          "first": fm["first"],
+                          "last": fm["last"],
+                          "at": fm["at"]},
                 "wallpaper": {"set": os.path.isfile(WALL_PATH),
                               "v": int(os.path.getmtime(WALL_PATH)) if os.path.isfile(WALL_PATH) else 0},
                 "export": {"dir": export_dir()},
@@ -2854,6 +3400,22 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/feed":
             return self._json(feed_view(q))
+
+        if path == "/api/flomo/notes":
+            return self._json(flomo_view(q))
+
+        if path.startswith("/api/flomo/att/"):
+            p = flomo_att_path(unquote(path[len("/api/flomo/att/"):]))
+            if not p:
+                return self._send(404, "text/plain; charset=utf-8", "没有这张图")
+            ext = os.path.splitext(p)[1].lstrip(".").lower()
+            mime = {"png": "image/png", "gif": "image/gif", "webp": "image/webp",
+                    "bmp": "image/bmp"}.get(ext) or "image/jpeg"
+            with open(p, "rb") as f:
+                # 文件名是内容哈希，改一个字就换个名字，所以可以放心长缓存：
+                # 时间线往下翻时不必反复重读同一张图。
+                return self._send(200, mime, f.read(),
+                                  {"Cache-Control": "public, max-age=31536000"})
 
         if path == "/api/video":
             # mode=file 是「把导出的字幕 / 纯文本给我」这一种问法：它回的是字节，
@@ -3186,6 +3748,25 @@ class Handler(BaseHTTPRequestHandler):
                                "papers": list(board_mod.PAPERS),
                                "max_boards": board_mod.MAX_BOARDS})
 
+        if path == "/api/ai/summary":
+            # 上次存下来的那份（这本书的 _ai/）。重开页面不必再问一次模型 ——
+            # 用户要的是「我读过的书都记着」，而不是每次刷新都重新生成一遍。
+            book = q.get("book", [""])[0]
+            d = safe_book_dir(book)
+            if not d:
+                return self._json({"ok": False, "msg": "没找到这本书"}, 404)
+            meta = book_meta(book)
+            module = ai_sum.module_of(meta, book)
+            scope, ch = ai_sum.scope_for(module, q.get("chapter", [""])[0])
+            style = q.get("style", ["brief"])[0]
+            if style not in ai_sum.STYLE_KEYS:
+                style = "brief"
+            if not scope:
+                return self._json({"ok": True, "text": "", "scope": "", "style": style})
+            return self._json({"ok": True, "text": ai_sum.load_result(d, scope, style, ch),
+                               "scope": scope, "style": style,
+                               "chapter": ch, "module": module})
+
         if path == "/api/mindmap":
             # 这本书自己那张可编辑的脑图（mindmap.json 一个书目录一份）。
             # 布局必须在后端算：四种形态的排布是几十行几何，前端再写一遍就是两份真相，
@@ -3269,7 +3850,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "msg": "文件内容解码失败"}, 400)
             try:
                 info = book_import.import_book(
-                    OUT_DIR, name, blob,
+                    module_dir("local"), name, blob,
                     title=str((body or {}).get("title") or "").strip(),
                     author=str((body or {}).get("author") or "").strip(),
                     cover_dir=COVER_DIR,
@@ -3286,17 +3867,20 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/book_state":
             ids = (body or {}).get("books") or []
             st = ((body or {}).get("state") or "").strip()[:8]
+            want = str((body or {}).get("module") or "").strip()
             lib = load_lib()
-            lib.setdefault("state", {})
             n = 0
             for b in ids:
                 # 状态只是 library.json 里的标签，不要求本地已抓取（书架上的书也能标）
                 if not re.fullmatch(r"[A-Za-z0-9_\-]{4,}", str(b or "")):
                     continue
+                # 落在哪一格：前端说了不算、目录也还没建，所以按书号前缀认；
+                # 一次请求点名了模块（一屏里批量标）就以它为准。
+                s = lib_scope(lib, want or book_module(str(b)))
                 if st:
-                    lib["state"][b] = st
+                    s["state"][b] = st
                 else:
-                    lib["state"].pop(b, None)
+                    s["state"].pop(b, None)
                 n += 1
             save_lib(lib)
             skipped = len(ids) - n
@@ -3312,17 +3896,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not d:
                     continue
                 title = meta_title(b)
+                mod = book_layout.MODULE_OF.get(
+                    os.path.basename(os.path.dirname(d)), "weread")
+                drop_stray_md(b, title)      # 先清合并稿（还要靠这本书认自己住哪格）
                 shutil.rmtree(d)
-                stray = os.path.join(OUT_DIR, re.sub(r'[<>:"/\\|?*]', "_", title) + ".md")
-                if (os.path.isfile(stray)
-                        and os.path.realpath(stray).startswith(os.path.realpath(OUT_DIR) + os.sep)):
-                    try:
-                        os.remove(stray)
-                    except OSError:
-                        pass
-                lib["assign"].pop(b, None)
-                lib["order"] = [x for x in lib["order"] if x != b]
-                (lib.get("state") or {}).pop(b, None)
+                lib_forget(lib, b, mod)
                 n += 1
             save_lib(lib)
             return self._json({"ok": True, "msg": f"已删除 {n} 本的本地缓存"})
@@ -3357,6 +3935,65 @@ class Handler(BaseHTTPRequestHandler):
             ok, out = agent_quick(mode, (body or {}).get("text"),
                                   (body or {}).get("ctx"))
             return self._json({"ok": ok, "text": out if ok else "", "msg": "" if ok else out})
+
+        if u.path == "/api/ai/summary":
+            # AI 小结：三种内容共用这一个口。范围（一章 / 整篇）由后端按来路定，
+            # 前端只报「我在读哪一章」—— 让页面决定读多少，早晚变成页面替用户挑章节。
+            book = str((body or {}).get("book") or "")
+            style = str((body or {}).get("style") or "brief")
+            if style not in ai_sum.STYLE_KEYS:
+                style = "brief"
+            ok, src = ai_source(book, (body or {}).get("chapter"))
+            if not ok:
+                return self._json({"ok": False, "msg": src})
+            url, key, model = agent_cfg()
+            if not url or not model:
+                # 和聊天一样：一旦转成流就改不了状态码，这类「没配好」必须在前头挡掉。
+                return self._json({"ok": False, "msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"})
+            self._sse_start()
+            sent = []
+
+            def emit(piece):
+                sent.append(piece)
+                self._chunk(json.dumps({"d": piece}, ensure_ascii=False) + "\n")
+
+            try:
+                msgs = ai_sum.messages(style, src["scope"], src["title"],
+                                       src["text"], src["module"])
+                with agent_open({"url": url, "key": key,
+                                 "body": {"model": model, "messages": msgs,
+                                          "stream": True}}) as r:
+                    for piece in agent_deltas(r):
+                        emit(piece)
+                text = "".join(sent).strip()
+                if not text:
+                    raise RuntimeError("那边一个字都没回，模型名或地址可能不对")
+                d = safe_book_dir(book)
+                saved = ai_sum.save_result(d, src["scope"], style, src["chapter"], text) if d else ""
+                self._chunk(json.dumps({"done": True, "saved": bool(saved),
+                                       "scope": src["scope"], "style": style},
+                                       ensure_ascii=False) + "\n")
+            except Exception as e:
+                log(f"--- AI 小结出错：{str(e)[:200]} ---")
+                self._chunk(json.dumps({"err": str(e)[:300]}, ensure_ascii=False) + "\n")
+            self._chunk_end()
+            return
+
+        if u.path == "/api/ai/mindmap":
+            # 三种内容共用：范围还是后端定，画完直接落进这本书的 mindmap.json，
+            # 界面上拿到的就是那张可以接着手改的图（不是只能看的图片）。
+            try:
+                ok, out = ai_mindmap(str((body or {}).get("book") or ""),
+                                     (body or {}).get("chapter"))
+                if not ok:
+                    return self._json({"ok": False, "msg": out.get("msg") or "导图没生成"})
+                out["ok"] = True
+                out["svg"] = mindmap.render_svg(out["doc"])
+                return self._json(out)
+            except Exception as e:
+                # 这条口一旦抛穿，前端拿到的就是「按了没反应」—— 统一收成一句人话。
+                log(f"--- AI 导图出错：{type(e).__name__}: {e} ---")
+                return self._json({"ok": False, "msg": "导图没生成：%s" % str(e)[:160]})
 
         if u.path == "/api/readstat/tick":
             ok = readstat_tick((body or {}).get("book"), (body or {}).get("title"),
@@ -3466,12 +4103,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "msg": "先粘贴至少一个文章链接"})
             if mode == "batch":
                 try:
-                    res = clip_article.clip_many(OUT_DIR, urls, cover_dir=COVER_DIR,
+                    res = clip_article.clip_many(module_dir("clip"), urls,
+                                                 cover_dir=COVER_DIR,
                                                  extract_fn=clip_extract)
                 except Exception as e:
                     return self._json({"ok": False, "msg": "剪不动：%s" % str(e)[:160]})
                 for info in res["ok"]:
-                    cache_cover(info["id"], book_meta(info["id"]).get("cover") or "")
+                    cache_meta_cover(info.get("id"))
                     log(f"剪藏入库：{info['title']}（{info.get('site') or ''}，"
                         f"{info.get('words') or info['chars']} 字）")
                 return self._json({
@@ -3485,11 +4123,11 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if mode == "save":
                     info = clip_article.save_clip(
-                        OUT_DIR, url,
+                        module_dir("clip"), url,
                         title=str((body or {}).get("title") or "").strip(),
                         author=str((body or {}).get("author") or "").strip(),
                         cover_dir=COVER_DIR, extract_fn=clip_extract)
-                    cache_cover(info["id"], book_meta(info["id"]).get("cover") or "")
+                    cache_meta_cover(info.get("id"))
                 else:
                     art = clip_extract(url)
                     return self._json({"ok": True, "preview": {
@@ -3509,6 +4147,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/feed":
             return self._json(feed_do(body))
+
+        if u.path == "/api/flomo/notes":
+            # 注意方向：/api/flomo 是「把内容发去 flomo」（写用户的 webhook），
+            # /api/flomo/notes 才是反过来「把 flomo 导进来」（只动本机）。
+            # 两条路挨着容易混，所以分开命名，日志里也各说各的。
+            return self._json(flomo_do(body))
 
         if u.path == "/api/video":
             return self._json(video_do(body))
@@ -3767,7 +4411,8 @@ class Handler(BaseHTTPRequestHandler):
             book_id = extract_book_id(book)
             if not book_id:
                 return self._json({"ok": False, "msg": "没能从里面认出书籍编号，看看是不是粘错了"})
-            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id], book=book_id)
+            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id],
+                                 book=book_id, env_extra=task_env("weread"))
             return self._json({"ok": ok, "msg": msg, "id": book_id})
 
         if action == "export.fresh":
@@ -3785,7 +4430,8 @@ class Handler(BaseHTTPRequestHandler):
             r = reset_book_output(book_id)
             if not r.get("ok"):
                 return self._json(r)
-            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id], book=book_id)
+            ok, msg = start_task("export", [py(), script("export_precise.py"), book_id],
+                                 book=book_id, env_extra=task_env("weread"))
             return self._json({"ok": ok, "id": book_id, "removed": r.get("removed", 0),
                                "msg": (r["msg"] + " · " + msg) if ok else msg})
 
@@ -3793,7 +4439,8 @@ class Handler(BaseHTTPRequestHandler):
             book_id = (book or "").strip()
             if not safe_book_dir(book_id):
                 return self._json({"ok": False, "msg": "找不到这本书的导出目录"})
-            ok, msg = start_task("images", [py(), script("download_images.py"), book_id], book=book_id)
+            ok, msg = start_task("images", [py(), script("download_images.py"), book_id],
+                                 book=book_id, env_extra=task_env(book_module(book_id)))
             return self._json({"ok": ok, "msg": msg})
 
         if action == "reveal":
@@ -3803,19 +4450,25 @@ class Handler(BaseHTTPRequestHandler):
             pc.open_in_file_manager(d)
             return self._json({"ok": True, "msg": "已在文件管理器打开"})
 
-        # 打开整个书库根目录：本地书库那一屏用，和「定位某本书」区分开
+        # 打开整个书库根目录，或某个模块那一格：界面上每屏的「打开所在文件夹」
+        # 各开各的，剪藏那一屏不必把微信读书那一大堆一起摊在访达里。
         if action == "openbooks":
             ensure_books_dir()
-            pc.open_in_file_manager(OUT_DIR)
-            return self._json({"ok": True, "msg": "已打开书库文件夹"})
+            mod = (body.get("module") or "").strip()
+            named = mod if mod in book_layout.DIR_OF else ""
+            pc.open_in_file_manager(module_dir(named) if named else OUT_DIR)
+            return self._json({"ok": True,
+                               "msg": "已打开「%s」的文件夹" % MODULE_NAME[named] if named
+                               else "已打开书库文件夹"})
 
         if action == "folder.new":
             name = (body.get("name") or "").strip()[:40]
             if not name:
                 return self._json({"ok": False, "msg": "文件夹需要一个名字"})
             lib = load_lib()
+            s = lib_scope(lib, body.get("module"))
             fid = "f" + uuid.uuid4().hex[:8]
-            lib["folders"].append({"id": fid, "name": name})
+            s["folders"].append({"id": fid, "name": name})
             save_lib(lib)
             return self._json({"ok": True, "id": fid, "msg": "已新建"})
 
@@ -3825,9 +4478,10 @@ class Handler(BaseHTTPRequestHandler):
             if not (fid and name):
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            if not any(f["id"] == fid for f in lib["folders"]):
-                return self._json({"ok": False, "msg": "文件夹不存在"})
-            for f in lib["folders"]:
+            s = lib_scope(lib, body.get("module"))
+            if not any(f["id"] == fid for f in s["folders"]):
+                return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
+            for f in s["folders"]:
                 if f["id"] == fid:
                     f["name"] = name
             save_lib(lib)
@@ -3836,45 +4490,117 @@ class Handler(BaseHTTPRequestHandler):
         if action == "folder.drop":
             fid = (body.get("id") or "").strip()
             lib = load_lib()
-            keep = [f for f in lib["folders"] if f["id"] != fid]
-            if len(keep) == len(lib["folders"]):
-                return self._json({"ok": False, "msg": "文件夹不存在"})
-            lib["folders"] = keep
-            for bid, f in list(lib["assign"].items()):
+            s = lib_scope(lib, body.get("module"))
+            keep = [f for f in s["folders"] if f["id"] != fid]
+            if len(keep) == len(s["folders"]):
+                return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
+            s["folders"] = keep
+            for bid, f in list(s["assign"].items()):
                 if f == fid:
-                    lib["assign"].pop(bid, None)
+                    s["assign"].pop(bid, None)
             save_lib(lib)
             return self._json({"ok": True, "msg": "文件夹已删除，书回到未归类"})
 
         if action == "book.move":
             bid = (body.get("book") or "").strip()
             folder = (body.get("folder") or "").strip()
-            if not safe_book_dir(bid):
+            d = safe_book_dir(bid)
+            if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
             lib = load_lib()
-            if folder and not any(f["id"] == folder for f in lib["folders"]):
-                return self._json({"ok": False, "msg": "文件夹不存在"})
+            # 归到哪一格由这本书自己住哪儿决定，不信前端传过来的模块名：
+            # 前端的模块标签可能是上一次刷新时留下的，跨模块归错夹子看不出来。
+            s = lib_scope(lib, book_layout.MODULE_OF.get(
+                os.path.basename(os.path.dirname(d)), "weread"))
+            if folder and not any(f["id"] == folder for f in s["folders"]):
+                return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
             if folder:
-                lib["assign"][bid] = folder
+                s["assign"][bid] = folder
             else:
-                lib["assign"].pop(bid, None)
+                s["assign"].pop(bid, None)
             save_lib(lib)
             return self._json({"ok": True, "msg": "已归入"})
 
         if action == "book.order":
             bid = (body.get("book") or "").strip()
             before = (body.get("before") or "").strip()
+            mod = book_module(bid)
             if not safe_book_dir(bid):
                 return self._json({"ok": False, "msg": "找不到这本书"})
             lib = load_lib()
-            ids = [b["id"] for b in list_books() if b["id"] != bid]
+            s = lib_scope(lib, mod)
+            ids = [b["id"] for b in list_books(mod) if b["id"] != bid]
             if before and before in ids:
                 ids.insert(ids.index(before), bid)
             else:
                 ids.append(bid)
-            lib["order"] = ids
+            s["order"] = ids
             save_lib(lib)
             return self._json({"ok": True, "msg": "顺序已调整"})
+
+        if action == "book.tag":
+            # 给一篇文章 / 一本书贴标签（可多张）。只在它自己那个模块里贴：
+            # 剪藏那套「随笔 / 待读」不会冒到微信读书的整本书上去。
+            bid = (body.get("book") or "").strip()
+            mod = book_module(bid)
+            if not safe_book_dir(bid):
+                return self._json({"ok": False, "msg": "找不到这本书"})
+            add = body.get("add") or []
+            drop = body.get("remove") or ""
+            if isinstance(add, str):
+                add = [add]
+            lib = load_lib()
+            s = lib_scope(lib, mod)
+            cur = [str(t) for t in (s["tags"].get(bid) or [])]
+            for t in [str(x).strip()[:20] for x in add if str(x).strip()]:
+                if t and t not in cur:
+                    cur.append(t)
+            drop = str(drop).strip()[:20]
+            if drop:
+                cur = [t for t in cur if t != drop]
+            if len(cur) > 12:
+                cur = cur[:12]
+            if cur:
+                s["tags"][bid] = cur
+            else:
+                s["tags"].pop(bid, None)
+            save_lib(lib)
+            return self._json({"ok": True, "tags": cur, "msg": "标签已更新"})
+
+        if action == "tag.rename":
+            old = str(body.get("from") or "").strip()[:20]
+            new = str(body.get("to") or "").strip()[:20]
+            if not (old and new):
+                return self._json({"ok": False, "msg": "缺少参数"})
+            lib = load_lib()
+            s = lib_scope(lib, body.get("module"))
+            n = 0
+            for bid, tags in list(s["tags"].items()):
+                if old in tags:
+                    merged = [new if t == old else t for t in tags]
+                    merged = list(dict.fromkeys(merged))[:12]
+                    s["tags"][bid] = merged
+                    n += 1
+            save_lib(lib)
+            return self._json({"ok": n > 0, "msg": f"已改 {n} 篇" if n else "没有用到这个标签"})
+
+        if action == "tag.drop":
+            old = str(body.get("name") or "").strip()[:20]
+            if not old:
+                return self._json({"ok": False, "msg": "缺少参数"})
+            lib = load_lib()
+            s = lib_scope(lib, body.get("module"))
+            n = 0
+            for bid, tags in list(s["tags"].items()):
+                if old in tags:
+                    rest = [t for t in tags if t != old]
+                    if rest:
+                        s["tags"][bid] = rest
+                    else:
+                        s["tags"].pop(bid, None)
+                    n += 1
+            save_lib(lib)
+            return self._json({"ok": True, "msg": f"已从 {n} 篇摘掉"})
 
         if action == "book.delete":
             bid = (body.get("book") or "").strip()
@@ -3882,18 +4608,12 @@ class Handler(BaseHTTPRequestHandler):
             if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
             title = meta_title(bid)
+            mod = book_layout.MODULE_OF.get(os.path.basename(os.path.dirname(d)), "weread")
+            # 上游在写书的目录旁还会留一份合并稿，一并清掉（限定在书库内）
+            drop_stray_md(bid, title)
             shutil.rmtree(d)
-            # 上游在 output/ 下还会留一份合并稿，一并清掉（限定在 output 内）
-            stray = os.path.join(OUT_DIR, re.sub(r'[<>:"/\\|?*]', "_", title) + ".md")
-            if (os.path.isfile(stray)
-                    and os.path.realpath(stray).startswith(os.path.realpath(OUT_DIR) + os.sep)):
-                try:
-                    os.remove(stray)
-                except OSError:
-                    pass
             lib = load_lib()
-            lib["assign"].pop(bid, None)
-            lib["order"] = [x for x in lib["order"] if x != bid]
+            lib_forget(lib, bid, mod)
             save_lib(lib)
             return self._json({"ok": True, "msg": "已从书架移除"})
 

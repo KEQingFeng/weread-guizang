@@ -493,7 +493,8 @@ def _zhihu(url):
     if not date:
         date = clip_article._publish_time(tree, raw)
 
-    cover = clip_article._abs(clip_article._meta(tree, "og:image", "twitter:image"), final)
+    cover = clip_article.pick_cover(clip_article._meta(tree, "og:image", "twitter:image"),
+                                    md, final)
     if not title:
         title = "%s %s" % (author or "知乎", time.strftime("%m-%d"))
     return _result(title, author, "知乎", date, cover, final or url, md, words)

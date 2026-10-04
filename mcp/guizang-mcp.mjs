@@ -427,6 +427,28 @@ async function resolveStore(key) {
   throw new Error(`没在微信书架上找到「${k}」。先用 search_books 或 shelf_list 确认书名。`);
 }
 
+/** 一条便签 → 给 Agent 读的那几行。
+ *  原文里那些 `![](files/xxx.png)` 在界面上走 /api/flomo/att/<哈希名> 那个口子才打得开，
+ *  Agent 那边没有这个口子 —— 抄给它只是一段读不了的路径，换成「几张图」这句话更有用。
+ *  正文读 plain 不读 md：后端已经把「跟在 tags 里单列过的那几个 #标签」从 plain 里摘干净了
+ *  （见 flomo_notes.public）。这里要是还去抓 md，Agent 看到的就是头一行 #读书、
+ *  正文末尾又一个 #读书 —— 用户在屏幕上从来看不到第二遍，上一轮刚把这个毛病按掉。
+ *  留着 md 兜底：万一连的是没升级的老服务，宁可多一排标签，也不能吐空正文。 */
+function fmtFlomoMemo(m, full = false) {
+  const atts = (m.atts || []).length;
+  const tags = (m.tags || []).length ? "　" + m.tags.map(t => "#" + t).join(" ") : "";
+  const head = `${m.date || "?"} ${(m.clock || "").slice(0, 5) || "--:--"} · ${m.words || 0} 字`
+    + `${atts ? ` · ${atts} 张图` : ""}${tags}  [id: ${m.id}]`;
+  const text = String(m.plain != null ? m.plain : (m.md || "")).replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/[ \t]{2,}/g, " ").trim();
+  if (!text) return head + "\n  （这一条只有图，没有字）";
+  if (!full && text.length > 400) {
+    return head + "\n  " + text.slice(0, 400).replace(/\n/g, "\n  ")
+      + `…（还差 ${text.length - 400} 字，要全文就带着这个 id 再调一次 flomo_notes）`;
+  }
+  return head + "\n  " + text.replace(/\n/g, "\n  ");
+}
+
 const tools = {
   async shelf_list() {
     const s = await getState();
@@ -1313,6 +1335,62 @@ const tools = {
     out.push("删掉的画布找不回来（.prev 那份留档只保上一次保存的内容）。");
     return out.join("\n");
   },
+
+  async flomo_notes({ id, tag, q, limit, offset, order }) {
+    // id 那一支单独走：列表为了不让一次调用灌爆上下文，每条掐到 400 字，
+    // 想要原文就按 id 再取一次 —— 这是「读得到全文」和「一次别吐十万字」的折中。
+    if (id) {
+      const d = await api(`/api/flomo/notes?mode=one&id=${encodeURIComponent(String(id).trim())}`);
+      if (!d.ok) throw new Error(d.msg || "读这条便签失败了");
+      if (!d.memo) return `没有 id 为「${id}」的那条便签（被忘掉过，或本来就没有）。用 tag / q 重新筛一次。`;
+      return fmtFlomoMemo(d.memo, true);
+    }
+    const n = Math.max(1, Math.min(Number(limit) || 20, 200));
+    const off = Math.max(0, Number(offset) || 0);
+    const qs = [["mode", "list"], ["tag", String(tag || "")], ["q", String(q || "")],
+                ["limit", String(n)], ["offset", String(off)],
+                ["order", String(order || "desc") === "asc" ? "asc" : "desc"]]
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+    const d = await api(`/api/flomo/notes?${qs}`);
+    if (!d.ok) throw new Error(d.msg || "读便签失败了");
+    const st = d.stats || {};
+    if (!st.memos) {
+      return "本机还没有导入 flomo 便签。让用户在界面「便签」那一格的右上角菜单里导入 flomo 导出包（一个 zip），"
+        + "导入后这里才有内容。";
+    }
+    const tagline = (d.tags || []).slice(0, 20).map(t => `${t.tag}(${t.n})`).join("、");
+    const how = [];
+    if (tag) how.push(`标签「${tag}」`);
+    if (q) how.push(`含「${q}」`);
+    const out = [`${how.length ? "按" + how.join("、") + "筛出" : "本机存着"} ${d.total} 条，`
+                 + `这里给第 ${off + 1}-${off + (d.count || 0)} 条。`];
+    if (!d.total) {
+      out.push("", `这一格对不上任何一条。标签账上有：${tagline || "一个标签都没有"}。`);
+      return out.join("\n");
+    }
+    out.push(`这批笔记的骨架：全程 ${st.memos} 条 · ${st.days} 天（${st.first} ~ ${st.last}）· `
+             + `${fmtChars(st.words)} · ${st.images} 张图 · ${st.tags} 个标签。`);
+    if (!tag && !q && tagline) out.push(`标签（点父标签会带上子标签）：${tagline}`);
+    out.push("");
+    for (const m of d.memos || []) out.push(fmtFlomoMemo(m), "");
+    const left = d.total - off - (d.count || 0);
+    if (left > 0) out.push(`还剩 ${left} 条，翻页用 offset=${off + (d.count || 0)}。`);
+    out.push("想知道「这位用户是怎么记东西的」先调 flomo_portrait —— 那份画像不含原文，读它比读一百条便宜。");
+    return out.join("\n").trim();
+  },
+
+  async flomo_portrait() {
+    const d = await api("/api/flomo/notes?mode=portrait");
+    if (!d.ok) throw new Error(d.msg || "生成记忆画像失败了");
+    const p = d.portrait || {};
+    if (!p.memos) return "本机还没有导入 flomo 便签，画像是空的。先让用户在界面「便签」那一格里导入导出包。";
+    return [(d.md || "").trim(), "",
+            `这一页存在：${d.file}`,
+            `机器读的那份（同一份数据的 JSON）：${d.json}`,
+            "",
+            "口径：这份画像只由条数、字数、日期与标签算出，不含任何一条笔记原文。",
+            "替这位用户做事之前先读它 —— 它决定该一次给多少条、按哪套标签去找、回复写多长。"].join("\n");
+  },
 };
 
 const TOOL_DEFS = [
@@ -1832,6 +1910,27 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "flomo_notes",
+    description: "读本机导入的 flomo 便签（只读，一个字都不改）。默认按时间倒序给最近 20 条，每条带 id、日期时间、字数、标签和正文。tag 按标签筛（点父标签会带上它的子标签），q 搜正文与标签，id 只取那一条并给完整正文（列表里超 400 字会掐尾）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "只要这一条，给全文；给了它就忽略 tag / q / limit" },
+        tag: { type: "string", description: "按标签筛，如「读书」或「读书/神经科学」" },
+        q: { type: "string", description: "关键字，搜正文和标签" },
+        limit: { type: "number", description: "给几条，默认 20，最多 200" },
+        offset: { type: "number", description: "跳过几条，用来翻页" },
+        order: { type: "string", description: "desc（默认，新的在上）/ asc（旧的在上）" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "flomo_portrait",
+    description: "读「用户记忆画像」：从全部 flomo 便签算出体量与节奏、标签层级、长短分布、记笔记的高峰时段和已深加工的条数，写成半页中文，并给出它落在本机的位置。只含数字与标签，不含任何一条原文。替用户做与笔记有关的事之前先调它一次，比翻几十条便签便宜得多。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 /* ── 协议 ───────────────────────────────── */
@@ -1839,7 +1938,7 @@ function send(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 
-const serverInfo = { name: "guizang", version: "1.3.0" };
+const serverInfo = { name: "guizang", version: "1.4.0" };
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async line => {
