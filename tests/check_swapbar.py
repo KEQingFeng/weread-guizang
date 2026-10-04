@@ -9,7 +9,7 @@
 该干什么、点了「先不管」就别再烦人。
 
 这里只改后端「答的话」，不改它的行为：
-  · /api/state 的 version/code 是拦下来改写的（沙盒后端自己跑的就是 1.0.3，问不出 0.9.8）；
+  · /api/state 的 version/code 是拦下来改写的（沙盒后端自己跑的就是 1.0.5，问不出 0.9.8）；
   · /api/restart 的三种回执（换成 / 回了原因 / 压根没这条接口 / 连不上）也是造的。
 真的换班（旧进程退、接班人绑同一个端口、任务在跑就不动、不是归藏就不碰）
 归 tests/test_backend_identity.py —— 那份端到端起真进程，这一份管的是话说得对不对。
@@ -51,7 +51,7 @@ EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➯️⬀-⯿]")
 LIE = "本机服务没在跑"          # 这句只许留在注释里，界面不能说（后端在跑，只是旧）
 OLD_VER = "0.9.8"
 OLD_CODE = "0ldc0de0ldc0deadbeef"
-PAGE_VER = "1.0.3"              # 与 ui.html 的 GUIZANG_PAGE 对齐；对不上由静态门禁兜
+PAGE_VER = "1.0.5"              # 与 ui.html 的 GUIZANG_PAGE 对齐；对不上由静态门禁兜
 SANDBOX = tempfile.mkdtemp(prefix="gz-swapbar-")
 atexit.register(lambda: shutil.rmtree(SANDBOX, ignore_errors=True))
 

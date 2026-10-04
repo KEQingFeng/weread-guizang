@@ -50,6 +50,9 @@ APP_FILES=(
   feed.py
   video_note.py
   flomo_notes.py
+  writer.py
+  activity.py
+  person.py
   ffmpeg_tool.py
   media_setup.py
   cleanup.py

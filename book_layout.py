@@ -12,6 +12,7 @@
       订阅/feed_<名>/…       RSS 条目收进来的那一篇
       视频/video_<名>/…      视频转出来的笔记
       便签/flomo_<名>/…      flomo 导进来、又收成一条一篇的那笔记
+      写作/write_<名>/…      自己在写作平台里写的稿子
 
 只有「这一层目录是模块文件夹」这件事是新的，**书号本身不变**：界面、接口、MCP
 用的还是那个 id，所以旧链接、旧笔记、旧导图全都照常打得开。位置由 `resolve()`
@@ -33,6 +34,7 @@ MODULES = [
     ("feed", "订阅"),
     ("video", "视频"),
     ("flomo", "便签"),
+    ("write", "写作"),
 ]
 DIR_OF = dict(MODULES)
 MODULE_OF = {v: k for k, v in MODULES}
@@ -40,7 +42,7 @@ ORDER = [m for m, _ in MODULES]
 
 # 目录名前缀：meta 坏了、还没有 meta 时，靠前缀认这本书属于哪一路
 PREFIX_OF = {"clip_": "clip", "feed_": "feed", "video_": "video",
-             "imp_": "local", "flomo_": "flomo"}
+             "imp_": "local", "flomo_": "flomo", "write_": "write"}
 
 # 书号只允许这些字符（与 ui_server.safe_book_dir 同一道闸，两边都把一次不算多）
 ID_RE = re.compile(r"[A-Za-z0-9_\-]+\Z")

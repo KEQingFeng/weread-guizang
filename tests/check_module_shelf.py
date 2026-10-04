@@ -7,7 +7,7 @@
 点一遍才现形，所以一半是 HTTP 契约、一半是 Playwright 真点。
 
 验的东西（每条都对应界面上真能点、或后端真会答的一件事）：
-  · /api/state 的 libs / modules 六格齐、每本书带 module、tags 记在自己那一格；
+  · /api/state 的 libs / modules 七格齐（六格书架 + 写作）、每本书带 module、tags 记在自己那一格；
   · 夹子与标签跨格不可见：剪藏的「待读」不会冒到本地书架那一格；
   · 把本地书架的书往剪藏的夹子里归 → 后端必须拒（不是静默归错）；
   · 六格表头各有一颗 ⋯，点开有菜单、Esc 与点别处都收得掉；
@@ -100,9 +100,12 @@ def book_of(st, bid):
 # ── 一、接口契约：账本分格与跨格隔离（不起浏览器也能钉死）──────────
 st = api("/api/state")
 mods = [m["id"] for m in st.get("modules", [])]
-chk("state：modules 报出六格",
-    mods == ["weread", "local", "clip", "feed", "video", "flomo"], mods)
-chk("state：libs 的六格齐、每格有 folders/states/tags",
+# 1.0.5 起名册多了一格「写作」：稿子也住在书库里（书库/写作/write_*/），
+# 所以 /api/state.modules 与 book_layout.MODULES 都报七格。书架上那六格没动 ——
+# 写作有它自己的一整屏，前端不为它摆芯片条，这里只把名册对齐。
+chk("state：modules 报出七格（六格书架 + 写作）",
+    mods == ["weread", "local", "clip", "feed", "video", "flomo", "write"], mods)
+chk("state：libs 的七格齐、每格有 folders/states/tags",
     sorted(st.get("libs", {})) == sorted(mods)
     and all({"folders", "states", "tags"} <= set(st["libs"][m]) for m in mods),
     {m: sorted(st["libs"][m]) for m in mods})
