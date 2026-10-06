@@ -29,7 +29,8 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 「把 cache 整个删掉」：将来往 cache 里放别的东西时，会在这里被显式想一遍。
 CACHE_ITEMS = (
     ("browser_profile", "取书用的浏览器档案（含微信读书登录态）"),
-    ("downloads", "取书 / 下载留下的中间文件"),
+    ("anna_profile", "在安娜的档案里搜书下载时用的浏览器档案"),
+    ("downloads", "取书 / 下载留下的中间文件（含安娜的档案接住的原文件）"),
     ("covers", "书架封面缓存"),
     ("apkg", "导出的 Anki 卡包"),
     ("video", "视频转笔记的临时音频与产物"),
@@ -47,6 +48,8 @@ CACHE_FILES = (
     ("notes_index.json", "划线与笔记索引"),
     ("feed.json", "订阅源与抓下来的条目"),
     ("clips.json", "剪藏下来的文章"),
+    ("anna.json", "安娜的档案这一栏的状态账（窗口状态与入库记录，没有账号信息）"),
+    ("anna_cmd.json", "界面递给下载窗口的搜书口令"),
     ("server.out", "上次运行的日志"),
 )
 ROOT_FILES = (

@@ -48,7 +48,8 @@ APP_FILES=(
   clip_article.py
   web_parse.py
   feed.py
-  zlib_client.py
+  anna_state.py
+  anna_browser.py
   video_note.py
   flomo_notes.py
   writer.py

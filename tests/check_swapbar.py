@@ -16,6 +16,11 @@
 
 检查的事：
   1 版本对得上 → 横幅不出现（不能一进门就喊有问题）；
+ 1b 版本号一样、磁盘上的代码却不是进程里那一份（改过源码没重启）→ 横幅出现，
+    说的是「改过代码没重启」，不能拿两个一样的版本号说瞎话。这一条是 2026-10-07
+    补的：用户报「左侧没有安娜的档案」，查下来本机进程还是 1.0.6 —— 导航那几格由
+    后端 NAV_ITEMS 给，进程旧就铺不出新增那一格，而两个版本号当时看着完全一样，
+    旧判定（只比版本字符串）一声不吭。后端因此开始报 code_disk，界面把它当过期；
   2 后端报 0.9.8 → 横幅出现，同时报出两个版本号，且不出现那句假话「本机服务没在跑」；
   3 这时候打一个旧后端没有的接口 → gzApi 认成 stale，文案与横幅同一把尺；
   4 版本对得上时打不存在的接口 → 说的是「认不得这条接口」，仍然给一键；
@@ -60,8 +65,9 @@ PAGE_VER = _m.group(1) if _m else "0.0.0"
 SANDBOX = tempfile.mkdtemp(prefix="gz-swapbar-")
 atexit.register(lambda: shutil.rmtree(SANDBOX, ignore_errors=True))
 
-# 拦截器看这两个值决定怎么答：stale = /api/state 报旧版本；restart = 那一键的回执。
-FAKE = {"stale": False, "restart": "ok"}
+# 拦截器看这两个值决定怎么答：stale = /api/state 报旧版本；drift = 版本一样但磁盘上的
+# 代码比进程里那份新（改过源码没重启）；restart = 那一键的回执。
+FAKE = {"stale": False, "drift": False, "restart": "ok"}
 
 
 def chk(name, cond, extra=""):
@@ -126,6 +132,7 @@ def bar_state(page):
               text: span ? span.textContent : '',
               dis: go ? !!go.disabled : true,
               why: GZ.why, hid: GZ.hid, stale: GZ.stale,
+              drift: GZ.drift, disk: GZ.disk,
               back: GZ.back, code: GZ.code};
     }""")
 
@@ -143,14 +150,18 @@ def wait_bar(page, want, timeout=8.0):
 
 def on_state(route):
     resp = route.fetch()
-    if not FAKE["stale"]:
+    if not (FAKE["stale"] or FAKE["drift"]):
         return route.fulfill(response=resp)
     try:
         d = json.loads(resp.body())
     except Exception:
         return route.fulfill(response=resp)
-    d["version"] = OLD_VER
-    d["code"] = OLD_CODE
+    if FAKE["stale"]:
+        d["version"] = OLD_VER
+        d["code"] = OLD_CODE
+    # drift：版本号不动（这正是它难认的地方），只让「磁盘上那份」比进程里这份新。
+    if FAKE["drift"]:
+        d["code_disk"] = OLD_CODE
     return route.fulfill(status=200,
                          headers={"Content-Type": "application/json; charset=utf-8"},
                          body=json.dumps(d).encode("utf-8"))
@@ -216,6 +227,30 @@ with sync_playwright() as pw:
     chk("版本对得上时横幅不出现", not st["show"], st)
     chk("界面认到后端版本 " + PAGE_VER, st["back"] == PAGE_VER, st["back"])
     chk("后端报得出代码指纹", bool(st["code"]) and st["code"] != OLD_CODE, st["code"])
+
+    # ── 1b 版本一样、代码却不是跑着的那份（改过源码没重启）──────────────
+    # 2026-10-07 用户报「左侧没有安娜的档案」：那一格是后端 NAV_ITEMS 给的，进程还是
+    # 上一版就铺不出来，而两个版本号一模一样 —— 横幅只比 version 时这件事完全没露面。
+    chk("新后端自报「磁盘与进程是同一份代码」（不能一进门就喊过期）",
+        bool(st["disk"]) and st["disk"] == st["code"], st)
+    FAKE["drift"] = True
+    page.evaluate("GZ.why=''; drawState(true)")
+    st = wait_bar(page, True)
+    dtext = st["text"]
+    chk("改过源码没重启时横幅出现", st["show"] and st["vis"] and st["drift"], st)
+    chk("那句说的是「改过代码没重启」", "没重启" in dtext, dtext[:160])
+    chk("那句不自相矛盾（不说两个一样的版本号）",
+        "本机后端是 " not in dtext and PAGE_VER not in dtext, dtext[:160])
+    chk("那句照样给一键", "换新后端" in dtext, dtext[:160])
+    chk("那句不说「本机服务没在跑」", LIE not in dtext, dtext[:160])
+    chk("那句零 emoji", not EMOJI.search(dtext), dtext[:160])
+    r = page.evaluate("() => gzApi('/api/__ghost__')")
+    chk("这种情形下打新接口，说的是同一句", "没重启" in r.get("msg", ""), r)
+    page.screenshot(path=os.path.join(SHOTS, "swapbar-drift.png"))
+    FAKE["drift"] = False
+    page.evaluate("GZ.why=''; drawState(true)")
+    st = wait_bar(page, False)
+    chk("磁盘与进程重新一致后横幅自己收起", not st["show"] and not st["drift"], st)
 
     # ── 2 后端是旧的：横幅出现、两个版本号都在、不说假话 ──────────────
     FAKE["stale"] = True

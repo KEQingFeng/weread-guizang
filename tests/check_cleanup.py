@@ -44,6 +44,7 @@ def seed():
     """铺一份「装过一次、用过一阵」的样子。"""
     for p in (DATA / "cache" / "browser_profile", DATA / "cache" / "tools",
               DATA / "cache" / "covers", DATA / "cache" / "video",
+              DATA / "cache" / "anna_profile", DATA / "cache" / "downloads" / "anna",
               DATA / ".venv", BOOKS, PW / "chromium-1228", PW / "firefox-1466",
               HF / "models--mlx-community--whisper-large-v3-turbo",
               HF / "models--Mapika--decider-2b"):     # 别人家的模型，不能被带走
@@ -52,6 +53,10 @@ def seed():
     (DATA / "cache" / "tools" / "ffmpeg").write_text("x")
     (DATA / "cache" / "feed.json").write_text('{"subs": []}')
     (DATA / "cache" / "config.json").write_text("{}")
+    (DATA / "cache" / "anna_profile" / "Cookies").write_text("x")
+    (DATA / "cache" / "downloads" / "anna" / "一本现编的书.md").write_text("x")
+    (DATA / "cache" / "anna.json").write_text('{"window": "closed"}')
+    (DATA / "cache" / "anna_cmd.json").write_text('{"keyword": ""}')
     (DATA / "runtime.json").write_text("{}")
     (DATA / "订阅.opml").write_text("<opml/>")
     (DATA / ".venv" / "pyvenv.cfg").write_text("home = /x")
@@ -91,8 +96,9 @@ def main():
         and not any("firefox" in i["key"] for i in groups["components"]["items"]),
         [i["key"] for i in groups["components"]["items"]])
     chk("试算：订阅条目、登录态、运行时回执都在数据组里",
-        {"data-cache-feed.json", "data-cache-browser_profile",
-         "data-root-runtime.json"} <= {i["key"] for i in groups["data"]["items"]},
+        {"data-cache-feed.json", "data-cache-browser_profile", "data-root-runtime.json",
+         "data-cache-anna_profile", "data-cache-downloads",
+         "data-cache-anna.json", "data-cache-anna_cmd.json"} <= {i["key"] for i in groups["data"]["items"]},
         [i["key"] for i in groups["data"]["items"]])
     chk("试算不动任何东西（cache 大小没变）", cl._size(DATA / "cache") == before)
     chk("试算：别家的模型不在清单里",
@@ -104,6 +110,11 @@ def main():
         {k: r[k] for k in ("ok", "freed", "errors")})
     chk("清数据：订阅条目真的没了", not (DATA / "cache" / "feed.json").exists())
     chk("清数据：登录态与浏览器档案没了", not (DATA / "cache" / "browser_profile").exists())
+    chk("清数据：安娜的档案那两本账与它那个窗口用的档案、接住的原文件也没了",
+        not (DATA / "cache" / "anna.json").exists()
+        and not (DATA / "cache" / "anna_cmd.json").exists()
+        and not (DATA / "cache" / "anna_profile").exists()
+        and not (DATA / "cache" / "downloads" / "anna").exists())
     chk("清数据：端口回执也没了", not (DATA / "runtime.json").exists())
     chk("清数据：书一个字没动", (BOOKS / "某本书.md").read_text() == "这是用户的书")
     chk("清数据：虚拟环境还留着（那是「卸载组件」的事）", (DATA / ".venv").is_dir())
@@ -143,6 +154,8 @@ def main():
         and "cleanup.run" in srv)
     build = (ROOT / "shell" / "build_macos.sh").read_text(encoding="utf-8")
     chk("打包清单里有 cleanup.py", "\n  cleanup.py\n" in build)
+    chk("打包清单里有 anna_browser.py 与 anna_state.py（开窗下载那两样要一起进包）",
+        "\n  anna_browser.py\n" in build and "\n  anna_state.py\n" in build)
     html = (ROOT / "ui.html").read_text(encoding="utf-8")
     chk("设置里有「卸载组件」与「清除本地数据」两个入口",
         "卸载组件" in html and "清除本地数据" in html and "cleanupAsk" in html)

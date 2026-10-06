@@ -4,12 +4,13 @@
 README 上挂着的那几张图，得是「界面上真能点出来的样子」，不能拿调试里截的半张。
 所以这一份自己起一个 ui_server，数据目录是系统临时目录里的沙盒，跑完连目录一起删 ——
 用户真实的书库与仓库 cache 一个字节都不碰。素材全部来自 tests/seed.py 铺的假书
-（书名是编的，不是真书），Z-Library 那一栏走前端桩，也不碰网络。
+（书名是编的，不是真书），安娜的档案那一屏走前端桩，也不碰网络、不开真窗口。
 
-拍八张，落到 docs/shots/：
+拍九张，落到 docs/shots/：
   home     我的书架（默认那一屏的瀑布铺法）
   reader   阅读器（左目录 / 中正文 / 右这套笔记）
-  search   搜书（左微信读书、右 Z-Library，两栏各摆各的动作）
+  search   搜书（微信读书书城：搜到 → 加入书架 → 整本取回）
+  anna     安娜的档案（工具自己开一个浏览器窗口，这一屏是它接住了什么）
   plan     每本书的阅读计划（详情页定完之后的读数）
   mindmap  笔记脑图（从笔记按标签生成一张图）
   feed     订阅阅读器（订上源、点开一篇）
@@ -17,7 +18,7 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
   flomo    便签（导入一份假导出包）
 
 用法：
-    .venv/bin/python tools/shot_pages.py            # 八张全拍
+    .venv/bin/python tools/shot_pages.py            # 九张全拍
     .venv/bin/python tools/shot_pages.py home feed  # 只重拍某几张
 """
 import atexit
@@ -39,6 +40,9 @@ import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
+# 仓库根也进路径：拍「安娜的档案」那张要直接用 anna_state 那套读写，
+# 免得在这里手搓一份 JSON 结构、和后端悄悄跑岔。
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
 
 # 沙盒路径先落进 os.environ：seed 的 book_dir() 就是读它来把书号翻成目录的。
@@ -53,6 +57,7 @@ ENV = dict(os.environ)
 
 import flomo_fixture  # noqa: E402
 import seed as seed_mod  # noqa: E402
+import anna_state  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 OUT = REPO / "docs" / "shots"
@@ -257,36 +262,7 @@ def shot_reader(page):
 
 
 def shot_search(page):
-    # 右栏 Z-Library：桩一份「登录 → 搜索」，书名全编的，不碰网络也不碰书库。
-    def zlib_route(route):
-        try:
-            req = json.loads(route.request.post_data or "{}")
-        except Exception:
-            req = {}
-        mode = req.get("mode")
-        if mode == "login":
-            body = {"ok": True, "msg": "已登录 Z-Library",
-                    "zlib": {"logged_in": True, "email": "reader@example.com",
-                             "domain": "1lib.sk"}}
-        elif mode == "search":
-            body = {"ok": True, "total": 3, "page": 1, "logged_in": True, "books": [
-                {"id": "1", "hash": "a1", "title": "样书甲", "author": "张三",
-                 "extension": "epub", "size": "1.2 MB", "year": "1988", "language": "中文",
-                 "cover": "", "publisher": "", "readable": True},
-                {"id": "2", "hash": "b2", "title": "Sample Book Beta", "author": "Li Si",
-                 "extension": "pdf", "size": "3.4 MB", "year": "2001", "language": "English",
-                 "cover": "", "publisher": "", "readable": True},
-                {"id": "3", "hash": "c3", "title": "扫件丙", "author": "",
-                 "extension": "djvu", "size": "8 MB", "year": "", "language": "",
-                 "cover": "", "publisher": "", "readable": False},
-            ]}
-        else:
-            body = {"ok": False, "msg": "这一套没铺这个动作"}
-        route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps(body, ensure_ascii=False))
-
-    # 左栏微信读书：桩一份书城搜索。这一栏要求先配了 Key 才肯去搜，所以把 keySet
-    # 临时点亮（它每轮轮询会被照回真值，所以要在点搜索之前那一下点亮）。
+    # 搜书页只有微信读书一栏：桩一份书城搜索，书名全编的，不碰网络也不碰书库。
     def wr_route(route):
         try:
             req = json.loads(route.request.post_data or "{}")
@@ -303,7 +279,6 @@ def shot_search(page):
                           "results": [{"books": [{"bookInfo": b} for b in books]}]}},
                           ensure_ascii=False))
 
-    page.route("**/api/zlib", zlib_route)
     page.route("**/api/weread", wr_route)
     page.click('#nav button[data-v="search"]')
     page.wait_for_selector('#wrq', timeout=8000)
@@ -311,20 +286,42 @@ def shot_search(page):
     page.evaluate("() => { keySet = true; }")
     page.fill('#wrq', '样书')
     page.click('#wrgo')
-    try:
-        page.wait_for_selector('#zbodyZl #zlEmail', timeout=8000)
-    except Exception:
-        pass
-    page.wait_for_timeout(500)
-    page.fill('#zbodyZl #zlEmail', 'reader@example.com')
-    page.fill('#zbodyZl #zlPass', 'demo-not-a-real-password')
-    page.click('#zbodyZl #zlGo')
-    try:
-        page.wait_for_selector('#zbodyZl .zrow', timeout=8000)
-    except Exception:
-        pass
-    wait_toast_gone(page)                # 等那句「已登录」的浮字整条淡完再拍
+    page.wait_for_timeout(900)
+    wait_toast_gone(page)                # 等那句回执的浮字整条淡完再拍
     shot(page, "search")
+
+
+def shot_anna(page):
+    """「安娜的档案」这一屏。
+
+    拍这张不真的开浏览器窗口 —— 展示图要说的是「这一栏会告诉你窗口接住了什么」，
+    窗口里装的是别人家的网页，不是归藏的界面。所以只往沙盒的账本里铺一份样例：
+    两本进了书架、一份格式不认、下载夹里留着一份 EPUB 和一份 Mobi。
+    书名全是编的，文件写在临时沙盒里，跑完连目录一起删。
+    """
+    data = os.environ["GUIZANG_DATA"]
+    incoming = anna_state.incoming_dir(data, create=True)
+    for name, size in (("示范这本.epub", 240 * 1024), ("旧格式样本.mobi", 96 * 1024)):
+        with open(os.path.join(incoming, name), "wb") as f:
+            f.write(b"%PDF-ish" + b"0" * (size - 8))
+    now = int(time.time())
+    anna_state.write_state(data, {
+        "domain": "annas-archive.is", "window": "closed", "keyword": "示范",
+        "caught": 3, "imported": 2, "skipped": 1,
+        "note": "窗口关掉了，接住的三份都处理完了",
+        "books": [{"name": "示范这本.epub", "title": TITLE, "author": "张三",
+                   "book": BOOK, "bytes": 240 * 1024, "chapters": 12, "at": now},
+                  {"name": "长夜读本.epub", "title": "长夜读本", "author": "王五",
+                   "book": "", "bytes": 318 * 1024, "chapters": 8, "at": now - 60}],
+        "pending": [{"name": "旧格式样本.mobi",
+                     "reason": "格式不认（现在只收 EPUB / PDF / TXT / Markdown），原文件留着没动",
+                     "bytes": 96 * 1024, "at": now - 30}],
+    })
+    page.click('#nav button[data-v="anna"]')
+    page.wait_for_selector("#anWinDot", timeout=8000)
+    page.wait_for_timeout(1400)          # 那一格下载夹要等 listing 回来才有内容
+    wait_toast_gone(page)
+    shot(page, "anna")
 
 
 def shot_plan(page):
@@ -411,10 +408,11 @@ def shot_flomo(page):
 
 
 SHOTS = {
-    "home": shot_home, "reader": shot_reader, "search": shot_search, "plan": shot_plan,
+    "home": shot_home, "reader": shot_reader, "search": shot_search, "anna": shot_anna,
+    "plan": shot_plan,
     "mindmap": shot_mindmap, "feed": shot_feed, "video": shot_video, "flomo": shot_flomo,
 }
-ORDER = ["home", "reader", "search", "plan", "mindmap", "feed", "video", "flomo"]
+ORDER = ["home", "reader", "search", "anna", "plan", "mindmap", "feed", "video", "flomo"]
 
 
 def main():
