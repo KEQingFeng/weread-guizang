@@ -660,20 +660,12 @@
   .emptyline{padding:40px 20px; text-align:center; color:var(--ink-3); font-size:12.5px}
   .emptyline b{display:block; color:var(--ink-2); font-weight:520; margin-bottom:5px}
 
-  /* ── 搜索页：微信读书 ⇄ Z-Library 左右分栏 ──────────────
-     两边的逻辑根本不同：微信读书是「取书」（搜到 → 加入书架 → 整本取回），
-     Z-Library 是「下载」（搜到 → 直接下一份 EPUB/PDF 落进本地书架）。
-     所以并排两栏、各有各的栏头与动作，别把两条路揉成一条控件。
-     高度按「一屏刚好」算（配合 body.feedfit）：两栏各自内部滚，整页不动。 */
+  /* ── 搜索页 ──────────────────────────────
+     这一屏只剩微信读书一栏：搜到 → 加入书架 → 整本取回。下载那条路挪到
+     「安娜的档案」，由工具自己开一个浏览器窗口去做，所以不再并排两栏。
+     高度按「一屏刚好」算（配合 body.feedfit）：结果在栏内自己滚，整页不动。 */
   .zsplit{display:flex; height:100%; min-height:0}
   .zcol{flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden}
-  .zcol + .zcol{border-left:1px solid var(--line)}
-  @media (max-width:1000px){
-    /* 窄窗收成上下排：两栏并排时每边只剩两百来像素，书名与按钮都挤成一条缝。 */
-    .zsplit{flex-direction:column; height:auto}
-    .zcol{overflow:visible}
-    .zcol + .zcol{border-left:0; border-top:1px solid var(--line)}
-  }
   .zhead{flex:none; display:flex; align-items:baseline; gap:9px; padding:11px 15px;
     border-bottom:1px solid var(--line); background:var(--paper-2)}
   .zhead .b{font-size:12.5px; font-weight:600; flex:none}
@@ -683,8 +675,8 @@
   .zbody{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
   /* 「划线内容」那格不走 .zsplit（只有书城分左右栏），它自己收口滚一下。 */
   .zscroll{height:100%; min-height:0; overflow:auto; overscroll-behavior:contain}
-  /* Z-Library 的结果按「行」排：一本一行（小封面 + 书名/作者 + 格式与大小 + 下载钮）。
-     这一栏要的是「一眼看清能不能下、点了就下」，行式比卡片更利落。 */
+  /* 「安娜的档案」里那两串记录按「行」排：一本一行（书脊块 + 书名 / 文件名 + 徽章）。
+     这一类清单要的是「一眼看清收没收进来、为什么没收进来」，行式比卡片更利落。 */
   .zrow{display:flex; gap:11px; padding:11px 15px; border-bottom:1px solid var(--line);
     align-items:center; transition:background .14s ease}
   .zrow:hover{background:var(--surface-2)}
@@ -702,16 +694,33 @@
     background:var(--surface-2); border:1px solid var(--line); color:var(--ink-3)}
   .zrow .zb span.ok{color:var(--accent); border-color:var(--accent-soft); background:var(--accent-soft)}
   .zrow .zn{flex:none; align-self:center}
-  /* 右栏未登录时的就地登录：不进设置也能填一次，登录后就地出结果。 */
-  .zlogin{padding:20px 16px}
-  .zlogin .tip{font-size:11.5px; color:var(--ink-3); line-height:1.72; margin-bottom:13px}
-  .zlogin .row{margin-bottom:9px}
-  .zlogin input{width:100%; height:32px; padding:0 11px; border-radius:9px;
-    border:1px solid var(--line-2); background:var(--surface-2); outline:none;
-    font:inherit; font-size:12.5px; color:var(--ink)}
-  .zlogin input:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
-  .zlogin .act{display:flex; gap:8px; align-items:center}
-  .zlogin .act .grow{flex:1}
+  /* 窗口那一格：说清现在在等什么、办成了没有，外加「查看详情」与「关掉窗口」。
+     这一路没有同步回执（下载点下去在网页那一头），所以状态由轮询说话；这一格的
+     作用是别让人对着不动的界面猜是不是卡住了。 */
+  .zwaiting{padding:20px 16px}
+  .zwaiting .hd{display:flex; align-items:center; gap:8px; font-size:12.5px;
+    color:var(--ink-2); margin-bottom:9px}
+  .zwaiting .pulse{width:7px; height:7px; border-radius:50%; flex:none;
+    background:var(--accent); animation:dotpulse 1.6s ease-in-out infinite}
+  @keyframes dotpulse{0%,100%{opacity:.3}50%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){ .zwaiting .pulse{animation:none; opacity:1} }
+  .zwaiting .tip{font-size:11.5px; color:var(--ink-3); line-height:1.72; margin-bottom:13px}
+  .zwaiting .act{display:flex; gap:8px; align-items:center; flex-wrap:wrap; row-gap:8px}
+  .zwaiting .act .grow{flex:1}
+  .zwaiting .act .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  /* 窗口没开的时候那颗点不该呼吸 —— 它在说「closed」，闪动会被读成「正在做什么」。 */
+  .zwaiting .pulse.off{animation:none; background:var(--ink-3); opacity:.45}
+
+  /* 「让窗口去搜」与镜像域名这一排：两条输入加两颗钮，窄窗折行。
+     这一屏的输入框不在 .fetools / .fmtools 那一类作用域里，样式得自己给全。 */
+  .anbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:12px 15px 4px}
+  .anbar input{height:30px; flex:1; min-width:150px; padding:0 10px; font:inherit; font-size:12px;
+    color:var(--ink); background:var(--surface-2); border:1px solid var(--line-2);
+    border-radius:9px; outline:none}
+  .anbar input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .anbar input.dm{flex:none; width:170px; min-width:0}
+  /* 三段小标题：左边距对齐 .zrow 的 15px，所以不用 .fegrp（那是组件栏那一套，横向 6px）。 */
+  .ansec{padding:15px 15px 6px; font-size:11px; color:var(--ink-3); letter-spacing:.04em}
 
   /* ── 侧边栏 + 内容区 ───────────────────── */
   .shell{display:grid; grid-template-columns:214px minmax(0,1fr); gap:16px; align-items:start}
@@ -1246,7 +1255,7 @@
   body.feedfit #view > .vpane[data-pane="video"],
   body.feedfit #view > .vpane[data-pane="flomo"],
   /* 写作台同理：稿列、正文、坞各自滚，整页不动 —— 打字时页面跟着跳是最刺眼的。 */
-  /* 搜索页也是两栏（微信读书 / Z-Library）：各自滚，整页不动，翻结果时工具条不会滚出视野。 */
+  /* 搜索页只有一栏，同样收在这套高度算法里：结果在栏内滚，翻的时候工具条不会滚出视野。 */
   body.feedfit #view > .vpane[data-pane="search"],
   body.feedfit #view > .vpane[data-pane="write"]{height:calc(100vh - 106px); min-height:0}
   /* 搜索这一屏内部自己收口（.zsplit / .zscroll 各自滚），vbody 不必再滚一层。 */
@@ -1264,12 +1273,8 @@
     body.feedfit #view > .vpane[data-pane="flomo"]{height:auto; min-height:0}
     /* 写作在窄窗也回到整页滚：稿列收成一条缝之后，定高只会把正文挤成半屏。 */
     body.feedfit #view > .vpane[data-pane="write"]{height:auto; min-height:0}
-  }
-  /* 搜索这一屏的断点得跟着两栏走，不能等 840：≤1000px 时两栏已经收成上下排（见 .zsplit
-     那一段），这时若还定高，下半栏就被压成一条能滚的缝，超出的那一截还会被 vbody 的
-     overflow:hidden 吃掉、连滚都滚不到 —— 等于把结果藏了。所以定高的阈值与「并排 / 上下排」
-     的阈值对齐。 */
-  @media (max-width:1000px){
+    /* 搜索同理：这时候侧边栏已经折到上面，定高加 overflow:hidden 会把多出来的
+       结果藏掉，连滚都滚不到。 */
     body.feedfit #view > .vpane[data-pane="search"]{height:auto; min-height:0}
     body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:visible}
   }
@@ -3229,7 +3234,6 @@
   <aside class="popnav" id="popnav">
     <div class="head">设置</div>
     <button class="pcat on" data-cat="acct">账号</button>
-    <button class="pcat" data-cat="zlib">Z-Library</button>
     <button class="pcat" data-cat="look">外观</button>
     <button class="pcat" data-cat="nav">导航</button>
     <button class="pcat" data-cat="out">导出</button>
@@ -3272,36 +3276,6 @@
         <button class="deed" id="saveflomo">保存</button>
       </div>
       <div class="hint" id="flomohint">flomo 记录 API 地址。填入后可把划线笔记导入 flomo。获取方式：flomo 网页版 → 设置 → API，格式为 https://flomoapp.com/iwh/xxxx/。需要 flomo PRO。</div>
-    </section>
-
-    <section class="popcat" data-cat="zlib">
-      <div class="sechd">Z-Library 账号</div>
-      <div class="row">
-        <span class="k">状态</span>
-        <span class="v" id="v-zlib">未登录</span>
-        <span class="grow"></span>
-        <button class="deed" id="zlibOut">退出</button>
-      </div>
-      <div class="row" id="zlibAcct">
-        <span class="k">邮箱</span>
-        <input id="zlibEmail" type="text" spellcheck="false" autocomplete="off" placeholder="登录邮箱"
-               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
-      </div>
-      <div class="row" id="zlibAcct2">
-        <span class="k">密码</span>
-        <input id="zlibPass" type="password" spellcheck="false" autocomplete="off" placeholder="登录密码"
-               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
-        <button class="deed" id="zlibLogin">登录</button>
-      </div>
-      <div class="hint">在「搜索」页搜书时，右侧一栏会显示 Z-Library 的结果，可以直接下载 EPUB / PDF 收进本地书架。密码只用于换一次登录令牌，换到之后本机只保存令牌（不保存密码）。</div>
-      <div class="sechd">镜像域名</div>
-      <div class="row">
-        <span class="k">域名</span>
-        <input id="zlibDomain" type="text" spellcheck="false" autocomplete="off" placeholder="1lib.sk"
-               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
-        <button class="deed" id="zlibSaveDom">保存</button>
-      </div>
-      <div class="hint" id="zlibhint">Z-Library 的入口域名时常更换。默认使用 1lib.sk，如无法访问可在此填入当前可用的镜像域名。访问走本机代理（与取书同一套），不必额外配置。</div>
     </section>
 
     <section class="popcat" data-cat="look">
@@ -4542,11 +4516,21 @@ let sideFootStamp = '';
    「画板 / 思维导图 / flomo 导入后端没启动」全是这一条：端口上跑着 0.9.8，
    界面写着 1.0.1，而文案却说什么「本机服务没在跑」，把人带去查一件本来没事的事。
    GUIZANG_PAGE 是这份界面写给哪版后端看的；ui_server.py 改完没跟着改版本号的情况，
-   靠 404 兜住（后端认不得这条接口 = 它比界面旧）。 */
-const GUIZANG_PAGE = "1.0.6";
-const GZ = {back: "", code: "", stale: false, hid: false, swapping: false, why: "", prof: ""};
+   靠 404 兜住（后端认不得这条接口 = 它比界面旧）。
+   还有第三种比「版本旧」更隐蔽的：版本号一样、代码却已经不是跑着的那份 —— 源码改了
+   没重启。2026-10-07 用户报「左侧没有安娜的档案」就是它：导航那几格是后端 NAV_ITEMS
+   给的，进程还是上一版，界面再怎么新也铺不出这一格，而两个版本号看着完全一样。
+   后端因此多报一个 code_disk（磁盘上此刻的指纹），和它自己的 code 一比就露馅。 */
+const GUIZANG_PAGE = "1.0.7";
+const GZ = {back: "", code: "", disk: "", drift: false, stale: false,
+            hid: false, swapping: false, why: "", prof: ""};
 
 function gzStale(what) {
+  // 两版号一样却说「本机后端是 1.0.7，界面是 1.0.7」是句疯话，得先认这一种。
+  if (GZ.drift && GZ.back === GUIZANG_PAGE) {
+    return '本机跑着的后端比磁盘上那份旧（改过代码没重启）：' + (what || '这个功能') +
+      '它那边还没有，所以左侧那一格铺不出来。点「换新后端」就补上了。';
+  }
   return '本机后端是 ' + (GZ.back || '更老的一版') + '，界面是 ' + GUIZANG_PAGE +
     '：' + (what || '这个功能') + '它那边还没有。点「换新后端」就补上了。';
 }
@@ -4673,7 +4657,11 @@ async function drawState(force) {
   // 到底是「服务没跑」还是「跑的是旧代码」，这两句话的解法完全不同。
   GZ.back = String(s.version || '');
   GZ.code = String(s.code || '');
-  GZ.stale = !!GZ.back && GZ.back !== GUIZANG_PAGE;
+  GZ.disk = String(s.code_disk || '');
+  // 磁盘上的代码和跑着的那份不是一个东西 —— 改过源码没重启。老后端不报 code_disk，
+  // 空串就当没这回事，不能因为后端少报一个字段就谎称它过期。
+  GZ.drift = !!(GZ.code && GZ.disk && GZ.code !== GZ.disk);
+  GZ.stale = (!!GZ.back && GZ.back !== GUIZANG_PAGE) || GZ.drift;
   if (GZ.stale && !GZ.swapping) gzSwapShow(gzStale('新功能'));
   else if (!GZ.swapping && !GZ.stale) {
     // 对上了就把话收回去：轮询一直在跑，不能让用户看到一条早就过了期的提醒。
@@ -4751,6 +4739,7 @@ async function drawState(force) {
   $('#fix').disabled = running;
 
   $('#v-browser').textContent = s.chromium ? '就绪' : '待修复';
+  browserReady = !!s.chromium;    // 「安娜的档案」要在本机开可见窗口，组件没就绪就提前拦一道
   const acc = $('#v-account');
   if (s.login) {
     acc.textContent = s.login.logged_in ? '已连接' : '未连接';
@@ -4771,7 +4760,7 @@ async function drawState(force) {
   paintAgent(s.agent || {});
   paintSync(s.sync || {});
   paintVideoCfg(s.video || {});
-  paintZlib(s.zlib || {});
+  paintAnna(s.anna || {});
 
   // 把「已经存好了」明确显示出来，免得每次打开都以为要重填
   const ki = $('#keyinput'), fi = $('#flomoinput');
@@ -4892,6 +4881,8 @@ const NAV_ICONS = {
   stats: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.5 16V11M10 16V5M15.5 16v-6.5"/></svg>',
   pick: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.2l1.7 4.1 4.1 1.7-4.1 1.7L10 14.8 8.3 10.7 4.2 9l4.1-1.7z"/><path d="M15.4 14.2l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/></svg>',
   search: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="9" r="5"/><path d="M12.8 12.8 16.4 16.4"/></svg>',
+  // 一只档案箱：这一格是「去档案库取书」，箱子比放大镜更贴（搜索框在页面里自己会说话）。
+  anna: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="4.2" width="13.6" height="3.6" rx="1.2"/><path d="M4.2 7.8v6.4c0 .9.7 1.6 1.6 1.6h8.4c.9 0 1.6-.7 1.6-1.6V7.8"/><path d="M8.4 11.2h3.2"/></svg>',
 };
 
 // 徽章只在后端那一格里有对应的数字可看；清单和 ui_server.NAV_ITEMS 一起维护。
@@ -6571,48 +6562,6 @@ $('#saveflomo').onclick = () => {
 };
 $('#flomoinput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveflomo').click(); });
 
-/* ── Z-Library 账号 ─────────────────────────────
-   登录把邮箱＋密码在本机换成一对令牌，后端只留令牌（密码不落盘）。这里几条都打
-   /api/zlib，回来的是 {ok, zlib, msg}；成功后立刻把状态照到界面上，不等下一轮轮询。
-   搜索页右栏那张就地登录表也是这几个动作，共用同一份状态。 */
-async function zlibCall(payload) {
-  return gzApi('/api/zlib', payload, 30000);
-}
-$('#zlibEmail').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibPass').focus(); });
-$('#zlibPass').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibLogin').click(); });
-$('#zlibLogin').onclick = async () => {
-  const email = $('#zlibEmail').value.trim();
-  const pass = $('#zlibPass').value;
-  if (!email || !pass) { whisper('先填邮箱与密码'); return; }
-  $('#zlibLogin').disabled = true;
-  whisper('正在登录 Z-Library…');
-  const r = await zlibCall({mode: 'login', email, password: pass});
-  $('#zlibLogin').disabled = false;
-  if (!r.ok) { whisper(r.msg || '登录没成功'); return; }
-  $('#zlibEmail').value = '';
-  $('#zlibPass').value = '';
-  paintZlib(r.zlib || {});
-  whisper(r.msg || '已登录 Z-Library');
-};
-$('#zlibOut').onclick = async () => {
-  const r = await zlibCall({mode: 'logout'});
-  if (r.ok) { paintZlib(r.zlib || {}); whisper(r.msg || '已退出 Z-Library'); }
-  else whisper(r.msg || '退出没成功');
-};
-$('#zlibDomain').addEventListener('input', () => { zlibDomDirty = true; });
-$('#zlibSaveDom').onclick = async () => {
-  const v = $('#zlibDomain').value.trim();
-  const r = await zlibCall({mode: 'domain', domain: v});
-  if (!r.ok) { whisper(r.msg || '没能保存'); return; }
-  zlibDomDirty = false;
-  const dm = $('#zlibDomain');
-  dm.value = '';
-  dm.placeholder = (r.zlib || {}).domain || '1lib.sk';
-  paintZlib(r.zlib || {});
-  whisper(r.msg || '已保存域名');
-};
-$('#zlibDomain').addEventListener('keydown', e => { if (e.key === 'Enter') $('#zlibSaveDom').click(); });
-
 /* ── 导出位置 ─────────────────────────────
    选目录这件事只能在原生外壳里做：浏览器拿不到真实路径（input[webkitdirectory]
    只给相对名）。所以「选择…」是让外壳弹一个系统选文件夹的框，选完它把绝对路径
@@ -6946,7 +6895,8 @@ function paneEl(name) {
   // 把 main 底部那段呼吸留白收窄（配合 .rdwrap 的定高），离开时再还回去。
   document.body.classList.toggle('reading', name === 'read');
   // 订阅 / 视频 / 便签这三屏同理：栏内各自滚，整页不动，翻列表时不会把顶部工具条滚出视野。
-  // 搜索也是两栏（微信读书 / Z-Library），收在同一套高度算法里。
+  // 搜索同理：结果在栏内自己滚，整页不动（这一屏只有微信读书一栏）。
+  // 「安娜的档案」不进这个名单 —— 它是一页状态 + 两串记录，本来就该整页滚。
   document.body.classList.toggle('feedfit',
     name === 'feed' || name === 'video' || name === 'flomo' || name === 'write'
     || name === 'search');
@@ -7267,6 +7217,7 @@ function renderView() {
   if (v === 'stats') { renderStatsView(); return; }
   if (v === 'pick') { renderPickView(); return; }
   if (v === 'me') { renderMeView(); return; }
+  if (v === 'anna') { renderAnnaView(); return; }
   renderSearchView();
 }
 
@@ -10709,10 +10660,13 @@ function renderFlomoView() {
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
-let zlibDomDirty = false;   // Z-Library 的域名输入被改过、还没保存（同上，别被轮询盖回）
-// Z-Library 的登录状态。搜书页右栏据此决定先摆登录表单还是直接搜；
-// 只在 paintZlib() 一处写入，轮询与设置里登录/登出/换域名都从那儿过一遍，别各存各的。
-let zlibState = {};
+let annaDomDirty = false;   // 安娜的档案域名输入被改过、还没保存（同上，别被轮询盖回）
+// 安娜的档案那一栏的状态账本（窗口开没开、接住几份、进书架几本）。
+// 只在 paintAnna() 一处写入，轮询与这一栏里的每个按钮都从那儿过一遍，别各存各的。
+let annaState = {};
+// 浏览器组件（Playwright 的 chromium）就绪没有。安娜的档案要在本机开一个可见窗口，
+// 组件没装好时这一路起不来，界面提前拦一道、说清去哪儿修，而不是点了没反应。
+let browserReady = true;
 const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHead: null,
                cnt: null, plan: null, start: null, stop: null};
 const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
@@ -11938,28 +11892,176 @@ function paintVideoCfg(v) {
   }
 }
 
-/* Z-Library 那一行状态 / 表单。凭据与令牌都在后端，这一屏只是把它照出来：
-   登录了就显示「已登录 · 邮箱」，把邮箱与密码两行收起来，只留「退出」。 */
-function paintZlib(z) {
-  z = z || {};
-  zlibState = z;
-  const on = !!z.logged_in;
-  const st = $('#v-zlib');
-  if (st) st.textContent = on
-    ? ('已登录' + (z.email ? ' · ' + z.email : (z.name ? ' · ' + z.name : '')))
-    : '未登录';
-  const out = $('#zlibOut');
-  if (out) out.disabled = !on;
-  for (const id of ['#zlibAcct', '#zlibAcct2']) {
-    const r = $(id);
-    if (r) r.hidden = on;             // 登录了就不再摆着邮箱/密码
+/* 「安娜的档案」这一栏的状态。窗口那头负责浏览与下载，后端只读它留下的一份小账，
+   这里再把那份账照出来。页面内容、cookie、令牌都不进这条链路，所以这一屏能显示的
+   只有「窗口开没开、接住几份、进了几本、哪几本没进来、为什么没进来」。 */
+
+/** 账本里的 window 是窗口进程自己写的：被强杀时来不及写 closed，于是会说谎。
+ *  「这会儿到底有没有这个进程」的真源是任务槽（runningKind），对不上时以它为准。 */
+function annaLive(st) {
+  const w = (st && st.window) || 'closed';
+  const live = running && runningKind === 'anna_browser';
+  if (live && w !== 'open' && w !== 'opening') return 'open';      // 刚点下打开，账本还没翻过来
+  if (!live && (w === 'open' || w === 'opening')) return 'stale';  // 进程没了，账本还留着
+  return w;
+}
+
+const ANNA_WIN = {
+  opening: '窗口正在打开…',
+  open: '窗口开着，在里面搜书、点下载，文件归藏自己接',
+  closed: '窗口没开',
+  failed: '窗口没起来',
+  stale: '上一次说窗口还开着，其实进程已经不在了',
+};
+
+/** 一串记录换上去。内容没变就不重画 —— 轮询每 2.6 秒一次，来回重建会把用户
+ *  正指着那一行的 hover 打掉，也白烧一遍布局。 */
+function annaRows(el, list, build, emptyText) {
+  if (!el) return;
+  const sig = JSON.stringify(list || []);
+  if (el.dataset.sig === sig) return;
+  el.dataset.sig = sig;
+  const rows = (list || []).map(build);
+  if (!rows.length) {
+    const e = document.createElement('div');
+    e.className = 'emptyline';
+    e.textContent = emptyText || '还没有记录';
+    el.replaceChildren(e);
+    return;
   }
-  const dm = $('#zlibDomain');
-  if (dm && !zlibDomDirty) dm.placeholder = z.domain || '1lib.sk';
-  const hi = $('#zlibhint');
-  if (hi) hi.textContent = on
-    ? '已登录，搜索页右侧可直接搜书并下载。访问走本机代理（与取书同一套）。'
-    : 'Z-Library 的入口域名时常更换。默认使用 1lib.sk，如无法访问可在此填入当前可用的镜像域名。访问走本机代理（与取书同一套），不必额外配置。';
+  el.replaceChildren(...rows);
+}
+
+function annaBadge(text, ok) {
+  const s = document.createElement('span');
+  if (ok) s.className = 'ok';
+  s.textContent = text;
+  return s;
+}
+
+/** 一行书：书脊块 + 书名 / 文件名 + 徽章。点了跳到阅读器（入库的就是本地书架里的书）。 */
+function annaBookRow(r) {
+  const row = document.createElement('div');
+  row.className = 'zrow';
+  const spine = document.createElement('div');
+  spine.className = 'zc';
+  const sp = document.createElement('span');
+  sp.className = 'sp';
+  sp.textContent = String(r.title || r.name || '?').trim().slice(0, 1);
+  spine.append(sp);
+  const mid = document.createElement('div');
+  mid.className = 'zm';
+  const t = document.createElement('div');
+  t.className = 'zt';
+  t.textContent = r.title || r.name || '未命名';
+  const a = document.createElement('div');
+  a.className = 'za';
+  a.textContent = [r.author, r.name].filter(Boolean).join(' · ');
+  const b = document.createElement('div');
+  b.className = 'zb';
+  b.append(annaBadge('已入书架', true));
+  if (r.chapters) b.append(annaBadge(`${r.chapters} 章`));
+  if (r.bytes) b.append(annaBadge(humanBytes(r.bytes)));
+  mid.append(t, a, b);
+  row.append(spine, mid);
+  const go = document.createElement('button');
+  go.className = 'deed zn';
+  go.textContent = '看这本';
+  go.onclick = () => openReader(r.book, r.title || r.name, 'anna');
+  row.append(go);
+  return row;
+}
+
+/** 一行「没进书架」：原文件还在下载夹里，原因写在明处，不假装成功。 */
+function annaPendingRow(r) {
+  const row = document.createElement('div');
+  row.className = 'zrow';
+  const mid = document.createElement('div');
+  mid.className = 'zm';
+  const t = document.createElement('div');
+  t.className = 'zt';
+  t.textContent = r.name || '未命名';
+  const a = document.createElement('div');
+  a.className = 'za';
+  a.textContent = r.reason || '没进书架';
+  const b = document.createElement('div');
+  b.className = 'zb';
+  b.append(annaBadge('原文件留着'));
+  if (r.bytes) b.append(annaBadge(humanBytes(r.bytes)));
+  mid.append(t, a, b);
+  row.append(mid);
+  return row;
+}
+
+/** 下载夹那一格里有什么。这是「现场」不是账本，所以只在这一栏进来时数一遍。 */
+function annaFileRow(f) {
+  const row = document.createElement('div');
+  row.className = 'zrow';
+  const mid = document.createElement('div');
+  mid.className = 'zm';
+  const t = document.createElement('div');
+  t.className = 'zt';
+  t.textContent = f.name || '未命名';
+  const b = document.createElement('div');
+  b.className = 'zb';
+  b.append(annaBadge(f.ok ? '收得下' : '格式不认', !!f.ok));
+  b.append(annaBadge(humanBytes(f.bytes || 0)));
+  mid.append(t, b);
+  row.append(mid);
+  return row;
+}
+
+function paintAnna(a) {
+  annaState = a || {};
+  const p = PANES.anna;
+  if (!p) return;
+  const q = sel => p.querySelector(sel);
+  const st = annaState;
+  const win = annaLive(st);
+  const live = win === 'open' || win === 'opening';
+
+  const hd = q('#anWinText');
+  if (hd) hd.textContent = ANNA_WIN[win] || ANNA_WIN.closed;
+  const dot = q('#anWinDot');
+  if (dot) dot.classList.toggle('off', !live);
+  const tip = q('#anTip');
+  if (tip) {
+    const bits = [];
+    if (win === 'failed' && st.last_error) bits.push(String(st.last_error));
+    if (st.note) bits.push(String(st.note));
+    // 任务槽只有一个位置：窗口一直开着，这期间发起的取书会排队。这一句不写在
+    // 明处，「点了取书没动静」就会被当成程序卡死。
+    bits.push(live ? '窗口开着会占住任务位，这期间发起的取书会排队等它。'
+                   : '归藏自己开一个浏览器窗口，搜书与下载都在那个窗口里点。');
+    // 2026-10-07 在有头窗口里实测：详情页每一条下载链接都指向 /account，写着
+    // 「Log in to access downloads」。不登录就没有能点的下载，这一句不写在明处，
+    // 用户只会觉得「点了没反应」。登录态存在归藏自己那份浏览器档案里，登一次留着。
+    bits.push('对方现在要先登录才给下载，在这个窗口里登一次就行。');
+    tip.textContent = bits.join(' ');
+  }
+  const ob = q('#anOpen');
+  if (ob) {
+    ob.disabled = live;
+    ob.textContent = live ? '窗口已打开'
+      : (win === 'stale' || win === 'failed' ? '重新打开窗口' : '打开浏览器窗口');
+  }
+  const sb = q('#anStop');
+  if (sb) sb.hidden = !live;
+  const lb = q('#anLog');
+  if (lb) lb.hidden = !live;
+
+  const cnt = q('#anCnt');
+  const txt = `接住 ${st.caught || 0} 份 · 进书架 ${st.imported || 0} 本`
+    + ` · 没收进来 ${st.skipped || 0} 份`;
+  if (cnt && cnt.textContent !== txt) cnt.textContent = txt;
+
+  const dm = q('#anDom');
+  if (dm && !annaDomDirty) dm.placeholder = st.domain || 'annas-archive.is';
+  const kw = q('#anQ');
+  if (kw && st.keyword) kw.placeholder = '上一次搜的是「' + st.keyword + '」';
+
+  annaRows(q('#anBooks'), st.books, annaBookRow, '还没有从窗口里接住的书');
+  annaRows(q('#anPending'), st.pending, annaPendingRow, '没有没收进来的文件');
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
@@ -12387,11 +12489,10 @@ async function renderPickView() {
 
 /* 「我的书架」这一域已经砍掉了：书架本来就一屏能看完，顶部还有筛选框，
    搜索页只留「书城 + 划线内容」两类真正需要搜的东西。
-   「书城」这一格现在并排两条路：左边微信读书（搜到 → 加入书架 → 整本取回），
-   右边 Z-Library（搜到 → 直接下载 EPUB / PDF 收进本地书架）。两边逻辑不同，
-   所以各有各的栏头与动作：同一个搜索框，一次搜同时发两问。 */
+   「书城」这一格只剩微信读书一条路（搜到 → 加入书架 → 整本取回）：下载那条路
+   挪到工具区的「安娜的档案」，那边是工具自己开一个浏览器窗口，在这里并一排不进去。 */
 const SEARCH_HINTS = {
-  store: '在上面的框里写个书名、作者或关键词，微信读书与 Z-Library 会同时搜。微信读书那边搜到后加入书架、再整本取回；Z-Library 这边可以直接下载 EPUB / PDF，下载完自动收进本地书架。',
+  store: '在上面的框里写个书名、作者或关键词，搜的是微信读书书城。搜到后点「加入书架」，再回书架整本取回。想直接下载 EPUB / PDF，用左侧最下面的「安娜的档案」。',
   notes: '在你的划线与想法正文里搜（需要先建一次笔记索引）。',
 };
 
@@ -12467,9 +12568,9 @@ function renderSearchView() {
     body.replaceChildren(box);
   }
 
-  // ── 书城：左微信读书 / 右 Z-Library ─────────────────────
-  /** 两栏的骨架。栏头把「这一栏是干什么的」写在明处 —— 两边动作不同，
-   *  用户不必点一下才知道左边是取书、右边是下载。 */
+  // ── 书城：只有微信读书一栏 ─────────────────────────────
+  /** 一栏的骨架。栏头把「这一栏是干什么的」写在明处 —— 搜到的是「书城里的书」，
+   *  动作是加入书架再整本取回，不是下载。想下载去「安娜的档案」。 */
   function storeFrame() {
     body.innerHTML = `
       <div class="zsplit">
@@ -12478,14 +12579,8 @@ function renderSearchView() {
             <span class="s">搜到后加入书架，再整本取回</span></div>
           <div class="zbody" id="zbodyWr"></div>
         </section>
-        <section class="zcol" data-z="zl">
-          <div class="zhead"><span class="b">Z-Library</span>
-            <span class="s" id="zlibHead">EPUB / PDF 直接下载入本地书架</span></div>
-          <div class="zbody" id="zbodyZl"></div>
-        </section>
       </div>`;
-    return {wr: body.querySelector('#zbodyWr'), zl: body.querySelector('#zbodyZl'),
-            head: body.querySelector('#zlibHead')};
+    return {wr: body.querySelector('#zbodyWr')};
   }
 
   /** 左栏：微信读书书城。走的是老那条路 —— 搜到的是「书城里的书」，
@@ -12524,154 +12619,13 @@ function renderSearchView() {
     }
   }
 
-  /** 右栏：Z-Library。未登录先就地登录；登录后搜到的是「能下的文件」，
-   *  每行一颗「下载」，点完直接下一份收进本地书架。返回命中数（搜不了时回 null）。 */
-  async function searchZlib(col, head, kw) {
-    if (!zlibState.logged_in) {
-      head.textContent = '登录后可直接下载 EPUB / PDF';
-      col.replaceChildren(zlibLoginForm(() => searchZlib(col, head, kw)));
-      return null;
-    }
-    head.textContent = zlibState.email
-      ? '已登录 · ' + zlibState.email : 'EPUB / PDF 直接下载入本地书架';
-    col.innerHTML = zlibSkel(6);
-    const d = await gzApi('/api/zlib', {mode: 'search', q: kw, limit: 24}, 40000);
-    if (!d || !d.ok) {
-      col.innerHTML = `<div class="emptyline"><b>没能连上 Z-Library</b>`
-        + `${esc((d && d.msg) || '没答上来')}<br>可在「设置 → Z-Library」里换一个镜像域名。</div>`;
-      return null;
-    }
-    const books = d.books || [];
-    if (!books.length) { col.innerHTML = '<div class="emptyline">Z-Library 里没搜到</div>'; return 0; }
-    const box = document.createElement('div');
-    box.append(...books.map(zlibRow));
-    col.replaceChildren(box);
-    return books.length;
-  }
-
-  /** Z-Library 一行：小封面 + 书名 / 作者 + 格式与大小 + 下载钮。
-   *  封面是外链（走系统代理时浏览器未必取得到），取不到就落回书脊色块，形状不变。 */
-  function zlibRow(b) {
-    const row = document.createElement('div');
-    row.className = 'zrow';
-    const cv = document.createElement('div');
-    cv.className = 'zc';
-    const sp = () => {
-      const d = document.createElement('span');
-      d.className = 'sp';
-      d.textContent = (b.title || '书').trim().slice(0, 1);
-      return d;
-    };
-    if (b.cover) {
-      const img = document.createElement('img');
-      img.alt = '';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.src = b.cover;
-      img.onerror = () => img.replaceWith(sp());
-      cv.append(img);
-    } else cv.append(sp());
-
-    const m = document.createElement('div');
-    m.className = 'zm';
-    const ti = document.createElement('div');
-    ti.className = 'zt';
-    ti.textContent = b.title || '(无题)';
-    const au = document.createElement('div');
-    au.className = 'za';
-    au.textContent = [b.author, b.publisher].filter(Boolean).join(' · ') || '佚名';
-    const bs = document.createElement('div');
-    bs.className = 'zb';
-    const fmt = document.createElement('span');
-    fmt.textContent = (b.extension || '').toUpperCase() || '未知格式';
-    if (b.readable) fmt.className = 'ok';
-    bs.append(fmt);
-    for (const v of [b.size, b.year, b.language]) {
-      if (!v) continue;
-      const s = document.createElement('span');
-      s.textContent = v;
-      bs.append(s);
-    }
-    m.append(ti, au, bs);
-
-    const go = document.createElement('button');
-    go.className = 'deed';
-    go.textContent = b.readable ? '下载' : '阅读器打不开';
-    go.disabled = !b.readable;
-    go.onclick = () => zlibDownload(b, go);
-    const zn = document.createElement('div');
-    zn.className = 'zn';
-    zn.append(go);
-    row.append(cv, m, zn);
-    return row;
-  }
-
-  /** 下载一本书：后端下一份、转成章节、收进「本地书架」。
-   *  下载要拿直链再拉整本，比一次搜索慢得多，所以超时给到两分钟。 */
-  async function zlibDownload(b, btn) {
-    if (btn.dataset.busy) return;
-    btn.dataset.busy = '1';
-    btn.textContent = '下载中…';
-    const r = await gzApi('/api/zlib', {mode: 'download', book: b}, 120000);
-    btn.dataset.busy = '';
-    if (!r.ok) { btn.textContent = '下载'; whisper(r.msg || '下载没成功'); return; }
-    btn.textContent = '已入架';
-    whisper(r.msg || ('已下载《' + (b.title || '') + '》'));
-    drawState(true);      // 书架多了一本：把状态与「已取回」计数刷新一遍
-  }
-
-  function zlibLoginForm(onOk) {
-    const box = document.createElement('div');
-    box.className = 'zlogin';
-    box.innerHTML = `<div class="tip">Z-Library 的账号在这里登录一次就行。登录后这一栏能搜书并直接下载 EPUB / PDF，下载完自动收进「本地书架」。密码只用来换一次登录令牌，本机只保存令牌，不保存密码。</div>
-      <div class="row"><input id="zlEmail" type="text" placeholder="登录邮箱" autocomplete="off" spellcheck="false"></div>
-      <div class="row"><input id="zlPass" type="password" placeholder="登录密码" autocomplete="off"></div>
-      <div class="act"><button class="deed" id="zlGo">登录</button><span class="grow"></span></div>`;
-    const em = box.querySelector('#zlEmail'), pw = box.querySelector('#zlPass'),
-          go = box.querySelector('#zlGo');
-    const run = async () => {
-      const email = em.value.trim(), pass = pw.value;
-      if (!email || !pass) { whisper('先填邮箱与密码'); return; }
-      go.disabled = true;
-      go.textContent = '登录中…';
-      const r = await gzApi('/api/zlib', {mode: 'login', email, password: pass}, 30000);
-      go.disabled = false;
-      go.textContent = '登录';
-      if (!r.ok) { whisper(r.msg || '登录没成功'); return; }
-      paintZlib(r.zlib || {});    // 搜书页右栏与设置里那一段都跟着变
-      whisper(r.msg || '已登录 Z-Library');
-      if (onOk) onOk();
-    };
-    go.onclick = run;
-    [em, pw].forEach(x => x.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); }));
-    return box;
-  }
-
-  // 与结果行同形状的骨架（封面块 + 两行文字），冷启动时先把位置占住
-  function zlibSkel(n) {
-    let s = '';
-    for (let i = 0; i < (n || 6); i++) {
-      s += '<div class="zrow"><div class="zc">'
-        + '<span class="skbar" style="width:26px;height:38px;border-radius:6px"></span></div>'
-        + '<div class="zm"><div class="skline" style="margin:0;width:64%"></div>'
-        + '<div class="skline" style="margin:8px 0 0;width:40%;height:9px"></div></div></div>';
-    }
-    return s;
-  }
-
   async function storeFlow(kw) {
     const cols = storeFrame();
-    const [a, b] = await Promise.all([
-      searchWeRead(cols.wr, kw),
-      searchZlib(cols.zl, cols.head, kw),
-    ]);
-    const bits = [];
-    if (a != null) bits.push(`微信读书 ${a} 本`);
-    if (b != null) bits.push(`Z-Library ${b} 本`);
-    setNote('search', bits.join(' · '));
+    const a = await searchWeRead(cols.wr, kw);
+    setNote('search', a != null ? `微信读书 ${a} 本` : '');
   }
 
-  /** 搜索没法预判（词还没打出来），所以这一段更得把空白先占住：书城两栏各自铺骨架，
+  /** 搜索没法预判（词还没打出来），所以这一段更得把空白先占住：书城铺卡片骨架，
    *  划线铺引文条骨架。不论从哪个分支收口（结果 / 没搜到 / 失败 / 要先建索引），
    *  都是「骨架 → 真内容」那一下，淡入统一在包装里补一次，不必每个分支各写一行。 */
   async function runSearch() {
@@ -12695,6 +12649,146 @@ function renderSearchView() {
     hint();
   }
   paintTabs();
+}
+
+/* ── 安娜的档案 ─────────────────────────────
+   这一栏是「工具自己开的浏览器窗口」的遥控器加回执板：搜书、翻页、点下载都在那个真网页
+   里做（这里不代抓、不代填、也不碰它的 cookie），归藏只干两件事 —— 把窗口领到某个搜索页、
+   把窗口接住的文件转成书进「本地书架」。所以这一屏显示的是状态与账，不是书单。
+
+   为什么做成窗口而不是嵌一页进来：对方响应头写着 X-Frame-Options: SAMEORIGIN，iframe 一律
+   空白；而它的域名字面在轮换、直连时常 TLS 断、socks 代理只有 Chromium 认 —— 三条加起来，
+   只有真浏览器能稳定走完它自己的流程。这也是这颗按钮必须等浏览器组件就绪的原因。 */
+async function annaPost(payload, ms) {
+  return gzApi('/api/anna', payload, ms || 20000);
+}
+
+/** 下载夹那一格有什么。这是「现场」不是账本，所以只在这一栏进来、或刚补收完时数一遍 ——
+ *  轮询每 2.6 秒一次，不该去翻目录。 */
+async function annaListing() {
+  const p = PANES.anna;
+  if (!p) return;
+  const d = await annaPost({mode: 'listing'}, 8000);
+  const el = p.querySelector('#anFiles');
+  if (!el || !d || !d.ok) return;
+  annaRows(el, d.files || [], annaFileRow, '那一格里还是空的');
+}
+
+function renderAnnaView() {
+  const {p, body, fresh} = viewPane('anna', viewHeader('安娜的档案',
+    `<button class="deed" id="anOpen" style="height:30px">打开浏览器窗口</button>
+     <button class="deed" id="anStop" style="height:30px" hidden>关掉窗口</button>`));
+  if (fresh) {
+    body.innerHTML = `
+      <div class="zwaiting">
+        <div class="hd"><span class="pulse" id="anWinDot"></span><span id="anWinText">窗口没开</span></div>
+        <div class="tip" id="anTip"></div>
+        <div class="act">
+          <button class="deed" id="anLog" style="height:30px" hidden>查看详情</button>
+          <button class="deed" id="anCollect" style="height:30px">补收下载夹</button>
+          <button class="deed" id="anClear" title="清掉这一栏的记录，已入库的书与原始文件都不动">清空记录</button>
+          <span class="grow"></span>
+          <span class="cnt" id="anCnt"></span>
+        </div>
+      </div>
+      <div class="anbar">
+        <input id="anQ" placeholder="写个书名或关键词，让窗口去搜这一页" autocomplete="off" spellcheck="false">
+        <button class="deed" id="anGo" style="height:30px">让窗口去搜</button>
+        <input class="dm" id="anDom" placeholder="annas-archive.is" autocomplete="off" spellcheck="false">
+        <button class="deed" id="anDomSave" style="height:30px">存这个镜像域名</button>
+      </div>
+      <div class="ansec">最近收进本地书架</div>
+      <div id="anBooks"></div>
+      <div class="ansec">下载夹里（转成书之前的原始文件）</div>
+      <div id="anFiles"></div>
+      <div class="ansec">没收进来的（原因写在每一行下面，原文件都留着）</div>
+      <div id="anPending"></div>`;
+    wireAnna(p);
+  }
+  paintAnna(annaState);
+  if (fresh) annaListing();
+}
+
+function wireAnna(p) {
+  const q = sel => p.querySelector(sel);
+  const qv = () => q('#anQ').value.trim();
+
+  q('#anOpen').onclick = async () => {
+    if (!browserReady) {
+      whisper('浏览器组件还没就绪：先在「设置 → 账号」里点「修复」');
+      return;
+    }
+    // 点了就先把它按住：后端起任务是同步的，但界面这一侧要等下一轮轮询（最长 2.6 秒）
+    // 才知道「已经在跑了」，中间这段时间再点一次会撞任务槽。
+    q('#anOpen').disabled = true;
+    const r = await post('anna.open');
+    if (!r.ok) {
+      q('#anOpen').disabled = false;
+      whisper(r.msg || '没能打开窗口');
+      return;
+    }
+    whisper(r.msg || '窗口正在打开');
+    paintAnna(Object.assign({}, annaState, {window: 'open'}));
+  };
+
+  q('#anStop').onclick = async () => {
+    const r = await post('stop');
+    whisper(r.ok ? '已请求关掉窗口' : (r.msg || '没能关掉'));
+  };
+
+  q('#anLog').onclick = () => showTaskLog({title: '安娜的档案窗口', state: 'running'});
+
+  q('#anGo').onclick = async () => {
+    const kw = qv();
+    if (!kw) { q('#anQ').focus(); whisper('先写个书名或关键词'); return; }
+    const r = await annaPost({mode: 'search', q: kw});
+    if (r && r.anna) paintAnna(r.anna);
+    whisper((r && r.msg) || '口令没送出去');
+  };
+  q('#anQ').addEventListener('keydown', e => { if (e.key === 'Enter') q('#anGo').click(); });
+
+  q('#anDom').addEventListener('input', () => { annaDomDirty = true; });
+  q('#anDom').addEventListener('keydown', e => { if (e.key === 'Enter') q('#anDomSave').click(); });
+  q('#anDomSave').onclick = async () => {
+    const v = q('#anDom').value.trim();
+    const r = await annaPost({mode: 'domain', domain: v});
+    if (!r || !r.ok) { whisper((r && r.msg) || '没能保存'); return; }
+    annaDomDirty = false;
+    q('#anDom').value = '';
+    paintAnna(r.anna || annaState);
+    whisper('已保存镜像域名');
+  };
+
+  // 补收：窗口关了、或被「格式不认」挡下来的那几份，从下载夹再过一遍导入路。
+  // 收一份要解析整本书，慢的时候十几秒，所以这里把闸放宽。
+  q('#anCollect').onclick = async () => {
+    const btn = q('#anCollect');
+    btn.disabled = true;
+    btn.textContent = '收集中…';
+    const r = await annaPost({mode: 'collect'}, 120000);
+    btn.disabled = false;
+    btn.textContent = '补收下载夹';
+    if (!r || !r.ok) { whisper((r && r.msg) || '没能收'); return; }
+    paintAnna(r.anna || annaState);
+    await annaListing();
+    await drawState(true);   // 新书落架：本地书目、侧边栏那一格的数字一起接手
+    whisper(r.msg || '已收');
+  };
+
+  q('#anClear').onclick = () => {
+    sheet({
+      title: '清空这一栏的记录',
+      text: '只清这一栏的账（接住几份、进书架几本、最近列表）。书架上的书和下载夹里的原文件一个都不动。',
+      actions: [
+        {label: '确认清空', lead: true, run: async () => {
+          const r = await annaPost({mode: 'clear'});
+          if (r && r.anna) paintAnna(r.anna);
+          whisper((r && r.msg) || '已清空');
+        }},
+        {label: '算了'},
+      ],
+    });
+  };
 }
 
 /* ── 书籍详情页 ───────────────────────── */

@@ -8,7 +8,7 @@
 最先栽的是写作屏左栏那句「还没有稿子。在右边直接开始写，第一句落下就会建一篇。」：
 `.wrline .lab` 写了 `flex:none`，既不长也不缩，整句就顶着 max-content 的宽度戳出 214px 的
 稿子列 82px。同一类写法（`flex:none` / 不给 `min-width:0` 的定宽标签）全站都可能再犯，
-所以这里不做单点断言，而是把十二格入口 + 个人主界面 + 设置弹窗都扫一遍。
+所以这里不做单点断言，而是把十三格入口 + 个人主界面 + 设置弹窗都扫一遍。
 
 判定口径（都在页面里算，量的是真实排版结果）：
   · 只看**自己带文字节点**的元素 —— 空壳容器不算，它有没有溢出由里面的文字决定；
@@ -34,7 +34,7 @@ SHOTS_DIR = selftest.SHOTS
 SHOTS_DIR.mkdir(parents=True, exist_ok=True)
 SHOT = str(SHOTS_DIR / "overflow.png")
 
-# 十二格入口一律走 setView（它就是侧边栏点击走的那条路）；「我的」不在名册里，点头像进。
+# 十三格入口一律走 setView（它就是侧边栏点击走的那条路）；「我的」不在名册里，点头像进。
 NAVS = ["shelf", "local", "clip", "subs", "video", "notes", "write",
         "marks", "wander", "stats", "pick", "find"]
 SIZES = [(1280, 900), (1024, 760), (760, 700)]

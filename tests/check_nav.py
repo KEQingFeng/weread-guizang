@@ -75,7 +75,7 @@ def nav_of(st):
 
 
 # ── 一、名册与页面：逐条对得上 ──────────────────────────────────
-chk("名册：一共十二个入口", len(NAV_IDS) == 12, NAV_IDS)
+chk("名册：一共十三个入口（Z-Library 砍了、加进「安娜的档案」）", len(NAV_IDS) == 13, NAV_IDS)
 chk("名册：顺序里没有重复", len(set(NAV_IDS)) == len(NAV_IDS), NAV_IDS)
 
 block = re.search(r"const NAV_ICONS = \{(.*?)\n\};", SRC, re.S)
@@ -97,8 +97,8 @@ ST = get("/api/state")
 NAV = nav_of(ST)
 items = NAV.get("items") or []
 
-chk("状态包：导航项十二颗、带 id / 名字 / 分组 / 显隐",
-    len(items) == 12 and all(set(("id", "label", "group", "hidden")) <= set(x) for x in items),
+chk("状态包：导航项十三颗、带 id / 名字 / 分组 / 显隐",
+    len(items) == 13 and all(set(("id", "label", "group", "hidden")) <= set(x) for x in items),
     len(items))
 chk("状态包：默认顺序就是名册的顺序", [x["id"] for x in items] == NAV_IDS,
     [x["id"] for x in items])
@@ -202,7 +202,7 @@ with sync_playwright() as pw:
     page.wait_for_timeout(1500)
 
     dom = page.eval_on_selector_all("#nav button[data-v]", "els => els.map(e => e.dataset.v)")
-    chk("真机：侧边栏铺出来的就是名册那十二颗，顺序一致", dom == NAV_IDS, dom)
+    chk("真机：侧边栏铺出来的就是名册那十三颗，顺序一致", dom == NAV_IDS, dom)
 
     body_cls = page.eval_on_selector("body", "b => b.className")
     chk("真机：默认是「摊开」待法（body.side-open）",
@@ -222,7 +222,7 @@ with sync_playwright() as pw:
         dragged = page.eval_on_selector_all("#nav button[data-v]", "els => els.map(e => e.dataset.v)")
         chk("真机：长按拖拽真的换了位（书架被拖到了别处）",
             dragged != NAV_IDS and dragged.index("shelf") > 0, dragged)
-        chk("真机：拖拽没有弄丢入口（还是那十二个）", sorted(dragged) == sorted(NAV_IDS), dragged)
+        chk("真机：拖拽没有弄丢入口（还是那十三个）", sorted(dragged) == sorted(NAV_IDS), dragged)
         post("/api/nav", {"order": NAV_IDS})            # 还原
         page.wait_for_timeout(3300)                     # 等一轮状态轮询把新顺序铺回来
         back = page.eval_on_selector_all("#nav button[data-v]", "els => els.map(e => e.dataset.v)")
@@ -283,8 +283,8 @@ with sync_playwright() as pw:
     # 设置里那一段导航控件。
     page.evaluate("setPop(true, 'nav')")
     page.wait_for_timeout(400)
-    chk("真机：设置里入口显隐的勾选框正好十二个",
-        page.locator("#navList input[data-nav]").count() == 12,
+    chk("真机：设置里入口显隐的勾选框正好十三个",
+        page.locator("#navList input[data-nav]").count() == 13,
         page.locator("#navList input[data-nav]").count())
     chk("真机：侧边栏待法两颗（常驻 / 靠左缘滑出）都在",
         page.locator('#navSideSeg button[data-s="open"]').count() == 1

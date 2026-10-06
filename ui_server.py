@@ -47,25 +47,50 @@ import ffmpeg_tool
 import flomo_notes
 import media_setup
 import mindmap
+import anna_state
 import person
 import readplan
 import sync as cloudsync
 import video_note
 import web_parse
 import writer as writer_mod
-import zlib_client as zlib
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
 # 2026-10-04 用户报「画板、思维导图点了没反应」就是这个坑（详见 platform_compat）。
-CODE_HASH = pc.code_fingerprint(os.path.abspath(__file__))
+SELF_PATH = os.path.abspath(__file__)
+CODE_HASH = pc.code_fingerprint(SELF_PATH)
+
+# 磁盘上「此刻」的指纹，按 mtime + 大小缓存 —— /api/state 是 2.6 秒一次轮询，
+# 每问都重算一遍几百 KB 的散列是白烧。
+DISK_FP = {"stamp": None, "fp": CODE_HASH}
+
+
+def disk_code_fingerprint():
+    """磁盘上这份后端代码现在的指纹（进程自己的那份是 CODE_HASH）。
+
+    为什么两个都要报：CODE_HASH 是进程起来那刻按当时的文件算的，之后**改源码不重启**，
+    进程报的仍是老指纹，而磁盘上的代码已经换了。界面只比 version，两个数一样就以为
+    一切正常 —— 于是新加的入口、新加的路由在内存里根本不存在，界面上表现为「凭空少一格」
+    （2026-10-07 用户报「左侧没有安娜的档案」就是这个：进程还是上一版，页面却从磁盘现读）。
+    把「跑的那份」和「磁盘上那份」一起递出去，界面才认得出该换班。
+    """
+    try:
+        st = os.stat(SELF_PATH)
+        stamp = (round(st.st_mtime, 6), st.st_size)
+    except OSError:
+        return ""                      # 读不到就当没有：宁可漏报，不要误报「你过期了」
+    if stamp != DISK_FP["stamp"]:
+        DISK_FP["stamp"] = stamp
+        DISK_FP["fp"] = pc.code_fingerprint(SELF_PATH)
+    return DISK_FP["fp"]
 
 # 实际绑上的端口（默认口被占时 main() 会往后挪）。/api/restart 得让接班人绑同一个口，
 # 不然用户那个页面就跟着挪丢了 —— 界面和适配器认的都是这一个端口。
@@ -879,6 +904,7 @@ NAV_ITEMS = [
     ("stats", "阅读统计", "tool"),
     ("pick", "为我推荐", "tool"),
     ("search", "搜索书籍", "tool"),
+    ("anna", "安娜的档案", "tool"),
 ]
 NAV_IDS = [i for i, _l, _g in NAV_ITEMS]
 NAV_LABEL = {i: l for i, l, _g in NAV_ITEMS}
@@ -3313,85 +3339,77 @@ def _feed_tags(body, key="tags"):
     return [str(x).strip() for x in v if str(x).strip()][:12]
 
 
-def zlib_do(body):
-    """POST /api/zlib —— Z-Library 这一路：查状态 / 登录 / 登出 / 搜书 / 下载入库。
+def anna_do(body):
+    """POST /api/anna —— 「安娜的档案」这一路：搜书口令 / 镜像域名 / 补收 / 清账。
 
-    密码只在这一趟请求的内存里过一手（zlib_client 落盘的只有换回来的 remix 令牌，
-    回给界面的也只有后四位）。下载成功后走 `book_import` 收进「本地书架」—— 和用户
-    自己拖文件进来是同一条路，所以阅读器、导出、文件管理器定位这些现成能力一行不改。
+    浏览器窗口不归这儿管（那是 `anna_browser.py` 那条任务），后端只做四件事：
+    给窗口递一个搜索口令、记住用户选的镜像域名、把原始下载格里没转成的补收一次、
+    清掉这一路的账。状态本身是纯本地的一份小 json，所以每 2.6 秒的轮询读得动。
 
-    代理由 zlib_client 自己接（本机现有那套），这里不管 —— 它在国内是必需品，不是选项。
+    代理由窗口那头自己接（`anna_state.proxy_url`）—— 这一路在国内是必需品，不是选项。
     """
     b = body or {}
     mode = str(b.get("mode") or "").strip()
 
-    def _num(v, dflt):
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return dflt
+    if mode == "search":
+        term = str(b.get("q") or b.get("term") or "").strip()
+        if not term:
+            return {"ok": False, "msg": "先写个书名或关键词"}
+        st = anna_state.read_state(DATA_DIR)
+        anna_state.write_cmd(DATA_DIR, term)
+        # 窗口没开时口令条照样写：界面会告诉他「点了打开窗口就会搜这个」。
+        return {"ok": st.get("window") == "open",
+                "msg": "已经让窗口去搜：%s" % term if st.get("window") == "open"
+                       else "口令记下了，打开窗口就会搜：%s" % term,
+                "anna": anna_state.write_state(DATA_DIR, {"keyword": term})}
 
-    try:
-        if mode == "status":
-            st = zlib.status(DATA_DIR)
-            st["downloads_left"] = zlib.downloads_left(DATA_DIR)  # 问不到回 None，界面就不显示
-            return {"ok": True, "zlib": st}
+    if mode == "domain":
+        dom = anna_state.clean_domain(b.get("domain"))
+        st = anna_state.write_state(DATA_DIR, {"domain": dom})
+        log("安娜的档案镜像域名改为 %s" % dom)
+        return {"ok": True, "msg": "已保存域名", "anna": st}
 
-        if mode == "login":
-            dom = str(b.get("domain") or "").strip() or None
-            if b.get("userid") or b.get("userkey"):
-                st = zlib.login_with_token(DATA_DIR, b.get("userid"), b.get("userkey"), domain=dom)
+    if mode == "collect":
+        # 补收：把原始下载格里那些「窗口没来得及转」或「当初格式不认现在想再试」的
+        # 文件再过一遍导入路。只读那一格，不碰用户自己放别处的文件。
+        d = anna_state.incoming_dir(DATA_DIR)
+        rows = anna_state.incoming_listing(d, limit=40)
+        done, skipped, dup = [], [], []
+        for r in rows:
+            res = anna_state.ingest(module_dir("local"), COVER_DIR,
+                                    os.path.join(d, r["name"]), data_dir=DATA_DIR)
+            if res.get("dup"):
+                dup.append(r["name"])
+            elif res.get("ok"):
+                done.append(r["name"])
             else:
-                st = zlib.login(DATA_DIR, str(b.get("email") or "").strip(),
-                                b.get("password") or "", domain=dom)
-            log("Z-Library 已登录")
-            return {"ok": True, "zlib": st, "msg": "已登录 Z-Library"}
+                skipped.append(res.get("msg") or r["name"])
+        msg = []
+        if done:
+            msg.append("收进书架 %d 本" % len(done))
+        if dup:
+            msg.append("%d 份已经收过了" % len(dup))
+        if skipped:
+            msg.append("%d 份还是没收进来（%s）" % (len(skipped), skipped[0]))
+        if not msg:
+            msg.append("那一格里没有要收的文件")
+        return {"ok": True, "msg": "，".join(msg), "done": done,
+                "duplicated": dup, "skipped": skipped,
+                "anna": anna_state.read_state(DATA_DIR)}
 
-        if mode == "logout":
-            zlib.clear_cred(DATA_DIR)
-            log("Z-Library 已退出登录")
-            return {"ok": True, "zlib": zlib.status(DATA_DIR), "msg": "已退出 Z-Library"}
+    if mode == "clear":
+        st = anna_state.read_state(DATA_DIR)
+        st = anna_state.write_state(DATA_DIR, {"caught": 0, "imported": 0, "skipped": 0,
+                                               "seen": [], "books": [], "pending": [],
+                                               "note": "", "last_error": ""})
+        log("安娜的档案：清掉了这一路的记录（原文件与已入库的书都没动）")
+        return {"ok": True, "msg": "记录已清空，书架上的书一个没动", "anna": st}
 
-        if mode == "domain":
-            # 只改「下次往哪个域名打」，不动令牌 —— 换域名后原来的令牌多半还有效。
-            st = zlib.set_domain(DATA_DIR, str(b.get("domain") or "").strip())
-            log("Z-Library 镜像域名改为 %s" % st.get("domain"))
-            return {"ok": True, "zlib": st, "msg": "已保存域名"}
+    if mode == "listing":
+        return {"ok": True, "files": anna_state.incoming_listing(
+            anna_state.incoming_dir(DATA_DIR), limit=30)}
 
-        if mode == "search":
-            ext = b.get("extensions")
-            if isinstance(ext, str):
-                ext = [x for x in re.split(r"[,，\s]+", ext) if x]
-            if not isinstance(ext, list) or not ext:
-                ext = list(zlib.KEEP_EXT)     # 缺省只列阅读器收得下的，免得点了下载却打不开
-            d = zlib.search(DATA_DIR, str(b.get("q") or "").strip(),
-                            page=_num(b.get("page"), 1), limit=_num(b.get("limit"), 20),
-                            extensions=ext)
-            return {"ok": True, **d}
-
-        if mode == "download":
-            book = b.get("book")
-            if not isinstance(book, dict):
-                return {"ok": False, "msg": "没有指明要下哪本书"}
-            name, blob = zlib.download(DATA_DIR, book)
-            info = book_import.import_book(
-                module_dir("local"), name, blob,
-                title=str(book.get("title") or "").strip(),
-                author=str(book.get("author") or "").strip(),
-                book_id_prefix="zlib", source="local", cover_dir=COVER_DIR)
-            log("Z-Library 下载入库：%s（%s，%d 章）"
-                % (info["title"], info["label"], info["chapters"]))
-            return {"ok": True, "book": info,
-                    "msg": "已下载《%s》并收进本地书架" % info["title"]}
-
-        return {"ok": False, "msg": "不认识这个动作"}
-    except zlib.ZlibError as e:              # 这一路的错误都带人话，原样递出去
-        return {"ok": False, "msg": str(e)}
-    except ValueError as e:                  # 收书那一层认不出格式 / 空文件之类
-        return {"ok": False, "msg": str(e)}
-    except Exception as e:
-        traceback.print_exc()
-        return {"ok": False, "msg": "没做成：%s" % str(e)[:160]}
+    return {"ok": False, "msg": "不认识这个动作"}
 
 
 def feed_do(body):
@@ -4223,6 +4241,10 @@ class Handler(BaseHTTPRequestHandler):
                 # 代码指纹：让启动器、MCP 适配器和界面能认出「端口上那个进程
                 # 是不是手上这份代码」，光比版本号比不出来（改代码不改号）
                 "code": CODE_HASH,
+                # 磁盘上那份代码此刻的指纹。这两个值不相等 = 本机跑的是改之前那一进程，
+                # 新入口与新路由还没进内存 —— 界面靠这一对比才敢说「你该换班了」，
+                # 不然它只会看见两个一样的版本号，把「左侧少一格」当成界面自己的毛病。
+                "code_disk": disk_code_fingerprint(),
                 "weread": {"key_set": bool(weread_key()),
                            "key_tail": weread_key()[-4:] if weread_key() else ""},
                 "flomo": {"url_set": bool(load_cfg().get("flomo_url")),
@@ -4255,9 +4277,9 @@ class Handler(BaseHTTPRequestHandler):
                 "video": {"available": video_avail(),
                           "asr": (load_cfg().get("asr_engine") or "auto"),
                           "lang": (load_cfg().get("asr_lang") or "")},
-                # Z-Library 这一路：状态是纯本地的（读凭据文件，不发一次请求），
-                # 所以能塞进每 2.6s 一次的轮询里。余量（下载次数）要联网，走 /api/zlib。
-                "zlib": zlib.status(DATA_DIR),
+                # 安娜的档案这一路：状态是纯本地的一份小 json（窗口那头写、这儿读），
+                # 所以塞得进每 2.6s 一次的轮询；真正的浏览与下载都在窗口进程里。
+                "anna": anna_state.read_state(DATA_DIR),
             })
 
         if path == "/api/feed":
@@ -5150,10 +5172,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/video":
             return self._json(video_do(body))
 
-        if u.path == "/api/zlib":
-            # Z-Library 这一路（登录 / 搜书 / 下载入库）。下载那一步是唯一的写盘动作，
-            # 落进「本地书架」，和用户自己拖文件进来走同一条导入路。
-            return self._json(zlib_do(body))
+        if u.path == "/api/anna":
+            # 安娜的档案这一路的「按键」：搜书口令 / 镜像域名 / 补收 / 清账。
+            # 窗口本身是任务（anna.open），走 /api/task；这儿只管本机那一份小账。
+            return self._json(anna_do(body))
 
         if u.path == "/api/mynotes":
             # 存这本书的笔记。落盘后把「服务端认得的版本」回给前端 —— id 和时间戳
@@ -5403,6 +5425,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "login":
             ok, msg = start_task("login", [py(), script("login.py")])
+            return self._json({"ok": ok, "msg": msg})
+
+        if action == "anna.open":
+            # 工具自己开一个可见的浏览器窗口停在安娜的档案上：用户在窗口里搜、点下载，
+            # 脚本把下载接住转成书进「本地书架」，界面靠状态轮询看见进度。和微信读书扫码
+            # 同一套路 —— 页面归浏览器管，工具只负责接文件，不代抓、不代填任何东西。
+            # 窗口开着会占住任务槽（一次只跑一个任务），界面那一行要说明这件事。
+            ok, msg = start_task("anna_browser", [py(), script("anna_browser.py")],
+                                 env_extra=task_env("local"))
             return self._json({"ok": ok, "msg": msg})
 
         if action == "export":
