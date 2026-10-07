@@ -32,6 +32,23 @@ TOP_RGB = (0.294, 0.576, 0.949)           # #4b93f2
 BOT_RGB = (0.145, 0.408, 0.800)           # #2568cc
 
 
+def gradient(stops):
+    """按色标（(r,g,b,a) 的序列）造一条渐变，位置平均分。
+
+    为什么不用 CGGradientCreateWithColorComponents：那条路的颜色分量是一个 C 数组
+    （`const CGFloat *`），PyObjC 拿到的却是一个 Python 元组 —— 它并不保证把元组
+    按浮点数组递过去。实测同一段代码在一台机器上前后两次就画出了不同的东西：一次
+    是想要的那条蓝渐变（应用图标的 icns 就是这么来的），一次整条渐变什么都没画
+    （背景全透明）、还有一次背景是一层花绿的垃圾字节。也就是说图标长什么样，之前
+    是靠运气的。CGColor 数组这条路有明确的对象类型可以映射，实测每次都一样。
+    """
+    cs = Quartz.CGColorSpaceCreateDeviceRGB()
+    colors = [Quartz.CGColorCreateGenericRGB(*c) for c in stops]
+    arr = Quartz.CFArrayCreate(None, colors, len(colors), None)
+    locs = tuple(i / float(len(stops) - 1) for i in range(len(stops)))
+    return Quartz.CGGradientCreateWithColors(cs, arr, locs)
+
+
 def draw(size):
     """画一张 size×size 的图，返回 CGImage。"""
     cs = Quartz.CGColorSpaceCreateDeviceRGB()
@@ -47,8 +64,7 @@ def draw(size):
     Quartz.CGContextSaveGState(ctx)
     Quartz.CGContextAddPath(ctx, squircle)
     Quartz.CGContextClip(ctx)
-    grad = Quartz.CGGradientCreateWithColorComponents(
-        cs, TOP_RGB + (1.0,) + BOT_RGB + (1.0,), (0.0, 1.0), 2)
+    grad = gradient([TOP_RGB + (1.0,), BOT_RGB + (1.0,)])
     Quartz.CGContextDrawLinearGradient(
         ctx, grad,
         Quartz.CGPointMake(rect.origin.x, rect.origin.y + rect.size.height),
@@ -56,8 +72,7 @@ def draw(size):
         0)
 
     # 顶部一层很淡的高光，不然纯渐变会显得平
-    gloss = Quartz.CGGradientCreateWithColorComponents(
-        cs, (1.0, 1.0, 1.0, 0.20) + (1.0, 1.0, 1.0, 0.0), (0.0, 1.0), 2)
+    gloss = gradient([(1.0, 1.0, 1.0, 0.20), (1.0, 1.0, 1.0, 0.0)])
     Quartz.CGContextDrawLinearGradient(
         ctx, gloss,
         Quartz.CGPointMake(rect.origin.x, rect.origin.y + rect.size.height),
