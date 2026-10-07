@@ -4,8 +4,8 @@
 这个模块删的是几百 MB 到 1.6GB，删错了没有回收站，所以测试的重点不是「删得掉」，
 而是「删不掉不该删的」：
   · 书（GUIZANG_BOOKS）—— 用户的东西，一个字都不许动
-  · 别人家的模型（HF 缓存里同一个目录下还有别的仓库）
-  · 别人家的浏览器（共享缓存里的 firefox）
+  · 别人家的浏览器（共享缓存里的 firefox）—— 1.0.8 起转写不再下本地模型，
+    HF 缓存整个退出清理范围，所以那底下连自己那份都不许碰（这里连带钉住）
   · 数据目录本身 / 仓库根（源码直接跑时这俩是同一个目录，删了就是把仓库清了）
 全程在临时沙盒里跑，不碰真实的 cache / 书库 / HF 缓存 / playwright 缓存。
 """
@@ -88,9 +88,6 @@ def main():
     chk("试算：ffmpeg 那份在组件组里",
         any(i["key"] == "ffmpeg" and i["exist"] for i in groups["components"]["items"]),
         [i["key"] for i in groups["components"]["items"]])
-    chk("试算：转写模型也在组件组里",
-        any(i["key"].startswith("model-") and i["exist"] for i in groups["components"]["items"]),
-        [i["key"] for i in groups["components"]["items"]])
     chk("试算：Chromium 在、firefox 不在（共享缓存里只挑自己的）",
         any("chromium-1228" in i["key"] for i in groups["components"]["items"])
         and not any("firefox" in i["key"] for i in groups["components"]["items"]),
@@ -101,8 +98,11 @@ def main():
          "data-cache-anna.json", "data-cache-anna_cmd.json"} <= {i["key"] for i in groups["data"]["items"]},
         [i["key"] for i in groups["data"]["items"]])
     chk("试算不动任何东西（cache 大小没变）", cl._size(DATA / "cache") == before)
-    chk("试算：别家的模型不在清单里",
-        not any("Mapika" in i["path"] for g in p["groups"] for i in g["items"]))
+    # 1.0.8 起转写不再下本地模型，HF 缓存整个退出清理范围 —— 所以那条路径底下
+    # 一份文件都不该出现在清单里（自己那份也好、别人家的仓库也好）。
+    chk("试算：HF 缓存一份都不在清单里（模型已不归清理管）",
+        not any(str(HF) in i["path"] for g in p["groups"] for i in g["items"]),
+        [i["path"] for g in p["groups"] for i in g["items"] if str(HF) in i["path"]])
 
     # ── 3. 清数据：只清数据，组件与书都留着 ──────────────────────
     r = cl.run("data")
@@ -119,10 +119,9 @@ def main():
     chk("清数据：书一个字没动", (BOOKS / "某本书.md").read_text() == "这是用户的书")
     chk("清数据：虚拟环境还留着（那是「卸载组件」的事）", (DATA / ".venv").is_dir())
     chk("清数据：ffmpeg 还留着", (DATA / "cache" / "tools" / "ffmpeg").exists())
-    chk("清数据：转写模型还留着",
-        (HF / "models--mlx-community--whisper-large-v3-turbo" / "model.safetensors").exists())
-    chk("清数据：别家的模型没被误伤",
-        (HF / "models--Mapika--decider-2b" / "m.bin").exists())
+    chk("清数据：HF 缓存一个字没动（模型已经不归清理管了）",
+        (HF / "models--mlx-community--whisper-large-v3-turbo" / "model.safetensors").exists()
+        and (HF / "models--Mapika--decider-2b" / "m.bin").exists())
     chk("清数据：Chromium 没被误伤", (PW / "chromium-1228" / "chrome").exists())
 
     # ── 4. 卸组件：只卸组件，书还是不动 ──────────────────────────
@@ -131,11 +130,10 @@ def main():
         {k: r2[k] for k in ("ok", "freed", "errors")})
     chk("卸组件：虚拟环境没了", not (DATA / ".venv").exists())
     chk("卸组件：ffmpeg 那份没了", not (DATA / "cache" / "tools").exists())
-    chk("卸组件：转写模型没了",
-        not (HF / "models--mlx-community--whisper-large-v3-turbo").exists())
     chk("卸组件：Chromium 没了", not (PW / "chromium-1228").exists())
-    chk("卸组件：别家的模型还在（只删自己下的那几个仓库）",
-        (HF / "models--Mapika--decider-2b" / "m.bin").exists())
+    chk("卸组件：HF 缓存还是一个字没动（模型不归我们管）",
+        (HF / "models--mlx-community--whisper-large-v3-turbo" / "model.safetensors").exists()
+        and (HF / "models--Mapika--decider-2b" / "m.bin").exists())
     chk("卸组件：别家的浏览器还在（共享缓存不是我们的）",
         (PW / "firefox-1466" / "ff").exists())
     chk("卸组件：书依然一个字没动", (BOOKS / "某本书.md").read_text() == "这是用户的书")

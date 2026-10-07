@@ -569,7 +569,12 @@ const tools = {
     const v = s.video || {};
     if (v.available) {
       const a = v.available;
-      const asr = (a.asr || {}).local ? "本地语音识别就绪" : ((a.asr || {}).cloud ? "只能走云端语音识别" : "没有可用语音识别");
+      // a.asr.cloud 只是「有这条路」的能力位（转写云化后恒真），拿它当「配好了」就是给
+      // Agent 亮假绿灯 —— Agent 以为能转，发起任务才失败。真要报的是用户填没填地址。
+      const cfgA = v.asr || {};
+      const asr = (cfgA.url || "").trim()
+        ? `云端语音识别已配置${cfgA.key_set ? "（Key 尾号 " + cfgA.key_tail + "）" : ""}`
+        : "云端语音识别没填（转写只走云端，去「设置 · 视频转写」填接口地址与 Key）";
       lines.push(`视频转笔记：${a.ytdlp ? "下载器就绪" : "缺下载器"} · ${a.ffmpeg ? "ffmpeg 就绪" : "缺 ffmpeg"} · ${asr} · 大模型${a.llm ? "已配置" : "未配置（可只转写）"}`);
     }
     lines.push(`存放位置：${s.out}`);
@@ -1018,11 +1023,15 @@ const tools = {
     await ensureServer();
     const d = await api("/api/video?mode=status");
     const a = d.available || {};
+    const asr = d.asr || {};
+    // 转写 1.0.8 起只走云端，所以这一盏灯问的不是「引擎装没装」，而是「地址填没填」——
+    // 没填就照实说没填，别亮假绿灯（本地那套引擎与权重已经整体移除）。
+    const asrOk = !!(asr.url || "").trim();
     const out = ["视频转笔记依赖四样东西，缺哪样都会如实告诉你：",
       `- 下载器 yt-dlp：${a.ytdlp ? "就绪" : "缺（设置里点「补齐组件」）"}`,
-      `- ffmpeg（抽音轨/转码）：${a.ffmpeg ? "就绪" : "缺（点「装组件」让归藏自己下一份）"}`,
-      `- 本地语音识别：${(a.asr || {}).local ? "就绪（" + (a.engines || []).join(" / ") + "）" : "没装 mlx-whisper / faster-whisper"}`,
-      `- 云端语音识别：${(a.asr || {}).cloud ? "可用（需在设置里填 Key）" : "没配"}`,
+      `- ffmpeg（抽音轨、音频过大时切段）：${a.ffmpeg ? "就绪" : "缺（点「装组件」让归藏自己下一份）"}`,
+      `- 云端语音识别：${asrOk ? "已配置" + (asr.key_set ? "（Key 尾号 " + asr.key_tail + "）" : "")
+        : "没填 —— 转写只走云端，去「设置 · 视频转写」填接口地址与 Key"}`,
       `- 大模型（写摘要/笔记/导图）：${a.llm ? "已配置" : "没配 —— 没配也能转写，只是没有 AI 摘要与导图"}`,
     ];
     return out.join("\n");
@@ -1042,7 +1051,7 @@ const tools = {
     return out.join("\n");
   },
 
-  async video_to_shelf({ url, engine, language }) {
+  async video_to_shelf({ url, engine, language, cloud_url, cloud_key, cloud_model }) {
     await ensureServer();
     const s = await getState();
     if (s.task && s.task.running) {
@@ -1052,7 +1061,14 @@ const tools = {
     const avail = (s.video && s.video.available) || (await api("/api/video?mode=status")).available || {};
     if (!avail.ytdlp) throw new Error("还没装下载器 yt-dlp，先在界面设置里点「补齐组件」");
     const body = { act: "start", url: String(url || "").trim() };
-    if (engine) body.asr = { engine: String(engine) };
+    // 转写只走云端：引擎固定 cloud，地址与 Key 默认取设置里那份；这里给的 cloud_*
+    // 只是这一次的临时覆盖。三项都没带头不算错，后端会用设置里的（缺了会回人话）。
+    body.asr = { engine: String(engine || "cloud") };
+    const cloud = {};
+    if (cloud_url) cloud.url = String(cloud_url);
+    if (cloud_key) cloud.key = String(cloud_key);
+    if (cloud_model) cloud.model = String(cloud_model);
+    if (Object.keys(cloud).length) body.asr.cloud = cloud;
     if (language) body.language = String(language);
     const r = await api("/api/video", { method: "POST", body });
     if (!r.ok) throw new Error(r.msg || "这条视频没跑起来");
@@ -1908,7 +1924,7 @@ const TOOL_DEFS = [
   },
   {
     name: "video_capability",
-    description: "查「视频转笔记」这条线现在能走到哪一步：下载器、ffmpeg、本地/云端语音识别、大模型各就绪没有。用户问「能不能转视频」时先调它。",
+    description: "查「视频转笔记」这条线现在能走到哪一步：下载器、ffmpeg、云端语音识别、大模型各就绪没有。用户问「能不能转视频」时先调它。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -1928,8 +1944,11 @@ const TOOL_DEFS = [
       type: "object",
       properties: {
         url: { type: "string", description: "视频链接" },
-        engine: { type: "string", description: "转写引擎：auto（默认）/ mlx / faster / cloud" },
+        engine: { type: "string", description: "转写引擎：只走云端，固定 cloud（auto 等价）；接口地址与 Key 在设置里填" },
         language: { type: "string", description: "语言代码，如 zh、en；留空自动" },
+        cloud_url: { type: "string", description: "可选：这次临时用的云转写接口地址（覆盖设置里的）" },
+        cloud_key: { type: "string", description: "可选：这次临时用的云转写 Key（覆盖设置里的）" },
+        cloud_model: { type: "string", description: "可选：这次临时用的云转写模型名（覆盖设置里的）" },
       },
       required: ["url"],
       additionalProperties: false,

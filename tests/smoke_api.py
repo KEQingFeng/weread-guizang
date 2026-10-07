@@ -16,6 +16,8 @@ flomo 导入包没反应）都不是界面缺按钮，也不是后端缺实现 �
 """
 import atexit
 import base64
+import csv
+import io
 import json
 import os
 import pathlib
@@ -221,6 +223,43 @@ chk("flomo 空文件要说没有", "/api/flomo/notes", {"act": "import", "data":
 chk("flomo 坏文件要说没有", "/api/flomo/notes",
     {"act": "import", "name": "x.zip", "data": base64.b64encode(b"not a zip").decode()},
     200, False)
+
+print()
+print("── 划线笔记导出 CSV（勾选范围 → flomo 导入格式）───────────")
+# 「导出 CSV」那颗钮在划线笔记那一屏，而那一屏要真 Key 才进得去（沙盒里没有），
+# 所以把这一条搬到接口层真跑一遍 —— 这里验的正是最容易假成功的那一段：回了 ok，
+# 文件到底写没写下去、写下去的字节对不对。只测落盘，不看界面文案（那归 check_notes_csv）。
+_rows_in = [{"text": '第一条：逗号, 和引号"x"', "at": 1756864800},
+            {"text": "第二条\n中间有换行", "at": 0}]
+cd = json.loads(chk("notes_csv 导得出", "/api/notes_csv",
+                    {"title": "冒烟·测试书", "items": _rows_in}, 200, True,
+                    must=["n", "name", "dir"]))
+note(cd.get("n") == 2, "notes_csv 回执条数对得上", cd.get("n"))
+_csvp = os.path.join(cd.get("dir") or "", cd.get("name") or "")
+try:
+    with open(_csvp, "rb") as f:
+        _raw = f.read()
+except Exception as e:
+    _raw = b""
+    print("     （读不到导出文件：%s）" % str(e)[:80])
+note(_raw[:3] == b"\xef\xbb\xbf", "落盘的 CSV 带 UTF-8 BOM", _raw[:3])
+note(b"\r\n" in _raw and b"\n" not in _raw.replace(b"\r\n", b""),
+     "落盘的 CSV 每行以 CRLF 收尾")
+note(_raw[3:3 + len("content,created_at")] == b"content,created_at",
+     "落盘的 CSV 表头是 content,created_at", _raw[3:25])
+_rb = list(csv.reader(io.StringIO(_raw.decode("utf-8-sig"))))
+note(len(_rb) == 3 and _rb[0] == ["content", "created_at"], "解析回来两行数据", _rb[:1])
+note(_rb[1][1] == "2025-09-03 10:00:00" and _rb[2][1] == "",
+     "时间列按 YYYY-MM-DD HH:MM:SS 写、空时间留空", [_r[1] for _r in _rb[1:]])
+note("逗号" in _rb[1][0] and '"x"' in _rb[1][0] and "换行" in _rb[2][0],
+     "逗号 / 引号 / 换行都原样保住（转义对了）", [_r[0] for _r in _rb[1:]])
+chk("notes_csv 空选要说没有", "/api/notes_csv", {"title": "x", "items": []}, 200, False)
+chk("notes_csv 全是空条目（滤完就没）也要说没有", "/api/notes_csv",
+    {"title": "x", "items": [{"at": 1}, {"text": "   "}]}, 200, False)
+_c2 = json.loads(chk("notes_csv 连导两次", "/api/notes_csv",
+                     {"title": "冒烟·测试书", "items": _rows_in}, 200, True))
+note(_c2.get("name") != cd.get("name"), "同名再导不覆盖，自动加了序号",
+     (cd.get("name"), _c2.get("name")))
 
 print()
 print("── 安全的 POST 动作（跳过会联网 / 删库 / 起长任务的）──────")

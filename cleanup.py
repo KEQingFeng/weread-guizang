@@ -3,8 +3,8 @@
 
 两件事分开，因为它们是两种意图：
 
-  卸载组件   —— 为了让这软件跑起来而装的东西：虚拟环境（转写引擎在里面）、
-                自己下的那份 ffmpeg、转写模型权重、取书用的 Chromium。
+  卸载组件   —— 为了让这软件跑起来而装的东西：虚拟环境（依赖在里面）、
+                自己下的那份 ffmpeg、取书用的 Chromium。
   清除数据   —— 它自己攒下来的东西：登录态、书架清单、设置、阅读时长、
                 笔记索引、订阅条目、剪藏、封面、下载中间件、临时音频。
 
@@ -111,17 +111,9 @@ def _safe_to_remove(path):
 def component_items():
     """为了让这软件跑起来而装的东西。每一项都是 (key, 标签, 路径或动作)。"""
     items = [
-        ("venv", "虚拟环境（转写引擎与依赖都在里面）", pc.venv_dir(REPO)),
+        ("venv", "虚拟环境（依赖都在里面）", pc.venv_dir(REPO)),
         ("ffmpeg", "自己下的那份 ffmpeg / ffprobe", os.path.join(cache_dir(), "tools")),
     ]
-    # 转写模型的权重：只认我们自己会下那两个仓库，别去动用户别的模型
-    try:
-        import media_setup as ms
-        for key in ms.ENGINES:
-            items.append(("model-" + key, "转写模型 %s" % ms.ENGINES[key]["model"],
-                          ms.model_dir(key)))
-    except Exception:
-        pass
     # 取书用的 Chromium：只挑归藏会用的那几个目录名，不动这个共享缓存里的别的东西
     try:
         base = pc.ms_playwright_dir()

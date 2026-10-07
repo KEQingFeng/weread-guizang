@@ -3382,13 +3382,19 @@
     <section class="popcat" data-cat="media">
       <div class="sechd">语音转文字（「视频转笔记」用）</div>
       <div class="row">
-        <span class="k">引擎</span>
-        <select class="deed" id="asrEngine" style="flex:1;min-width:0;padding:0 6px">
-          <option value="auto">自动选择（推荐）</option>
-          <option value="mlx">mlx-whisper · Apple 芯片最快</option>
-          <option value="faster">faster-whisper · CPU 通用</option>
-          <option value="cloud">云端转写 · 需自行配置接口</option>
-        </select>
+        <span class="k">接口地址</span>
+        <input id="asrUrl" type="text" spellcheck="false" autocomplete="off" placeholder="兼容 OpenAI 的语音转写接口，如 https://api.openai.com/v1"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">API Key</span>
+        <input id="asrKey" type="password" spellcheck="false" autocomplete="off" placeholder="留空＝不改（已保存的不会被清掉）"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">模型</span>
+        <input id="asrModel" type="text" spellcheck="false" autocomplete="off" placeholder="留空＝whisper-1"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
       </div>
       <div class="row">
         <span class="k">语言</span>
@@ -3401,20 +3407,14 @@
         <span class="grow"></span>
         <button class="deed" id="asrSave">保存</button>
       </div>
-      <div class="hint" id="asrhint">「自动」的选择顺序：Apple 芯片优先使用 mlx-whisper（速度最快，且不依赖 ffmpeg），其次 faster-whisper，均不可用时回退到云端。指定的引擎未安装时将直接报错并说明原因，不会自动改用其他引擎。</div>
+      <div class="hint" id="asrhint">转写只走云端，归藏不内置任何厂商：填上你自己的接口地址与密钥即可。地址写到 /v1 为止也行，会自动补成 /v1/audio/transcriptions。密钥仅保存在本机，不显示在界面中。没配也能下载视频，只是转录不了。</div>
       <div class="row">
         <span class="k">组件</span>
         <span class="v" id="v-vtool">—</span>
         <span class="grow"></span>
         <button class="deed" id="vfFix">装 ffmpeg</button>
       </div>
-      <div class="row">
-        <span class="k">转写模型</span>
-        <span class="v" id="v-media">—</span>
-        <span class="grow"></span>
-        <button class="deed" id="vModelFix">准备</button>
-      </div>
-      <div class="hint">转写引擎在安装归藏时一并配置。转写模型（约几百 MB 至 1.6 GB）在首次进入后于后台自动下载，此处显示进度，下载完成后即可转写。ffmpeg 按需下载，存放于归藏的数据目录，不修改系统环境。云端转写需在「小 Agent」中配置接口地址与模型。迁移到其他机器时，复制整个数据目录即可。</div>
+      <div class="hint">ffmpeg 负责抽音轨，按需下载一份放在归藏的数据目录里，不修改系统环境。迁移到其他机器时，复制整个数据目录即可。</div>
     </section>
 
     <section class="popcat" data-cat="sync">
@@ -3510,8 +3510,8 @@
         <span class="grow"></span>
         <button class="deed" id="clComp">卸载组件</button>
       </div>
-      <div class="hint">卸载的是为运行而安装的组件：虚拟环境（转写引擎安装在其中）、下载的 ffmpeg、
-        转写模型（约几百 MB 至 1.6 GB）以及取书所用的 Chromium。卸载后如需继续使用，
+      <div class="hint">卸载的是为运行而安装的组件：虚拟环境（依赖安装在其中）、下载的 ffmpeg
+        以及取书所用的 Chromium。卸载后如需继续使用，
         在「账号」页点击「修复」即可重新安装，无需重装整个软件。</div>
       <div class="row">
         <span class="k">本地数据</span>
@@ -4521,12 +4521,12 @@ let sideFootStamp = '';
    没重启。2026-10-07 用户报「左侧没有安娜的档案」就是它：导航那几格是后端 NAV_ITEMS
    给的，进程还是上一版，界面再怎么新也铺不出这一格，而两个版本号看着完全一样。
    后端因此多报一个 code_disk（磁盘上此刻的指纹），和它自己的 code 一比就露馅。 */
-const GUIZANG_PAGE = "1.0.7";
+const GUIZANG_PAGE = "1.0.8";
 const GZ = {back: "", code: "", disk: "", drift: false, stale: false,
             hid: false, swapping: false, why: "", prof: ""};
 
 function gzStale(what) {
-  // 两版号一样却说「本机后端是 1.0.7，界面是 1.0.7」是句疯话，得先认这一种。
+  // 两版号一样却说「本机后端是 1.0.8，界面是 1.0.8」是句疯话，得先认这一种。
   if (GZ.drift && GZ.back === GUIZANG_PAGE) {
     return '本机跑着的后端比磁盘上那份旧（改过代码没重启）：' + (what || '这个功能') +
       '它那边还没有，所以左侧那一格铺不出来。点「换新后端」就补上了。';
@@ -10672,8 +10672,6 @@ const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHea
 const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
   summary: '整理摘要', note: '写知识笔记', mindmap: '画思维导图',
   save: '落成一本书', done: '完成'};
-const VID_ENGINES = [['auto', '自动挑引擎'], ['mlx', 'mlx-whisper（Apple 芯片最快）'],
-  ['faster', 'faster-whisper（CPU）'], ['cloud', '云端转写']];
 
 async function videoGet(qs) {
   try { return await (await fetch('/api/video?' + qs)).json(); }
@@ -10703,24 +10701,14 @@ function paintVideoCap(v) {
   if (!VIDEO.cap) return;
   v = v || {};
   const a = v.available || v || {};
-  const st = v.setup || a.setup || {};
-  const asr = a.asr || {};
-  const loc = !!asr.local, cloud = !!asr.cloud;
-  // 转写模型那盏灯：引擎没装先报缺引擎；引擎有了但权重没下齐，说清是「准备中」（后台
-  // 正在拉，百分比会跳）；只有权重真在缓存里了才亮绿灯。假装就绪比不亮更坏 —— 用户会
-  // 一直等一个永远不会来的转写结果。
-  let modelOk = false, modelTxt = '转写模型未下载';
-  if (!st.engine_ready) modelTxt = '缺转写引擎（设置里可补）';
-  else if (st.model_ready) { modelOk = true; modelTxt = '转写模型就绪'; }
-  else if (st.busy) {
-    modelTxt = st.pct >= 0 ? `转写模型准备中 ${st.pct}%` : '转写模型准备中';
-    if (st.got) modelTxt += `（已下 ${Math.round(st.got / 1048576)}MB）`;
-  } else if (st.err) modelTxt = '转写模型没备好（设置里可重试）';
+  const cfg = v.asr || {};
+  // 转写 1.0.8 起只走云端，所以「转写那盏灯」问的不是装没装引擎，而是地址填没填。
+  // 没填就明说没填 —— 让用户自己去设置里补，比亮一盏假的绿灯好。
+  const cloudOk = !!String(cfg.url || '').trim();
   const items = [
     {ok: !!a.ytdlp, txt: a.ytdlp ? '下载器就绪' : '缺下载器 yt-dlp'},
     {ok: !!a.ffmpeg, txt: a.ffmpeg ? 'ffmpeg 就绪' : '缺 ffmpeg'},
-    {ok: loc || cloud, txt: loc ? '本地语音识别就绪' : (cloud ? '只能走云端语音识别' : '没有语音识别')},
-    {ok: modelOk, txt: modelTxt},
+    {ok: cloudOk, txt: cloudOk ? '云端转写已配置' : '云端转写未配置（设置里填地址与 Key）'},
     {ok: !!a.llm, txt: a.llm ? '大模型已配置' : '大模型未配置（可只转写）'},
   ];
   VIDEO.cap.replaceChildren(...items.map(it => {
@@ -10739,56 +10727,25 @@ function paintVideoCap(v) {
   // 弹层外的手一松，全局那个「点别处就收掉弹层」的监听会立刻把它关掉 —— 齿轮按钮靠 stopPropagation
   // 躲过这一下，这里照办，否则点「转写设置」等于什么都没发生
   nb.onclick = e => { e.stopPropagation(); setPop(true); setCat('media'); };
-  // 一颗钮按情绪换活干：缺 ffmpeg 先补 ffmpeg（它是转写的硬前置），否则补引擎/模型。
+  // 一颗钮按缺哪样换活干：ffmpeg 是转写的硬前置（抽音轨），先补它；它有、地址没填，
+  // 就带用户去填地址；都齐了这颗钮才有空回「重装 ffmpeg」这一手。
   const b = document.createElement('button');
   b.className = 'deed';
   b.style.height = '26px';
   if (!a.ffmpeg) {
     b.textContent = '装 ffmpeg';
-    b.title = 'ffmpeg 是转写的必需件。归藏按需下一份静态的放在自己的数据目录里，不动系统。';
+    b.title = 'ffmpeg 是转写的必需件（抽音轨）。归藏按需下一份静态的放在自己的数据目录里，不动系统。';
     b.onclick = () => vidEnsure(b);
-  } else if (!st.engine_ready || !st.model_ready) {
-    b.textContent = st.busy ? '正在准备…' : (!st.engine_ready ? '装转写引擎' : '下载转写模型');
-    b.disabled = !!st.busy;
-    b.title = '转写模型有几百 MB 到 1.6 GB；下的时候可以照常用别的功能，回来点一下就行。';
-    b.onclick = () => vidPrep(b);
+  } else if (!cloudOk) {
+    b.textContent = '去填接口';
+    b.title = '转写只走云端：把兼容 OpenAI 的语音转写接口地址与密钥填上就能用。';
+    b.onclick = e => { e.stopPropagation(); setPop(true); setCat('media'); };
   } else {
     b.textContent = '重装 ffmpeg';
     b.title = 'ffmpeg 已经就绪；按一下会重新下一份。';
     b.onclick = () => vidEnsure(b);
   }
   VIDEO.cap.append(g, nb, b);
-  // 正在下模型就开着轮询让百分比自己走；不忙就停下来，别拿轮询去换电。
-  if (st.busy) vidPollOn(); else vidPollOff();
-}
-
-let vidTimer = 0;
-
-function vidPollOn() { if (!vidTimer) vidTimer = setInterval(vidPollOnce, 2000); }
-function vidPollOff() { if (vidTimer) { clearInterval(vidTimer); vidTimer = 0; } }
-
-/** 转写组件的进度是后台线程在推的，界面每两秒问一次；一忙完就停。 */
-async function vidPollOnce() {
-  let r;
-  try { r = await videoPost({act: 'media_status'}); } catch (e) { return; }
-  if (!r || !r.ok) return;
-  if (!r.setup || !r.setup.busy) vidPollOff();
-  paintVideoCap({available: Object.assign({}, r.available || {}, {setup: r.setup})});
-}
-
-/** 一键补转写组件：引擎缺就装引擎，模型缺就在后台下。 */
-async function vidPrep(btn) {
-  const keep = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '正在准备…';
-  const r = await videoPost({act: 'media_all'});
-  whisper(r.msg || (r.ok ? '开始准备转写组件' : '没能开始准备'));
-  if (r.ok) {
-    vidPollOn();
-    if (r.setup) paintVideoCap({available: Object.assign({}, r.available || {}, {setup: r.setup})});
-  } else {
-    setTimeout(() => { if (document.body.contains(btn)) { btn.disabled = false; btn.textContent = keep; } }, 2500);
-  }
 }
 
 async function vidEnsure(btn) {
@@ -10850,12 +10807,20 @@ async function vidStart() {
   vidBusy = true; vidTools();
   vidProgSig = '';
   const body = {act: 'start', url};
-  // 转写偏好就在设置那一格上摆着 —— 直接读它，「看到什么就用什么」，不再存一份会走神的副本
-  const engEl = $('#asrEngine'), langEl = $('#asrLang');
-  const eng = engEl ? String(engEl.value || '') : '';
-  const lang = langEl ? String(langEl.value || '').trim() : '';
-  if (eng && eng !== 'auto') body.asr = {engine: eng};
+  // 转写偏好就在设置那一格上摆着 —— 直接读它，「看到什么就用什么」，不再存一份会走神的副本。
+  // 接口地址 / Key / 模型同理：填了就用这一份，没填就听后端从配置里拿（Key 留空＝不改）。
+  const pick = id => { const el = $(id); return el ? String(el.value || '').trim() : ''; };
+  const asr = {engine: 'cloud'};
+  const lang = pick('#asrLang');
   if (lang) body.language = lang;
+  const cu = pick('#asrUrl'), ck = pick('#asrKey'), cm = pick('#asrModel');
+  if (cu || ck || cm) {
+    asr.cloud = {};
+    if (cu) asr.cloud.url = cu;
+    if (ck) asr.cloud.key = ck;
+    if (cm) asr.cloud.model = cm;
+  }
+  body.asr = asr;
   const r = await videoPost(body);
   vidBusy = false;
   if (!r.ok) {
@@ -10959,7 +10924,7 @@ function vidFinish(r) {
 
 async function vidReloadCap() {
   const d = await videoGet('mode=status');
-  if (d.ok) paintVideoCap({available: d.available});
+  if (d.ok) paintVideoCap({available: d.available, asr: d.asr});
 }
 
 function videoBooks() {
@@ -11848,18 +11813,27 @@ function renderVideoView() {
  *  写回输入框时避开正被编辑/聚焦的那一格，免得用户正在打字被覆盖。 */
 function paintVideoCfg(v) {
   v = v || {};
-  const es = $('#asrEngine'), ls = $('#asrLang');
-  // 用户改过还没保存时，轮询不去覆盖他手上的选择（不然选了 2 秒后自己跳回去）
+  const cfg = v.asr || {};
+  const ur = $('#asrUrl'), kk = $('#asrKey'), mm = $('#asrModel'), ls = $('#asrLang');
+  // 用户改过还没保存时，不去覆盖他手上填的东西（不然填到一半自己跳回去）
   if (!asrDirty) {
-    if (es) es.value = String(v.asr || 'auto');
-    if (ls) ls.value = String(v.lang || '');
+    if (ur) ur.value = String(cfg.url || '');
+    if (mm) mm.value = String(cfg.model || '');
+    if (ls) ls.value = String(cfg.lang || '');
+    // 密钥只回「存没存」「尾号四位」，明文永远不回界面 —— 所以这个框任何时候都不填值，
+    // 只用占位符告诉用户「已经有一份了，留空就不会动它」。
+    if (kk) {
+      kk.value = '';
+      kk.placeholder = cfg.key_set
+        ? '已保存（尾号 ' + (cfg.key_tail || '') + '），留空＝不改'
+        : '留空＝不改（还没存过）';
+    }
   }
   const a = v.available;
-  if (!a) return;               // 保存回执只带 {asr, lang}，没有可用性快照就别硬编一盏灯
+  if (!a) return;               // 保存回执只带 {asr, available}，没有可用性快照就别硬编一盏灯
   const st = $('#v-asr');
   if (st) {
-    const loc = !!((a.asr || {}).local);
-    st.textContent = (loc ? '本机可转写' : '需要云端转写')
+    st.textContent = (String(cfg.url || '').trim() ? '云端转写已配置' : '云端转写未配置')
       + (a.llm ? ' · 大模型已配' : ' · 大模型未配（只转文字）');
   }
   const vt = $('#v-vtool');
@@ -11871,25 +11845,6 @@ function paintVideoCfg(v) {
   }
   const vf = $('#vfFix');
   if (vf && !vf.disabled) vf.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
-  // 转写模型那一行：说清是「在下（几成）」还是「已就绪」还是「没备好」，钮跟着改口。
-  // 变量名不能叫 st —— 上面「语音识别」那行已经占了这个名字（同一函数作用域）。
-  const vm = $('#v-media');
-  const mst = a.setup || {};
-  if (vm) {
-    if (!mst.engine_ready) vm.textContent = '缺转写引擎';
-    else if (mst.model_ready) vm.textContent = '已就绪 · ' + (mst.model || '');
-    else if (mst.busy) {
-      vm.textContent = ('正在后台下载' + (mst.pct >= 0 ? ' ' + mst.pct + '%' : ''))
-        + (mst.got ? '（已下 ' + Math.round(mst.got / 1048576) + 'MB）' : '');
-    } else if (mst.err) vm.textContent = String(mst.err).slice(0, 60);
-    else vm.textContent = '未下载';
-  }
-  const vmf = $('#vModelFix');
-  if (vmf && !vmf.disabled) {
-    vmf.textContent = mst.busy ? '准备中…' : (!mst.engine_ready ? '装转写引擎'
-      : (mst.model_ready ? '校验' : '下载'));
-    vmf.disabled = !!mst.busy;
-  }
 }
 
 /* 「安娜的档案」这一栏的状态。窗口那头负责浏览与下载，后端只读它留下的一份小账，
@@ -12134,6 +12089,7 @@ async function openNotebook(b) {
          <span class="grow"></span>
          <input class="tag" id="nbTag" value="#读书笔记" placeholder="#标签">
          <button class="deed" id="nbFlomo" style="height:30px">导入 flomo</button>
+         <button class="deed" id="nbCsv" style="height:30px">导出 CSV</button>
        </div>`);
   const list = body;
   if (fresh) {
@@ -12142,6 +12098,7 @@ async function openNotebook(b) {
     p.querySelector('#nbAll').onclick = () => { nbItems.forEach((_, i) => nbSel.add(i)); paintNotes(); };
     p.querySelector('#nbNone').onclick = () => { nbSel.clear(); paintNotes(); };
     p.querySelector('#nbFlomo').onclick = () => importToFlomo(nbTitle);
+    p.querySelector('#nbCsv').onclick = () => exportNotesCsv(nbTitle);
   } else {
     setHeadTitle('notebook', title);
     list.replaceChildren();
@@ -12157,12 +12114,12 @@ async function openNotebook(b) {
     ]);
     const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
     for (const x of (mk.updated || [])) {
-      if (x.markText) nbItems.push({text: x.markText, src: '划线', when: when(x.createTime)});
+      if (x.markText) nbItems.push({text: x.markText, src: '划线', when: when(x.createTime), at: x.createTime || 0});
     }
     for (const x of (rv.reviews || [])) {
       const r = x.review || x;
       const t = r.content || r.abstract || '';
-      if (t) nbItems.push({text: t, src: '想法', when: when(r.createTime)});
+      if (t) nbItems.push({text: t, src: '想法', when: when(r.createTime), at: r.createTime || 0});
     }
   } catch (e) {
     list.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
@@ -12214,6 +12171,18 @@ function paintNbCnt() {
   if (el) el.textContent = `共 ${nbItems.length} 条 · 已选 ${nbSel.size} 条`;
 }
 
+/** 一条划线收成的笔记正文：原文 + 出处 + 标签。
+ *  导入 flomo（webhook）与导出 CSV 都走它 —— 两条路的笔记长得一模一样，
+ *  否则用户拿 CSV 导进去的和直接推的会是两种样子。 */
+function nbFlomoText(it, title, tag) {
+  return [it.text, '', `《${title}》`, tag].filter(Boolean).join('\n');
+}
+
+/** 当前勾选的那些条目，按列表原顺序排好（勾选顺序不重要，书的顺序才重要）。 */
+function nbPicked() {
+  return [...nbSel].sort((a, b) => a - b).map(i => nbItems[i]);
+}
+
 async function importToFlomo(title) {
   if (!flomoSet) {
     whisper('先在左上角设置里填 flomo 地址');
@@ -12222,15 +12191,25 @@ async function importToFlomo(title) {
   }
   if (!nbSel.size) { whisper('先勾选要导入的条目'); return; }
   const tag = ($('#nbTag').value || '').trim();
-  const items = [...nbSel].sort((a, b) => a - b).map(i => {
-    const it = nbItems[i];
-    return [it.text, '', `《${title}》`, tag].filter(Boolean).join('\n');
-  });
+  const items = nbPicked().map(it => nbFlomoText(it, title, tag));
   whisper(`正在导入 ${items.length} 条…`);
   // 原来这里裸 fetch + .json()：后端是旧进程时回的是 404 的 HTML，抛出去没人接，
   // 用户看到的就是「点了没反应」—— 正是这一轮报的那类毛病。
   const r = await gzApi('/api/flomo', {items}, 60000);
   whisper(r.msg || (r.ok ? '已导入' : '导入失败'));
+}
+
+/** 「导出 CSV」：把勾选的条目按 flomo 网页版导入的模板落成一份文件。
+ *  直连 flomo 的 webhook 要 PRO，导入 CSV 谁都能用 —— 没开会员的人走这条路。 */
+async function exportNotesCsv(title) {
+  if (!nbSel.size) { whisper('先勾选要导出的条目'); return; }
+  const tag = ($('#nbTag').value || '').trim();
+  const items = nbPicked().map(it => ({text: nbFlomoText(it, title, tag), at: it.at || 0}));
+  whisper(`正在导出 ${items.length} 条…`);
+  const r = await gzApi('/api/notes_csv', {title, items}, 30000);
+  if (!r.ok) { whisper(r.msg || '导出失败'); return; }
+  whisperAct(`${r.msg || '已导出'} · ${r.name || 'CSV'}`, '打开文件夹',
+             () => post('openexports', {dir: r.dir || ''}));
 }
 
 /** innerHTML 赋值会重建整棵子树并重播入场动画。内容没变就别写 —— 
@@ -17744,16 +17723,29 @@ $('#agenttest').onclick = async () => {
   }
 };
 
-/* 设置里的「视频转写」：两项偏好存后端，ffmpeg 按需下（和视频那屏同一个动作） */
-$('#asrEngine').addEventListener('change', () => { asrDirty = true; });
-$('#asrLang').addEventListener('input', () => { asrDirty = true; });
+/* 设置里的「视频转写」：云端接口的四项存后端（引擎固定 cloud，没有本地模型这一说），
+   ffmpeg 按需下（和视频那屏同一个动作） */
+const asrFieldIds = ['asrUrl', 'asrKey', 'asrModel', 'asrLang'];
+asrFieldIds.forEach(id => {
+  const el = $('#' + id);
+  if (el) el.addEventListener('input', () => { asrDirty = true; });
+});
 $('#asrSave').onclick = async () => {
-  const r = await post('media.save', {engine: $('#asrEngine').value, lang: $('#asrLang').value.trim()});
+  const val = id => { const el = $('#' + id); return el ? String(el.value || '').trim() : ''; };
+  const payload = {engine: 'cloud', lang: val('asrLang'), url: val('asrUrl'),
+                   model: val('asrModel')};
+  // 密钥框永远不填值（明文不回界面），所以它空着的意思是「不改」，而不是「清掉」——
+  // 空着就干脆不发这个键，后端那边 undefined 与空串是两种意思。
+  const k = val('asrKey');
+  if (k) payload.key = k;
+  const r = await post('media.save', payload);
   whisper(r.msg || (r.ok ? '已保存' : '没存上'));
-  if (r.ok) asrDirty = false;      // 存住了就交还给轮询，之后按后端的值显示
+  if (r.ok) {
+    asrDirty = false;              // 存住了就交还给状态刷新，之后按后端的值显示
+    paintVideoCfg(r);              // 回执里带着配置视图，顺手把「已保存（尾号 xxxx）」摆出来
+  }
 };
 $('#vfFix').onclick = () => vidEnsure($('#vfFix'));
-$('#vModelFix').onclick = () => vidPrep($('#vModelFix'));
 
 /* ── 维护：卸载组件 / 清除本地数据 ─────────────────
    两件都不可逆，删的是几百 MB 到 1.6GB，所以一律两步走：先要一份「试算」（删什么、
