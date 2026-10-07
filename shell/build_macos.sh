@@ -57,7 +57,6 @@ APP_FILES=(
   person.py
   readplan.py
   ffmpeg_tool.py
-  media_setup.py
   cleanup.py
   sync.py
   board.py

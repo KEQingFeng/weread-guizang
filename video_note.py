@@ -2,9 +2,9 @@
 """视频转笔记：一条链接 → 音频 → 转写 → 结构化摘要 / 知识笔记 / 思维导图 → 一本书。
 
 为什么单独一个文件：这条线和「取书」「剪藏」「订阅」都不一样 —— 它要吃视频站点的
-音频，要跑本地 ASR（mlx-whisper / faster-whisper）或云 ASR，还要三次 LLM 调用才
-能落出一本书。塞进 clip_article 的话，那个文件「一次抓一篇网页」的假设会被整条
-音视频流水线撑破。
+音频，要跑 ASR（1.0.8 起只走云端：用户自己填接口地址、Key 和模型名），还要三次
+LLM 调用才能落出一本书。塞进 clip_article 的话，那个文件「一次抓一篇网页」的假设
+会被整条音视频流水线撑破。
 
 整条流水线跑在调用方进程里，不起后台线程、不起守护进程：界面那边照旧用子进程拉起
 （见 ui_server 的 script()），中止靠 opts 里的 should_stop 在阶段之间查一次。
@@ -54,7 +54,6 @@ import uuid
 import book_import
 import book_notes
 import ffmpeg_tool
-import media_setup as ms
 import platform_compat as pc
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -75,10 +74,8 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
 BILIBILI_HEADERS = {"User-Agent": UA, "Referer": "https://www.bilibili.com/"}
 
-# 模型名单一真源在 media_setup（那边还负责下它、报告它到没到），这里只取来用，
-# 免得「装的时候按 A 下、跑的时候按 B 找」这种两处各写一遍的错。
-DEFAULT_MLX_MODEL = ms.ENGINES["mlx"]["model"]
-DEFAULT_FASTER_MODEL = ms.ENGINES["faster"]["model"]        # CTranslate2 权重短名，不是 HF repo id
+# 云转写的缺省模型名：用户在设置里没填模型时用它。地址与 Key 由用户自己填，
+# 归藏不代管、不内置任何厂商（1.0.8 起本地 Whisper 已整体移除）。
 DEFAULT_CLOUD_MODEL = "whisper-1"
 DEFAULT_LANGUAGE = "zh"
 
@@ -260,36 +257,17 @@ def _agent_cfg_from_disk():
 def available():
     """这条流水线现在能走到哪一步。永远不抛 —— 界面拿它显示状态，抛了就变「点了没反应」。
 
-    asr.cloud 报的是「云转写这条路在代码里可用」（地址在 run 的 opts 里给），
-    不代表用户已经配过；llm 则看配置文件里到底填没填地址和模型。
+    1.0.8 起转写只走云端：asr 这项报的是「云转写这条路在代码里可用」，地址与 Key
+    由用户在 opts 里给，不代表已经配过；llm 则看配置文件里到底填没填地址和模型。
     """
     out = {"ytdlp": False, "ffmpeg": False,
-           "asr": {"local": False, "cloud": True}, "llm": False, "engines": []}
+           "asr": {"cloud": True}, "llm": False, "engines": ["cloud"]}
     try:
         out["ytdlp"] = _importable("yt_dlp")
     except Exception:
         pass
     try:
         out["ffmpeg"] = bool(ffmpeg_tool.status().get("found"))
-    except Exception:
-        pass
-    try:
-        engines = []
-        if _importable("mlx_whisper"):
-            engines.append("mlx")
-        if _importable("faster_whisper"):
-            engines.append("faster")
-        engines.append("cloud")
-        out["engines"] = engines
-        out["asr"]["local"] = ("mlx" in engines) or ("faster" in engines)
-    except Exception:
-        pass
-    # 引擎「装了没」与模型「下齐了没」是两件事：引擎几十 MB 随安装就位，模型要几百 MB
-    # 到 1.6GB，进门之后才在后台下。界面那几盏灯分开报，用户才知道该等什么。
-    try:
-        out["engine_ready"] = ms.engine_ready()
-        out["model"] = ms.model_id()
-        out["model_ready"] = ms.model_ready()
     except Exception:
         pass
     try:
@@ -425,8 +403,8 @@ def probe_meta(url):
 def download_audio(url, task_dir, progress=None, should_stop=None):
     """下音频到 task_dir，返回文件路径。
 
-    format 优先 m4a —— 多数 ASR 引擎（mlx / faster-whisper 的 PyAV 解码）直接吃它，
-    不需要 ffmpeg 转码，所以 ffmpeg 没装时这条线照样能跑。ffmpeg 装着就顺手告诉
+    format 优先 m4a —— 云转写的接口直接吃它，不需要 ffmpeg 转码，所以 ffmpeg 没装时
+    这条线照样能跑（只有音频大到要切段时才用得上 ffmpeg）。ffmpeg 装着就顺手告诉
     yt-dlp 它在哪，合并流时用得上。
     """
     YoutubeDL = _ydl_class()
@@ -572,72 +550,23 @@ def _as_int(value):
 
 # ─────────────────────────── 转写 ───────────────────────────
 
-def _is_apple_silicon():
-    if not pc.IS_MAC:
-        return False
-    try:
-        return os.uname().machine in ("arm64", "aarch64")
-    except Exception:
-        return False
-
-
 def pick_engine(want, asr_cfg):
-    """选转写引擎。
+    """选转写引擎。1.0.8 起归藏只有云端这一条路（本地 Whisper 已整体移除）。
 
-    auto 的偏好顺序：Apple 芯片且 mlx-whisper 能导入 → mlx（最快，且吃 m4a 不用
-    ffmpeg）；否则 faster-whisper（CPU int8，哪台机器都能跑）；再否则云转写（用户
-    自己在 opts 里填了地址才算数）。用户点名要的那个装不上时直接报人话，不偷偷换 ——
-    「我要用大模型」被静默降级成小模型，比报错更让人火大。
+    want 认 auto / cloud，两者等价 —— 都是走云端；地址在 opts 的 asr.cloud.url 里给。
+    没填地址就直接报人话，别让用户对着一个点了没反应的按钮猜。其余字面量（老配置
+    文件里可能还留着 mlx / faster）一律报「本地转写已移除」，不静默改道。
     """
     want = (want or "auto").strip().lower()
-    cloud_ok = bool(((asr_cfg or {}).get("cloud") or {}).get("url"))
-    if want == "auto":
-        if _is_apple_silicon() and _importable("mlx_whisper"):
-            return "mlx"
-        if _importable("faster_whisper"):
-            return "faster"
-        if cloud_ok:
-            return "cloud"
-        raise ValueError("这台机器上没找到能用的转写引擎。装一个 mlx-whisper 或 "
-                         "faster-whisper，或者把云转写的地址填上再试。")
-    if want == "mlx":
-        if not _importable("mlx_whisper"):
-            raise ValueError("点名要用 mlx-whisper，但它还没装（pip install mlx-whisper），"
-                             "或者把引擎改成 auto / faster。")
-        if not _is_apple_silicon():
-            raise ValueError("mlx-whisper 只在 Apple 芯片上跑得起来，这台机器用不了，"
-                             "把引擎改成 faster 或 auto。")
-        return "mlx"
-    if want == "faster":
-        if not _importable("faster_whisper"):
-            raise ValueError("点名要用 faster-whisper，但它还没装（pip install faster-whisper）。")
-        return "faster"
-    if want == "cloud":
-        if not cloud_ok:
-            raise ValueError("要用云转写，先在设置里把地址（和 Key）填上。")
-        return "cloud"
-    raise ValueError("转写引擎只认 auto / mlx / faster / cloud 这几种")
-
-
-def _asr_model_error(err, model):
-    """模型拉不下来是最常见的一次性错误，光甩一句 HTTP 报错用户没法自救。"""
-    text = str(err)
-    low = text.lower()
-    looks_download = any(k in low for k in
-                         ("max retries", "connection", "timed out", "ssl", "huggingface",
-                          "can't load", "cannot load", "failed to download", "resolve",
-                          "offline", "404", "connect"))
-    if looks_download and not (os.environ.get("HF_ENDPOINT") or "").strip():
-        return ValueError(
-            "转写模型没能下下来（%s）。模型是第一次用时从 Hugging Face 取的："
-            "挂个代理再试，或者设 HF_ENDPOINT=https://hf-mirror.com 走国内镜像，"
-            "也可以先在别处下好、用 asr.model 指到本地目录。"
-            % _clip(text, 120))
-    return ValueError("转写出错了：%s" % _clip(text, 160))
+    if want not in ("auto", "cloud"):
+        raise ValueError("归藏现在只走云端转写，本地模型已移除 —— 把引擎改成 cloud 再试。")
+    if not bool(((asr_cfg or {}).get("cloud") or {}).get("url")):
+        raise ValueError("云转写还没配地址 —— 在设置里把接口地址（和 Key）填上再试。")
+    return "cloud"
 
 
 def _pack_result(result):
-    """把 mlx/faster/云三家的返回收敛成 {"text", "segments":[{start,end,text}]}。"""
+    """把云转写回的 JSON 收敛成 {"text", "segments":[{start,end,text}]}。"""
     segments = []
     for item in (result or {}).get("segments") or []:
         text = str((item or {}).get("text") or "").strip()
@@ -655,69 +584,25 @@ def _pack_result(result):
 def transcribe(audio_path, asr_cfg, progress=None, should_stop=None, resume=False):
     """音频 → 文字。返回 {"text", "segments", "engine", "language"}。
 
-    这里只是分发：真正干活的是下面三个函数，自测套件把 transcribe 整个换掉就行。
+    1.0.8 起只走云端一条路：真干活的是 _transcribe_cloud，自测套件把 transcribe
+    整个换掉就行。
 
     resume=True 时，云转写的分片结果会落盘复用（见 _part_cache），重跑不再传已经转
-    好的那些段；本地引擎（mlx / faster）一次调用吃整段音频，没有分片可跳，续跑靠
-    run() 那份转写暂存。
+    好的那些段。
     """
     asr_cfg = asr_cfg or {}
     engine = pick_engine(asr_cfg.get("engine"), asr_cfg)
     model = (asr_cfg.get("model") or "").strip()
     lang = (asr_cfg.get("language") or "").strip() or DEFAULT_LANGUAGE
-    # mlx-whisper 抽音轨时 shell 的是裸 'ffmpeg'，而归藏下的那份在 cache/tools/ 里、
-    # 不在 PATH 上 —— 不补这一步，组件装好了也照样报 No such file or directory。
-    ffmpeg_tool.ensure_on_path()
-    _say(progress, "asr", 47, "开始转写（%s）" % engine)
-    if engine == "mlx":
-        out = _transcribe_mlx(audio_path, model, lang, progress)
-    elif engine == "faster":
-        out = _transcribe_faster(audio_path, model, lang, progress)
-    else:
-        out = _transcribe_cloud(audio_path, asr_cfg.get("cloud") or {}, model, lang,
-                                progress, should_stop, resume=resume)
+    _say(progress, "asr", 47, "开始转写（云端）")
+    out = _transcribe_cloud(audio_path, asr_cfg.get("cloud") or {}, model, lang,
+                            progress, should_stop, resume=resume)
     out["engine"] = engine
     out["language"] = lang
     if not out.get("text"):
         raise ValueError("这段音频里没转出文字，换一集或者换个人声清楚的视频再试")
     _say(progress, "asr", 75, "转写完成，共 %d 字" % len(out["text"]))
     return out
-
-
-def _transcribe_mlx(audio_path, model, lang, progress):
-    tool = model or DEFAULT_MLX_MODEL
-    _say(progress, "asr", 48, "正在加载转写模型（首次会自动下 %s）" % tool)
-    try:
-        import mlx_whisper
-    except Exception as e:
-        raise ValueError("没装上 mlx-whisper（pip install mlx-whisper），"
-                         "或者把引擎改成 faster。") from e
-    try:
-        result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=tool, language=lang)
-    except Exception as e:
-        raise _asr_model_error(e, tool) from e
-    _say(progress, "asr", 72, "转写完成")
-    return _pack_result(result)
-
-
-def _transcribe_faster(audio_path, model, lang, progress):
-    name = model or DEFAULT_FASTER_MODEL
-    _say(progress, "asr", 48, "正在加载转写模型 %s（CPU int8，慢慢来）" % name)
-    try:
-        from faster_whisper import WhisperModel
-    except Exception as e:
-        raise ValueError("没装上 faster-whisper（pip install faster-whisper）。") from e
-    try:
-        engine = WhisperModel(name, device="cpu", compute_type="int8")
-        raw, _info = engine.transcribe(audio_path, language=lang, vad_filter=True)
-        # 这是个生成器：必须在这里面把它跑完，出了 try 再取会丢掉异常上下文。
-        segments = [{"start": float(getattr(s, "start", 0.0) or 0.0),
-                     "end": float(getattr(s, "end", 0.0) or 0.0),
-                     "text": (getattr(s, "text", "") or "").strip()} for s in raw]
-    except Exception as e:
-        raise _asr_model_error(e, name) from e
-    _say(progress, "asr", 72, "转写完成")
-    return _pack_result({"segments": segments, "text": ""})
 
 
 def _transcriptions_url(raw):
@@ -1427,7 +1312,7 @@ def _summary_block(summary):
 def _chapter_bodies(transcript, segments, chapters):
     """把转写按章节切段。
 
-    有分段（mlx / faster 都会给）就照时间切；云转写只回整段文字时按字数均分 ——
+    有分段（云转写回了 verbose_json 时就有）就照时间切；只回整段文字时按字数均分 ——
     章节标题是 LLM 按内容给的，正文对不齐也不至于错位到看不了。
     """
     text = (transcript or "").strip()
@@ -1684,7 +1569,7 @@ def run(url, out_dir, opts, progress):
     """整条流水线：认链接 → 下音频 → 转写 → 三次 LLM → 落成一本书。
 
     opts 认这些键：
-      asr   {"engine": "auto"|"mlx"|"faster"|"cloud", "model": str,
+      asr   {"engine": "auto"|"cloud", "model": str,
              "cloud": {"url", "key", "model"}, "language": "zh"}
       llm   {"url", "key", "model"}      —— 由调用方从 agent_cfg() 取
       page  取第几 P（B 站多 P 用；不给就认链接里的 p=，再不给就是第一 P）

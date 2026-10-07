@@ -89,8 +89,9 @@ def sweep(page, tag):
 st = api("/api/state")
 chk("state：带了 feed 段（subs / unread）",
     isinstance(st.get("feed"), dict) and "unread" in st["feed"], st.get("feed"))
-chk("state：带了 video 段（available / asr / lang）",
-    isinstance(st.get("video"), dict) and isinstance(st["video"].get("available"), dict),
+chk("state：带了 video 段（available / asr）",
+    isinstance(st.get("video"), dict) and isinstance(st["video"].get("available"), dict)
+    and isinstance(st["video"].get("asr"), dict),
     st.get("video"))
 fd = api("/api/feed?mode=list")
 chk("feed：mode=list 回 ok 与 subs 数组",
@@ -98,38 +99,52 @@ chk("feed：mode=list 回 ok 与 subs 数组",
 chk("feed：summary 形状对", isinstance(fd.get("summary"), dict)
     and "subs" in fd["summary"] and "unread" in fd["summary"], fd.get("summary"))
 vd = api("/api/video?mode=status")
-chk("video：mode=status 回 available",
-    vd.get("ok") is True and isinstance(vd.get("available"), dict), vd)
+chk("video：mode=status 回 available 与 asr",
+    vd.get("ok") is True and isinstance(vd.get("available"), dict)
+    and isinstance(vd.get("asr"), dict), vd)
 chk("video：available 里 ytdlp/ffmpeg/asr/llm 都在",
     all(k in vd["available"] for k in ("ytdlp", "ffmpeg", "asr", "llm")), vd.get("available"))
-# 转写组件的准备状态（引擎/模型）也要随 available 一起给出来 —— 视频页那盏「转写模型」
-# 灯全靠它，缺了这一块前端只能瞎猜。
-stv = vd["available"].get("setup") or {}
-chk("video：available.setup 报出引擎与模型到没到",
-    all(k in stv for k in ("engine", "engine_ready", "model", "model_ready")), stv)
-# 组件准备那个「随时问一句」的动作：视频页那盏灯靠它自己刷进度，不能是死的。
-# 只问不派活 —— 派活（media_engine/media_model）会真去装包或下 GB 级权重，
-# 那是用户点按钮才该发生的事，自测里不碰。
+# 1.0.8 起本地转写（mlx / faster）整体砍掉、只留云端一路 —— 引擎清单里不该再冒出第二样，
+# 也没了从前那份 setup（引擎/模型到没到）——那套是给本地权重看的，现在无物可报。
+chk("video：转写只剩云端一路（engines 就是 ['cloud']）",
+    vd["available"].get("engines") == ["cloud"], vd["available"].get("engines"))
+chk("video：云端那盏灯标着 asr.cloud",
+    (vd["available"].get("asr") or {}).get("cloud") is True, vd["available"].get("asr"))
+chk("video：没东西可报时不再塞一份 setup",
+    "setup" not in vd["available"], sorted(vd["available"]))
+chk("video：asr 快照报引擎/语言/地址/密钥尾号/模型",
+    all(k in vd["asr"] for k in ("engine", "lang", "url", "key_set", "key_tail", "model"))
+    and vd["asr"]["engine"] == "cloud", vd.get("asr"))
+# 本地模型那一问：没了就得明说没了并指路，不能死在那儿、更不能误报「准备好」。
 mst = api("/api/video", {"act": "media_status"})
-chk("video：media_status 问得动，且回一份 setup", mst.get("ok") and isinstance(mst.get("setup"), dict), mst)
-chk("video：没在忙的时候不带 busy 标记", not (mst.get("setup") or {}).get("busy"), mst.get("setup"))
+chk("video：media_status 明说本地模型已移除、并指到设置里改云端",
+    mst.get("ok") is False and "云端" in (mst.get("msg") or ""), mst)
 
 # ── 转写偏好：保存 → 读回来（写的是沙盒 config.json） ──────────
-old = {"engine": st["video"].get("asr") or "auto", "lang": st["video"].get("lang") or ""}
+old = vd.get("asr") or {}
 try:
     r = api("/api/action", {"action": "media.save", "engine": "faster", "lang": "zh"})
     chk("media.save：存得进（ok）", r.get("ok") is True, r)
-    r2 = api("/api/action", {"action": "media.save", "engine": "faster", "lang": "zh"})
-    chk("media.save：回执带回当前值", r2.get("asr") == "faster" and r2.get("lang") == "zh", r2)
+    # 老配置里残留的 faster 会被静默归正到 cloud —— 界面点了保存不该像没反应。
+    chk("media.save：引擎一律归正到 cloud（不报错、静默改道）",
+        (r.get("asr") or {}).get("engine") == "cloud", r.get("asr"))
     st2 = api("/api/state")
-    chk("media.save：state 读回来就是刚存的那一对",
-        st2["video"]["asr"] == "faster" and st2["video"]["lang"] == "zh", st2.get("video"))
-    bad = api("/api/action", {"action": "media.save", "engine": "no-such-engine", "lang": ""})
-    chk("media.save：引擎不认识时会拒绝（不静默吞掉）", bad.get("ok") is False, bad)
+    chk("media.save：state 读回来就是刚存的语言",
+        (st2["video"].get("asr") or {}).get("lang") == "zh", st2.get("video"))
+    # 密钥只报「有没有」和末四位，明文绝不回界面、也不进回执。
+    sk = api("/api/action", {"action": "media.save", "key": "sk-selftest-1234"})
+    view = sk.get("asr") or {}
+    chk("media.save：密钥只回末四位，明文不回界面",
+        view.get("key_set") is True and view.get("key_tail") == "1234"
+        and "sk-selftest-1234" not in json.dumps(sk), view)
 finally:
-    api("/api/action", {"action": "media.save", "engine": old["engine"], "lang": old["lang"]})
+    # 沙盒里这几项本来就是空的，跑完照空清回去 —— 免得后面那几盏灯读到脏配置。
+    api("/api/action", {"action": "media.save",
+                        "lang": old.get("lang") or "",
+                        "url": old.get("url") or "",
+                        "key": "", "model": old.get("model") or ""})
 chk("media.save：跑完把原值还回去了",
-    api("/api/state")["video"]["asr"] == old["engine"], old)
+    (api("/api/state")["video"].get("asr") or {}).get("lang") == (old.get("lang") or ""), old)
 
 # ── 真机：两屏 + 设置里那一类 ────────────────────────────────
 with sync_playwright() as pw:
@@ -178,14 +193,19 @@ with sync_playwright() as pw:
         chk(f"视频：「{what}」在", page.locator(f'[data-pane="video"] {sel}').count() == 1)
     lights = page.evaluate(
         "() => [...document.querySelectorAll('#vCap .it')].map(e => e.className)")
-    chk("视频：五盏灯都亮出来了（就绪/缺失各归各位）", len(lights) == 5, lights)
+    chk("视频：四盏灯都亮出来了（下载器 / ffmpeg / 云端转写 / 大模型）",
+        len(lights) == 4, lights)
     chk("视频：每盏灯非 ok 即 no", all(("ok" in c) ^ ("no" in c) for c in lights), lights)
-    # 转写模型那盏灯必须说真话：沙盒里没下过权重，就不许冒充「就绪」。
-    chk("视频：没下过模型时，那盏灯不冒充就绪", page.evaluate("""() => {
+    # 云端转写那盏灯必须说真话：沙盒里没填过接口地址，就不许冒充「已配置」。
+    chk("视频：没填过接口时，云端转写那盏灯不冒充已配置", page.evaluate("""() => {
       const t = [...document.querySelectorAll('#vCap .it')]
-        .map(e => e.textContent).find(x => x.includes('转写模型'));
-      return !!t && (/未下载|准备中|没备好|缺转写引擎/.test(t));
+        .map(e => e.textContent).find(x => x.includes('云端转写'));
+      return !!t && /未配置/.test(t);
     }"""), page.evaluate("() => [...document.querySelectorAll('#vCap .it')].map(e => e.textContent)"))
+    # 能力灯旁边那颗「转写设置」得在 —— 云化之后填地址全靠它把用户送进设置页。
+    chk("视频：「转写设置」那颗钮挂在能力灯旁边", page.evaluate(
+        "() => [...document.querySelectorAll('#vCap button')]"
+        ".some(b => (b.textContent || '').includes('转写设置'))"))
     # 沙盒里 seeded 了一本转出来的书（tests/seed.py 的 video_SE_LECTURE），
     # 所以这一栏不该再是空态；空态那条话在 check_video_workbench.py 里另有验法。
     rows = page.evaluate("() => document.querySelectorAll('#vShelf .vtbook').length")
@@ -253,32 +273,44 @@ with sync_playwright() as pw:
     chk("设置：直接落在「视频转写」这一类", page.evaluate(
         "() => { const s = document.querySelector('.popcat[data-cat=\"media\"]');"
         " return !!s && s.classList.contains('on'); }"))
-    for sel, what in (("#asrEngine", "引擎选择"), ("#asrLang", "语言"), ("#asrSave", "保存"),
-                      ("#vfFix", "装 ffmpeg")):
+    for sel, what in (("#asrUrl", "接口地址"), ("#asrKey", "API Key"), ("#asrModel", "模型"),
+                      ("#asrLang", "语言"), ("#asrSave", "保存"), ("#vfFix", "装 ffmpeg")):
         chk(f"设置：「{what}」在", page.locator(sel).count() == 1)
-    chk("设置：引擎选项是 auto/mlx/faster/cloud", page.evaluate(
-        "() => [...document.querySelectorAll('#asrEngine option')].map(o => o.value).join(',')")
-        == "auto,mlx,faster,cloud")
+    chk("设置：本地引擎那张选单已经摘掉（转写只剩云端一路）",
+        page.locator("#asrEngine").count() == 0)
     chk("设置：状态那行有话（不是占位符）", page.evaluate(
         "() => { const t=(document.querySelector('#v-asr').textContent||'').trim();"
         " return !!t && t !== '—'; }"))
     sweep(page, "设置·视频转写")
 
-    # 在界面上改一次再存：值真的落到后端
-    page.select_option("#asrEngine", "mlx")
+    # 在界面上改一次再存：值真的落到后端（云端三格 + 语言；引擎恒 cloud）
+    page.fill("#asrUrl", "https://asr.selftest/v1")
+    page.fill("#asrKey", "sk-selftest-9876")
+    page.fill("#asrModel", "whisper-large-v3")
     page.fill("#asrLang", "ja")
     page.click("#asrSave")
     page.wait_for_timeout(900)
-    after = api("/api/state")["video"]
-    chk("设置：保存后后端就是 mlx / ja",
-        after["asr"] == "mlx" and after["lang"] == "ja", after)
-    chk("设置：轮询不会把用户刚选的值顶回去", page.evaluate(
-        "() => document.querySelector('#asrEngine').value") == "mlx")
-    page.fill("#asrLang", old["lang"])
-    page.select_option("#asrEngine", old["engine"])
+    after = api("/api/state")["video"]["asr"]
+    chk("设置：保存后后端就是填的地址 / 模型 / 语言，引擎恒 cloud",
+        after.get("engine") == "cloud" and after.get("url") == "https://asr.selftest/v1"
+        and after.get("model") == "whisper-large-v3" and after.get("lang") == "ja", after)
+    chk("设置：Key 只回末四位，明文不回界面",
+        after.get("key_set") is True and after.get("key_tail") == "9876"
+        and "sk-selftest-9876" not in json.dumps(after), after)
+    chk("设置：轮询不会把用户刚填的值顶回去", page.evaluate(
+        "() => document.querySelector('#asrUrl').value") == "https://asr.selftest/v1")
+    page.fill("#asrUrl", old.get("url") or "")
+    page.fill("#asrModel", old.get("model") or "")
+    page.fill("#asrLang", old.get("lang") or "")
     page.click("#asrSave")
     page.wait_for_timeout(700)
-    chk("设置：收尾还原成原值", api("/api/state")["video"]["asr"] == old["engine"])
+    restored = api("/api/state")["video"]["asr"]
+    chk("设置：收尾还原成原值",
+        restored.get("url") == (old.get("url") or "")
+        and restored.get("lang") == (old.get("lang") or "")
+        and restored.get("model") == (old.get("model") or ""), restored)
+    # Key 字段留空 = 不改，所以上面那枚测试 Key 得单独清掉，别带进下一个套件
+    api("/api/action", {"action": "media.save", "key": ""})
 
     # 关掉弹层，回到两屏再转一圈（常驻 pane 不该在来回时炸掉）
     page.keyboard.press("Escape")

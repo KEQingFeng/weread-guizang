@@ -45,7 +45,6 @@ import clip_article
 import feed as feed_mod
 import ffmpeg_tool
 import flomo_notes
-import media_setup
 import mindmap
 import anna_state
 import person
@@ -60,7 +59,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -545,6 +544,47 @@ def set_export_dir(path):
     cfg["export_dir"] = path
     save_cfg(cfg)
     return True, "导出位置已设为 " + path
+
+
+def export_target_dir():
+    """后端自己写的导出文件落哪儿：用户设过导出位置就用它，否则用下载格。
+
+    用户设的那个目录每次现验一遍 —— 它可能已被删掉、或被换成只读卷（当初存下时
+    验过，但那是过去的事）。验不过就落回下载格：宁可文件跑到下载格并说清楚，
+    也不要一次导出就此失败。
+    """
+    d = export_dir()
+    if d and os.path.isdir(d) and os.access(d, os.W_OK):
+        return d
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    return DOWNLOAD_DIR
+
+
+def unique_dest(folder, name):
+    """在 folder 里给 name 找一个不重名的落点：重了就在后面加 (2)、(3)……
+
+    与设置里那句「重名文件自动加序号，不会互相覆盖」是同一个承诺 —— 用户连点两次
+    导出，第二份不该把第一份盖掉。
+    """
+    dest = os.path.join(folder, name)
+    if not os.path.exists(dest):
+        return dest
+    root, ext = os.path.splitext(name)
+    n = 2
+    while True:
+        cand = os.path.join(folder, "%s (%d)%s" % (root, n, ext))
+        if not os.path.exists(cand):
+            return cand
+        n += 1
+
+
+def notes_csv_name(title):
+    """划线笔记导出 CSV 的文件名：flomo导入-书名.csv。
+
+    书名是用户起的，可能带斜杠、引号、表情，拼进路径前先过一遍 file_stem。
+    """
+    stem = file_stem(str(title or "").strip() or "划线笔记")
+    return "flomo导入-%s.csv" % stem
 
 
 # ---------- 本机阅读时长 ----------
@@ -2019,28 +2059,90 @@ def set_agent_cfg(url, key, model):
     return True, "小 Agent 已连上 " + full
 
 
-ASR_ENGINES = ("auto", "mlx", "faster", "cloud")
-
-
-def set_media_cfg(engine, lang):
-    """存「视频转笔记」这两项偏好：转写引擎与语言。
+def set_media_cfg(engine, lang, url=None, key=None, model=None):
+    """存「视频转笔记」这条线的转写配置：引擎、语言、接口地址与 Key、模型名。
 
     为什么不放在 video_note 内部读盘：转写这条线本来就能脱离界面单独跑（命令行、
     MCP 都走同一条路），配置由调用方通过 opts 传进去，它不越权回读应用配置。界面
     这一侧把它存下来，起任务时随 opts 一起发过去 —— 两边各管一段，谁都不猜。
+
+    1.0.8 起本地转写（mlx-whisper / faster-whisper）已整体移除，引擎固定云端；
+    老配置里残留的 mlx / faster 一律归正到 cloud，不报错、静默改道，免得界面点了
+    保存却像没反应。url / key / model 传 None 表示「这次不动这一项」（只改语言时
+    用得上），传空串表示清掉。
     """
-    engine = (engine or "").strip().lower()
-    if engine not in ASR_ENGINES:
-        return False, "转写引擎只认 auto / mlx / faster / cloud 这几种"
     cfg = load_cfg()
-    cfg["asr_engine"] = engine
+    cfg["asr_engine"] = "cloud"
     lang = (lang or "").strip()[:8]
     if lang:
         cfg["asr_lang"] = lang
     else:
         cfg.pop("asr_lang", None)
+    if url is not None:
+        u = (url or "").strip()[:300]
+        if u:
+            cfg["asr_url"] = u
+        else:
+            cfg.pop("asr_url", None)
+    if key is not None:
+        k = (key or "").strip()[:400]
+        if k:
+            cfg["asr_key"] = k
+        else:
+            cfg.pop("asr_key", None)
+    if model is not None:
+        m = (model or "").strip()[:64]
+        if m:
+            cfg["asr_model"] = m
+        else:
+            cfg.pop("asr_model", None)
     save_cfg(cfg)
-    return True, "已保存（转写引擎：%s%s）" % (engine, "，语言：" + lang if lang else "")
+    return True, "已保存（云端转写%s）" % ("，语言：" + lang if lang else "")
+
+
+def asr_cfg_view():
+    """「视频转笔记」转写配置的快照，给设置页回显。
+
+    引擎恒为云端；Key 只报「有没有」和末四位，跟微信读书 / flomo 那两处的口径
+    一致 —— 密钥既不往界面送，也不进日志。
+    """
+    cfg = load_cfg()
+    key = (cfg.get("asr_key") or "").strip()
+    return {"engine": "cloud",
+            "lang": (cfg.get("asr_lang") or ""),
+            "url": (cfg.get("asr_url") or ""),
+            "key_set": bool(key),
+            "key_tail": key[-4:] if key else "",
+            "model": (cfg.get("asr_model") or "")}
+
+
+def asr_opts_for_task(body_asr=None):
+    """起视频任务时喂给 video_note 的 asr 段：以本机存的配置为底，body 传进来的
+    显式项覆盖在上面（MCP / 自测能点名指定，界面这边一般什么都不带）。
+
+    地址和 Key 只在真起任务时才从配置里取出来拼进 opts，跟界面回显走的不是同一条路 ——
+    回显那条路不吐密钥。
+    """
+    cfg = load_cfg()
+    out = {"engine": "cloud",
+           "language": (cfg.get("asr_lang") or "").strip(),
+           "cloud": {"url": (cfg.get("asr_url") or "").strip(),
+                     "key": (cfg.get("asr_key") or "").strip(),
+                     "model": (cfg.get("asr_model") or "").strip()}}
+    src = body_asr if isinstance(body_asr, dict) else {}
+    if (src.get("engine") or "").strip():
+        out["engine"] = str(src.get("engine")).strip().lower()
+    if (src.get("model") or "").strip():
+        out["model"] = str(src.get("model")).strip()
+    if (src.get("language") or "").strip():
+        out["language"] = str(src.get("language")).strip()[:8]
+    cloud = src.get("cloud") if isinstance(src.get("cloud"), dict) else {}
+    for k in ("url", "key", "model"):
+        if (cloud.get(k) or "").strip():
+            out["cloud"][k] = str(cloud.get(k)).strip()
+    if not out["language"]:
+        out.pop("language", None)
+    return out
 
 
 def local_context():
@@ -3136,22 +3238,19 @@ def feed_summary():
 
 
 _VIDEO_AVAIL = {"at": 0.0, "v": None}
-# 上一次问「转写组件在忙吗」得到的答案。只在「忙 → 闲」的那一刻才去作废 available 的
-# 缓存，平时一直闲就不动它（动一下就是一次大包 import）。
-_MEDIA_BUSY = {"v": False}
 
 
 def video_avail_forget():
-    """把那份 30 秒的缓存作废。装完组件、下完模型之后必须调一次 ——
-    否则用户点完「补齐组件」，那几盏灯还要再绿不绿半分钟，看着像没生效。"""
+    """把那份 30 秒的缓存作废。改完转写设置之后调一次，
+    否则那几盏灯还要再绿不绿半分钟，看着像没生效。"""
     _VIDEO_AVAIL.update({"at": 0.0, "v": None})
 
 
 def video_avail():
-    """视频这条线现在能走到哪一步（下载器 / ffmpeg / 本地或云 ASR / LLM / 模型）。
+    """视频这条线现在能走到哪一步（下载器 / ffmpeg / 云 ASR / LLM）。
 
-    available() 要试 import 几个大包（mlx_whisper 那类），一次几十毫秒；状态栏是
-    轮询的，所以缓存 30 秒 —— 用户刚装完组件时最迟半分钟就能看到绿灯。
+    available() 要试 import 几个包（yt_dlp 那类），一次几十毫秒；状态栏是轮询的，
+    所以缓存 30 秒 —— 用户刚改完设置时最迟半分钟就能看到新状态。
     """
     now = time.time()
     if _VIDEO_AVAIL["v"] is not None and now - _VIDEO_AVAIL["at"] < 30:
@@ -3159,14 +3258,8 @@ def video_avail():
     try:
         v = video_note.available()
     except Exception:
-        v = {"ytdlp": False, "ffmpeg": False, "asr": {"local": False, "cloud": True},
-             "llm": False, "engines": []}
-    # 引擎/模型准备到哪一步了（装引擎、后台下模型都走 media_setup）。它自带锁和
-    # 一次目录扫描，几十毫秒量级，跟 available() 一起缓在同一个 30 秒里。
-    try:
-        v["setup"] = media_setup.status()
-    except Exception:
-        pass
+        v = {"ytdlp": False, "ffmpeg": False, "asr": {"cloud": True},
+             "llm": False, "engines": ["cloud"]}
     _VIDEO_AVAIL.update({"at": now, "v": v})
     return v
 
@@ -3786,7 +3879,9 @@ def video_view(q):
             t.update({"segments": page, "offset": offset,
                       "returned": len(page), "has_more": offset + len(page) < len(rows)})
             return {"ok": True, "transcript": t}
-        return {"ok": True, "available": video_avail()}
+        # status 给「能不能跑」那一行用：available 说工具齐不齐，asr 说云转写的地址
+        # 填没填 —— 后者只有一份配置视图（key 只回有没有、尾号），明文永不出后端。
+        return {"ok": True, "available": video_avail(), "asr": asr_cfg_view()}
     except Exception as e:
         msg = str(e)[:180] or "视频这块没读到东西"
         log(f"--- 视频查询失败（{mode}）：{type(e).__name__}: {msg} ---")
@@ -3849,30 +3944,17 @@ def video_do(body):
             r["downloads"] = _video_exports(d)
             return {"ok": True, "msg": "导好了：%(name)s" % r, "export": r}
         if act in ("media_status", "media_engine", "media_model", "media_all"):
-            if act != "media_status":
-                kind = {"media_engine": "engine", "media_model": "model", "media_all": "auto"}[act]
-                ok, msg = media_setup.start(kind)
-                if not ok:
-                    return {"ok": False, "msg": msg, "setup": media_setup.status()}
-            # 状态现取（不走那个 30 秒缓存）：下载百分比要跳着往上走，缓存了就成了定格照。
-            st = media_setup.status()
-            # 刚好从「忙」变「闲」的那一帧，把 available 那份缓存作废 —— 装完引擎、
-            # 下完模型，那几盏灯必须立刻变绿，而不是再等半分钟。平时（一直闲）不动它，
-            # 否则每次轮询都要重新 import 那几个大包。
-            busy = bool(st.get("busy"))
-            if _MEDIA_BUSY["v"] and not busy:
-                video_avail_forget()
-            _MEDIA_BUSY["v"] = busy
-            return {"ok": True, "msg": st.get("note") or "已开始准备", "setup": st,
-                    "available": video_avail()}
+            # 1.0.8 起本地转写整体移除，这一组动作没有活可派了。留着这条分支只为
+            # 回一句人话：老界面（或缓存的旧页面）点了「准备」不至于撞进下面的起任务
+            # 分支、收到一句莫名其妙的「先把视频链接粘进来」。
+            return {"ok": False, "msg": "本地转写模型已移除，转写在「设置 · 视频转写」里改走云端"}
         url = str(body.get("url") or "").strip()
         if not url:
             return {"ok": False, "msg": "先把视频链接粘进来"}
         prog = video_avail()
         if not prog.get("ytdlp"):
             return {"ok": False, "msg": "还没装下载器（yt-dlp）：在设置里点一下「补齐组件」"}
-        asr = body.get("asr") if isinstance(body.get("asr"), dict) else {}
-        opts = {"asr": {k: v for k, v in asr.items() if v not in (None, "")},
+        opts = {"asr": asr_opts_for_task(body.get("asr")),
                 "language": str(body.get("language") or "").strip()[:8]}
         ok, msg = start_task(
             "video", [py(), script("video_note.py"), "--task", url],
@@ -4274,9 +4356,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sync": sync_state(),
                 # 订阅与视频这两条线的「有没有 / 能不能」——书目在 books 里已经有了
                 "feed": feed_summary(),
-                "video": {"available": video_avail(),
-                          "asr": (load_cfg().get("asr_engine") or "auto"),
-                          "lang": (load_cfg().get("asr_lang") or "")},
+                "video": {"available": video_avail(), "asr": asr_cfg_view()},
                 # 安娜的档案这一路：状态是纯本地的一份小 json（窗口那头写、这儿读），
                 # 所以塞得进每 2.6s 一次的轮询；真正的浏览与下载都在窗口进程里。
                 "anna": anna_state.read_state(DATA_DIR),
@@ -5102,6 +5182,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "msg": f"导入 {okn} 条，另有 {len(fails)} 条失败：{fails[0]}"})
             return self._json({"ok": False, "msg": f"都没成功：{fails[0] if fails else '未知原因'}"})
 
+        if u.path == "/api/notes_csv":
+            # 划线笔记视图「导出 CSV」：把勾选的那些条目按 flomo 网页版导入的模板
+            # 拼成一份 CSV 落盘（落 export_target_dir，与设置里那句话对上），回
+            # 文件名与条数。为什么要有这条路：网页直连 flomo 的 webhook 要 PRO，
+            # 而导入 CSV 谁都能用 —— 想让笔记进 flomo 又没开会员的人走这里。
+            rows = []
+            for it in (body or {}).get("items") or []:
+                if not isinstance(it, dict):
+                    continue
+                txt = str(it.get("text") or "").strip()
+                if txt:
+                    rows.append((txt, it.get("at") or 0))
+            if not rows:
+                return self._json({"ok": False, "msg": "没有选中任何内容"})
+            folder = export_target_dir()
+            dest = unique_dest(folder, notes_csv_name((body or {}).get("title")))
+            try:
+                with open(dest, "wb") as f:
+                    f.write(flomo_notes.build_import_csv(rows))
+            except Exception as e:
+                return self._json({"ok": False, "msg": "写不出来：%s" % str(e)[:160]})
+            # 日志只记条数与文件名，正文一个字不落 —— 划线是用户的私事。
+            log("划线笔记导出 CSV：%d 条 → %s" % (len(rows), os.path.basename(dest)))
+            return self._json({"ok": True, "n": len(rows), "name": os.path.basename(dest),
+                               "dir": folder, "msg": "已导出 %d 条" % len(rows)})
+
         if u.path == "/api/clip":
             # 剪藏：粘贴链接 → 解析正文 → 收成书架里的一本书。
             # 三种模式：preview 只解析不入架（先让人确认抓对了），save 收单篇，
@@ -5405,10 +5511,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "plan": cleanup.plan(what)})
 
         if action == "media.save":
-            ok, msg = set_media_cfg(body.get("engine"), body.get("lang"))
-            return self._json({"ok": ok, "msg": msg,
-                               "asr": (load_cfg().get("asr_engine") or "auto"),
-                               "lang": (load_cfg().get("asr_lang") or "")})
+            ok, msg = set_media_cfg(body.get("engine"), body.get("lang"),
+                                    url=body.get("url"), key=body.get("key"),
+                                    model=body.get("model"))
+            video_avail_forget()
+            return self._json({"ok": ok, "msg": msg, "asr": asr_cfg_view(),
+                               "available": video_avail()})
 
         if action == "install":
             # 只有这一步需要把系统代理翻成环境变量：playwright 的下载器是 Node，
@@ -5482,8 +5590,17 @@ class Handler(BaseHTTPRequestHandler):
         if action == "openexports":
             # 写作台导出的图片 / PDF / 电子书落在下载格（DOWNLOAD_DIR），不在稿子目录里，
             # 所以这一屏的「打开所在文件夹」开的是那一处 —— 开了稿目录等于没开。
-            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-            pc.open_in_file_manager(DOWNLOAD_DIR)
+            # 带 dir 时（划线笔记导出 CSV 落到用户自设的导出位置）只放行「用户自己设过的
+            # 那个导出目录」，别的路径一概不理：这个动作能开的文件夹永远只有归藏自己
+            # 写进去的那两个，用户传什么进来都越不出去。
+            want = (body.get("dir") or "").strip()
+            d = DOWNLOAD_DIR
+            chosen = export_dir()
+            if want and chosen and os.path.abspath(want) == os.path.abspath(chosen) \
+                    and os.path.isdir(want):
+                d = want
+            os.makedirs(d, exist_ok=True)
+            pc.open_in_file_manager(d)
             return self._json({"ok": True, "msg": "已打开导出文件所在的文件夹"})
 
         # 打开整个书库根目录，或某个模块那一格：界面上每屏的「打开所在文件夹」
@@ -5705,14 +5822,6 @@ def main():
             # 而 MCP 适配器只拿得到我们请它用的那个数。不写下来，挪完就没人找得着。
             pc.write_runtime(REPO, p, version=VERSION, code=CODE_HASH)
             print(f"  微信读书导出 → http://127.0.0.1:{p}", flush=True)
-            # 进门之后自动补视频那条线的组件：引擎缺就装、模型缺就在后台下（1.6GB 那个）。
-            # 只有壳（安装包）会设 GUIZANG_AUTO_MEDIA=1 —— 源码直接跑时不该因为起了一下
-            # 服务就悄悄拉一份 GB 级权重。是后台线程，不挡服务起来。
-            try:
-                ok, msg = media_setup.maybe_auto_start()
-                print(f"  转写组件: {msg}", flush=True)
-            except Exception as e:
-                print(f"  转写组件: 自动准备没起来（{type(e).__name__}: {e}）", flush=True)
             srv.serve_forever()
             return
         except OSError:

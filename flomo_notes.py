@@ -27,6 +27,7 @@
 情况下整套测一遍 —— 解析、抽标签、附件落盘、去重、导成书，全是纯逻辑。
 """
 
+import csv
 import hashlib
 import io
 import json
@@ -312,6 +313,59 @@ def read_export(blob, filename=""):
     if 'class="memo"' in text or "<div class=" in text:
         return text, {}
     raise ValueError("认不出这份文件：要 flomo 导出的那个 zip，或它里面的那页 HTML")
+
+
+# ─────────────────────────── 导出 CSV ───────────────────────────
+
+# flomo 网页版「导入」吃的那份模板（实测官方样例逐字节核对过）：
+#   · 开头一个 UTF-8 BOM —— 少了它 Excel 打开就是乱码，flomo 自己也认不全中文；
+#   · 表头正好 `content,created_at` 两列；
+#   · 每行以 CRLF 收尾（官方样例就是 Windows 记事本那种风格）；
+#   · 时间写成本机时区的 `YYYY-MM-DD HH:MM:SS`，留空则 flomo 按导入那一刻算。
+# 正文里可能有换行、逗号、引号（用户自己的划线就常带逗号），一律交给 csv 模块按
+# 规范转义 —— 手拼字符串一定会在某条带逗号的划线上翻车。
+
+CSV_HEADER = ("content", "created_at")
+CSV_TIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def csv_time(ts):
+    """Unix 秒 → flomo 导入要求的 `YYYY-MM-DD HH:MM:SS`（本机时区）。
+
+    拿不到时间（空、0、负数）就回空串 —— flomo 收到空列会把它记成导入当时，
+    比硬塞一个「1970-01-01」强。
+    """
+    try:
+        n = int(ts or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        return ""
+    return time.strftime(CSV_TIME_FMT, time.localtime(n))
+
+
+def _crlf(text):
+    """把正文里的换行统一成 CRLF。
+
+    csv 模块只按 lineterminator 收行尾，字段内部原有的 `\\n` 会原样写进引号里，
+    于是整份文件就混着 CRLF 与裸 LF。样例那份是通篇 CRLF，这里先把正文的换行
+    归一，落盘后整份文件行尾才真正一致（导入端不必去猜两种行尾）。
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+
+
+def build_import_csv(rows):
+    """把 [(正文, Unix 秒)] 拼成官方模板那份 CSV，返回 bytes。
+
+    带 BOM、表头两列，整份文件行尾都是 CRLF（含正文里的换行），与 flomo 网页版
+    「导入」页给的样例对齐；正文里的逗号/引号由 csv 模块负责转义。
+    """
+    buf = io.StringIO(newline="")
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(CSV_HEADER)
+    for text, ts in rows:
+        w.writerow([_crlf(str(text or "")), csv_time(ts)])
+    return b"\xef\xbb\xbf" + buf.getvalue().encode("utf-8")
 
 
 # ─────────────────────────── 存盘 ───────────────────────────
