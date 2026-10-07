@@ -34,6 +34,13 @@ def manifest():
     missing = [f for f in out["APP_FILES"] if not (ROOT / f).exists()]
     if missing:
         sys.exit("清单里的文件不在仓库里：" + "、".join(missing))
+    # 反向护栏，判据同 build_macos.sh 里那一段：根目录冒出新 .py 而没进 APP_FILES，
+    # 打出来的包就是「源码直接跑一切正常、装起来一开就哑」。这条放在这里，
+    # 三个打包器（mac / 源码 zip / Windows zip）就都看得见，不用各自再写一份。
+    listed = set(out["APP_FILES"])
+    drift = sorted(p.name for p in ROOT.glob("*.py") if p.name not in listed)
+    if drift:
+        sys.exit("根目录这些 .py 没进 APP_FILES（运行期模块必须进包）：" + "、".join(drift))
     return out["APP_FILES"], out["APP_DIRS"]
 
 
@@ -57,7 +64,11 @@ ALLOW = re.compile(r"git@github\.com|users\.noreply\.github\.com|example\.com|yo
 WAIVERS = [
     ("tests/check_privacy.py", "*"),                  # 扫描器的规则里本来就写着这些形状
     ("tools/package_source_zip.py", "*"),             # 同上，本文件的 PATTERNS 自身
-    ("vendor/", "像真实书号的长数字"),                  # 压缩过的三方 js 里全是长数字串
+    # 三方原样 vendored 的库，不归我们清洗 —— 判据与 tests/check_privacy.py 的 WAIVERS
+    # 保持一致（那边也是 vendor/ 全免）。里面本来就有上游作者的邮箱（fabric 的
+    # package.json）和成串的长数字（压缩后的 js）。这里必须和门禁同一个口径：
+    # 打包器喊狼、门禁不喊，喊久了就没人看了。
+    ("vendor/", "*"),
 ]
 
 
@@ -87,33 +98,51 @@ def scan(zf):
     return hits
 
 
-files, dirs = manifest()
-include = files + EXTRA_FILES
-extra_dirs = dirs + EXTRA_DIRS
+def build(out=None):
+    """打包，返回 (路径, 文件数)。out 不给就落桌面、文件名带当天日期。"""
+    files, dirs = manifest()
+    include = files + EXTRA_FILES
+    extra_dirs = dirs + EXTRA_DIRS
 
-out = pathlib.Path.home() / f"Desktop/归藏-源码-{datetime.date.today():%Y%m%d}.zip"
-out.parent.mkdir(parents=True, exist_ok=True)   # 没有桌面目录的机器（Linux/CI）不该在这一步炸
-n = 0
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-    for name in include:
-        f = ROOT / name
-        if f.exists():
-            z.write(f, f"归藏源码/{name}"); n += 1
-        elif name not in files:      # 外围文件（比如只做了 mac 的启动脚本）可以缺
-            print("  跳过（没有这个文件）:", name)
-        else:
-            sys.exit(f"清单点名了 {name}，仓库里却没有 —— 先查是不是被误删了")
-    for d in extra_dirs:
-        for f in sorted((ROOT / d).rglob("*")):
-            if f.is_dir() or f.suffix in SKIP_SUFFIX or any(p in SKIP_PARTS for p in f.parts):
-                continue
-            z.write(f, f"归藏源码/{f.relative_to(ROOT)}"); n += 1
+    if out is None:
+        out = pathlib.Path.home() / f"Desktop/归藏-源码-{datetime.date.today():%Y%m%d}.zip"
+    out = pathlib.Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)   # 没有桌面目录的机器（Linux/CI）不该在这一步炸
 
-print(f"{out} · {n} 个文件 · {out.stat().st_size//1024} KB")
-with zipfile.ZipFile(out) as z:
-    leaks = [i.filename for i in z.infolist()
-             if any(p in i.filename for p in ("cache/", "output/", "browser_profile",
-                                              "config.json", "notes_index"))]
-    print("夹带个人数据文件:", leaks or "无")
-    for line in scan(z):
-        print("  待核实", line)
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in include:
+            f = ROOT / name
+            if f.exists():
+                z.write(f, f"归藏源码/{name}"); n += 1
+            elif name not in files:      # 外围文件（比如只做了 mac 的启动脚本）可以缺
+                print("  跳过（没有这个文件）:", name)
+            else:
+                sys.exit(f"清单点名了 {name}，仓库里却没有 —— 先查是不是被误删了")
+        for d in extra_dirs:
+            for f in sorted((ROOT / d).rglob("*")):
+                if f.is_dir() or f.suffix in SKIP_SUFFIX or any(p in SKIP_PARTS for p in f.parts):
+                    continue
+                z.write(f, f"归藏源码/{f.relative_to(ROOT)}"); n += 1
+    return out, n
+
+
+def report(out):
+    """打完一体检：夹带了个人数据文件没有、包内文本有没有不该出现的形状。"""
+    with zipfile.ZipFile(out) as z:
+        leaks = [i.filename for i in z.infolist()
+                 if any(p in i.filename for p in ("cache/", "output/", "browser_profile",
+                                                  "config.json", "notes_index"))]
+        print("夹带个人数据文件:", leaks or "无")
+        for line in scan(z):
+            print("  待核实", line)
+
+
+def main():
+    out, n = build()
+    print(f"{out} · {n} 个文件 · {out.stat().st_size//1024} KB")
+    report(out)
+
+
+if __name__ == "__main__":
+    main()
