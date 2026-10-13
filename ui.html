@@ -2007,6 +2007,9 @@
     border-bottom:1px solid var(--line)}
   .ntai .aisum{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain;
     padding:8px 11px 12px}
+  /* 正在读的时候正文略淡一点：给「还在吐字」一个看得见的信号，
+     但别淡到读不下去 —— 半路吐出来的字用户还要照着看。 */
+  .ntai.busy .aisum{opacity:.7; transition:opacity .18s ease}
   .ntaifoot{flex:none; display:flex; align-items:center; gap:6px; flex-wrap:wrap;
     padding:7px 10px; border-top:1px solid var(--line)}
   .ntaifoot .deed{height:26px}
@@ -3489,6 +3492,11 @@
       </div>
       <div class="sechd">氛围</div>
       <div class="ambgrid" id="ambPresets"></div>
+      <div class="row">
+        <span class="grow"></span>
+        <button class="deed" id="ambReset" type="button"
+                title="把氛围渐变恢复成默认的蓝绿橙（150°）">恢复默认</button>
+      </div>
       <div class="row">
         <span class="k">色点</span>
         <input type="color" id="ambC0" class="ambc" aria-label="色点一">
@@ -8793,6 +8801,18 @@ if ($('#ambPresets')) {
   $('#ambPresets').addEventListener('click', e => {
     const b = e.target.closest('button');
     if (b && b.dataset.p) ambSet({preset: b.dataset.p});
+  });
+}
+// 「恢复默认」把配置写回 AMB_DEF 再走同一条重绘路：色块高亮、取色器、角度都由 paintAmb 收口。
+if ($('#ambReset')) {
+  $('#ambReset').addEventListener('click', () => {
+    const l = look();
+    l.ambient = {preset: AMB_DEF.preset, colors: AMB_DEF.colors.slice(),
+                 angle: AMB_DEF.angle, two: AMB_DEF.two};
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify(l)); } catch (e) { /* 忽略 */ }
+    applyAmbient();
+    paintAmb();
+    whisper('已恢复默认氛围');
   });
 }
 ['ambC0', 'ambC1', 'ambC2'].forEach((id, i) => {
@@ -18658,10 +18678,16 @@ function sumChips() {
 function sumTools() {
   const run = $sum('Run');
   if (run) run.textContent = SUM.busy ? '停下' : '重新生成';
+  const layer = document.getElementById('aiSumLayer');
+  if (layer) {
+    layer.classList.toggle('busy', !!SUM.busy);
+    layer.setAttribute('aria-busy', SUM.busy ? 'true' : 'false');
+  }
   const map = $sum('Map');
   if (map) map.disabled = SUM.busy || SUM.mapBusy;
+  // 没字不能存/复制；正在吐字时也不给用 —— 存下去或复制走的都是半截。
   const has = !!(SUM.text || '').trim();
-  [$sum('Note'), $sum('Copy')].forEach(b => { if (b) b.disabled = !has; });
+  [$sum('Note'), $sum('Copy')].forEach(b => { if (b) b.disabled = !has || !!SUM.busy; });
 }
 function sumFail(msg) {
   // 已经吐出来的那半截留着：一个字都不剩比「看得见但断了」更让人以为按钮坏了。
