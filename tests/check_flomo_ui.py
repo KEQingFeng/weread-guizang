@@ -642,10 +642,48 @@ with sync_playwright() as pw:
     badge = page.evaluate("() => (document.querySelector('#bgFlomo')||{}).innerText || ''")
     chk("侧边栏的便签角标没有残留旧数字", badge.strip() in ("", "0"), badge)
 
+    # 左栏那支笔：布局照 Memos / flomo 来 —— 左边写，右边看，写完的一条落在时间线最上面。
+    chk("便签是左右两栏：记笔记那一栏在时间线左边",
+        page.evaluate("""() => {
+          const ta = document.querySelector('#fmNew'), sc = document.querySelector('#fmScr');
+          if (!ta || !sc) return false;
+          const a = ta.getBoundingClientRect(), b = sc.getBoundingClientRect();
+          return a.right <= b.left + 1 && a.width > 80;
+        }"""))
+    page.fill("#fmNew", "手记一条：把书架按颜色排一排  #灵感")
+    chk("写字时左栏只更字数，不打后端", page.inner_text("#fmNewCnt").endswith("字"),
+        page.inner_text("#fmNewCnt"))
+    page.click("#fmAdd")
+    ok = settle(page, "() => document.querySelectorAll('#fmScr .fmcard').length === 1", ms=12000)
+    chk("点「记下来」→ 右边时间线当场多一条", ok, cards(page))
+    w = whisper(page)
+    chk("刚写的那条正文与标签都在卡上",
+        "把书架按颜色排一排" in page.inner_text("#fmScr")
+        and page.evaluate("() => !!document.querySelector('#fmScr .fmtg i')"),
+        page.inner_text("#fmScr")[:140])
+    chk("记完清空输入框、回执说的是本机几条",
+        page.input_value("#fmNew") == "" and "记下了" in w,
+        (page.input_value("#fmNew"), w))
+    st_new = get("mode=stats").get("stats") or {}
+    chk("手记真的落进本机账（计数行与后端统计一起变）",
+        "1 条" in page.inner_text("#fmCnt") and st_new.get("memos") == 1,
+        (page.inner_text("#fmCnt"), st_new))
+    page.fill("#fmNew", "再记一条：Ctrl 加回车也能存")
+    page.press("#fmNew", "Control+Enter")
+    ok = settle(page, "() => document.querySelectorAll('#fmScr .fmcard').length === 2", ms=12000)
+    chk("Ctrl + Enter 也记一条（不打断写字的连贯）", ok, cards(page))
+
     # 窄屏：这一格工具条有输入框、两颗按钮和一行小字，最容易在 390 上挤成一列字。
     for wdt, hgt, tag in ((720, 860, "便签 720"), (390, 780, "便签 390")):
         page.set_viewport_size({"width": wdt, "height": hgt})
         page.wait_for_timeout(400)
+        if wdt == 390:
+            chk("窄屏两栏改上下排：笔记框在时间线上方（不做「窗里再开一扇窗」）",
+                page.evaluate("""() => {
+                  const ta = document.querySelector('#fmNew'), sc = document.querySelector('#fmScr');
+                  return !!ta && !!sc
+                    && ta.getBoundingClientRect().bottom <= sc.getBoundingClientRect().top + 1;
+                }"""))
         flush(page)
         sweep(page, tag)
     page.set_viewport_size({"width": 1440, "height": 900})

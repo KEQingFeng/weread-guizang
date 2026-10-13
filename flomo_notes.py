@@ -504,6 +504,37 @@ def import_notes(flomo_dir, blob, filename="", log=None):
             "src": data["src"], "at": data["at"]}
 
 
+def stamp_now(now=None):
+    """此刻那串时间，形状和导出里的一模一样（YYYY-MM-DD HH:MM:SS）。
+
+    单独拎出来是为了让「手写的」和「导进来的」共用同一把尺：日期、时分秒都由
+    `memo_of` 从这一串里拆，右边时间线的分组与卡头时间才认得出它。
+    """
+    return time.strftime("%Y-%m-%d %H:%M:%S",
+                         time.localtime(time.time() if now is None else now))
+
+
+def add_memo(flomo_dir, md, when="", now=None):
+    """手工记一条 —— 界面左边那支笔记下来的就落在这儿。
+
+    字段口径与导入的一条完全一样（同一个 `memo_of`），所以右边时间线、标签统计、
+    收进书架、记忆画像都不用为「手写的」另开一套。空正文不收；同一秒里连点两下
+    同一句也不堆两条（id 是「时间 + 正文」的哈希，认得出还是它）。
+    """
+    text = str(md or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return {"ok": False, "msg": "还没写内容"}
+    data = load(flomo_dir)
+    m = memo_of(str(when or "").strip() or stamp_now(now), text)
+    old = one(data, m["id"])
+    if old is not None:
+        return {"ok": True, "dupe": True, "memo": public(old), "total": len(data["memos"])}
+    data["memos"].append(m)
+    data["at"] = int(time.time())
+    save(flomo_dir, data)
+    return {"ok": True, "dupe": False, "memo": public(m), "total": len(data["memos"])}
+
+
 def tag_match(mtags, tg):
     """标签筛的那把尺：只往下算，不往上算。
 

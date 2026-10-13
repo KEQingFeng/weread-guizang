@@ -20,6 +20,8 @@
   ⑤ 观测器自检：上面 ③ 的「没有长任务」只有在观测器真活着时才算数。这一条先注入
      一段已知的长活，抓不到就当场失败 —— 否则观测器悄然失灵时，③ 会永远绿（2026-10-05
      就栽在这儿：init 脚本写成了裸箭头函数，函数体根本没跑）。
+  ⑥ 舞台一致：暖态那遍每切一屏顺手量一次 main 的左右边与宽度，所有屏必须落在同一处 ——
+     用户报的「前几个页面正常，突然出现一个左右变动极大」正是按页换了舞台宽度。
 
 前提：有一个指向沙盒书库的服务（`bash tests/run_all.sh` 会起那一个）。
 地址走命令行第一参数或 GUIZANG_TEST_URL；没给就退出，不拿 8770 赌。
@@ -134,15 +136,25 @@ with sync_playwright() as pw:
     # ③ 暖态第二遍：这一遍才是日常那一下，主线程不许有长任务。
     page.evaluate("window.__long = []")
     switched = 0
+    stage = []
     for label, name in TARGETS:
         page.click(selector_for(name), timeout=4000)
         page.wait_for_timeout(160)
         switched += 1
+        # 顺手量这一屏的舞台：左右边与宽度都在 main 上。用户报的「前几个页面正常，突然
+        # 出现一个左右变动极大」就是这里在按页换宽度（书架 1120 / 宽页 1440）—— 每屏量一次，
+        # 只要有一屏跟别屏不一样就是横跳，当场失败。
+        r = page.evaluate("() => { const m = document.querySelector('main').getBoundingClientRect();"
+                          " return [Math.round(m.left), Math.round(m.width)]; }")
+        stage.append((label, r[0], r[1]))
     page.wait_for_timeout(400)
     longtasks = page.evaluate("window.__long") or []
     chk("暖态逐屏切换：没有任何一段主线程活超过 %dms（不长卡）" % LONG_MS,
         len(longtasks) == 0,
         "最长几段：%s" % [t["dur"] for t in sorted(longtasks, key=lambda x: -x["dur"])[:4]])
+    stage_shapes = {(l, w) for _, l, w in stage}
+    chk("暖态逐屏切换：每一屏脚下都是同一块舞台（左右边 / 宽度不许按页变）",
+        len(stage_shapes) == 1, stage)
 
     page.screenshot(path=SHOT)
 

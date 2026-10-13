@@ -276,6 +276,9 @@ fresh_state()
 d1 = write_incoming("第一本.md", MD_BYTES)
 time.sleep(0.02)
 d2 = write_incoming("第二本.mobi", b"MOBIPACK" * 10)
+# 秒级文件系统下 sleep(0.02) 可能让两份 mtime 落在同一秒，排序便看不出先后；
+# 强制把第二份的 mtime 推后，保证「新→旧」这一条稳定可判。
+os.utime(d2, (os.stat(d1).st_mtime + 10,) * 2)
 os.makedirs(os.path.join(anna.incoming_dir(DD), "子目录"), exist_ok=True)
 rows = anna.incoming_listing(anna.incoming_dir(DD))
 chk("下载格按时间新→旧排", [r["name"] for r in rows] == ["第二本.mobi", "第一本.md"],
@@ -483,13 +486,14 @@ ab._STOP["now"] = False
 html = (REPO / "ui.html").read_text(encoding="utf-8")
 srv = (REPO / "ui_server.py").read_text(encoding="utf-8")
 low = html.lower()
-# 界面里可以有的密码框只有三处：自己的接口 Key（agentkey）、云转写的接口 Key（asrKey）、
-# 自己云盘的口令（syncPass），都是「用户自己的秘密交给自己这台机器」。替第三方书店收口令
-# 不在允许之列 —— 上一轮验证过：机器填不进对方的登录表单，收上来的口令只是一份额外外泄面。
-# 用白名单而不是「一个都不许有」：那样会把这几条合法的一起误伤，改的人只会把整条删掉。
+# 界面里可以有的密码框只有四处：自己的接口 Key（agentkey）、阅读 AI 单独那份接口的 Key
+# （aikey）、云转写的接口 Key（asrKey）、自己云盘的口令（syncPass），都是「用户自己的秘密
+# 交给自己这台机器」。替第三方书店收口令不在允许之列 —— 上一轮验证过：机器填不进对方的
+# 登录表单，收上来的口令只是一份额外外泄面。用白名单而不是「一个都不许有」：那样会把
+# 这几条合法的一起误伤，改的人只会把整条删掉。
 pw_ids = set(re.findall(r'id="([A-Za-z0-9_]+)"\s+type="password"', html))
-chk("界面里的密码框只有那三处合法入口（不再多）",
-    pw_ids == {"agentkey", "asrKey", "syncPass"}, sorted(pw_ids))
+chk("界面里的密码框只有那四处合法入口（不再多）",
+    pw_ids == {"agentkey", "aikey", "asrKey", "syncPass"}, sorted(pw_ids))
 chk("这一路与搜书页没有任何口令输入框",
     not [i for i in pw_ids if re.search(r"anna|zlib|lib|store|search", i, re.I)], sorted(pw_ids))
 chk("界面里不再出现 Z-Library 这条链路", "zlib" not in low and "z-library" not in low,
