@@ -453,14 +453,21 @@ chk("界面：流式回话按帧合并渲染（每来一段就重排整篇 Markd
     "requestAnimationFrame" in HTML.split("async function sumRun")[1][:2600])
 chk("界面：半路断了的字留在屏幕上（一个字不剩，用户只当按钮坏了）",
     "断了 · 这次没存" in HTML)
-chk("界面：画完导图要先收掉小结层再开脑图层（两层同 z-index，不关就盖住）",
-    HTML.split("async function aiSumShowMap")[1].find(
-        "$sum('Layer').classList.remove('open')")
+chk("界面：画完导图先把小结页签收回去再开脑图层（不然小结还在右栏、导图盖在上面）",
+    HTML.split("async function aiSumShowMap")[1].find("aiSumHide()")
     < HTML.split("async function aiSumShowMap")[1].find("ntMapLayer"))
-chk("界面：存为笔记也要先收掉小结层再开编辑器（真机栽过：保存那颗钮被小结层盖住点不动）",
-    HTML.split("function aiSumNote")[1].find(
-        "$sum('Layer').classList.remove('open')")
+chk("界面：存为笔记也要先收起小结页签再开编辑器（真机栽过：保存那颗钮被小结层盖住点不动）",
+    HTML.split("function aiSumNote")[1].find("aiSumHide()")
     < HTML.split("function aiSumNote")[1].find("ntEdOpen(null)"))
+chk("界面：小结是阅读器右栏的第三个页签（不再是一层全屏浮层）",
+    'data-tab="ai"' in HTML and 'class="ntai" id="aiSumLayer"' in HTML
+    and 'id="aiSumLayer"' in HTML.split("function readerSkeleton")[1]
+    and 'class="ntlay narrow" id="aiSumLayer"' not in HTML)
+chk("界面：点「小结」/点页签都走同一条进小结栏的路，翻章时小结跟着换章（不弹窗）",
+    "NT.tab = 'ai'" in HTML.split("function ntTab")[1][:400]
+    and "aiSumOpen();" in HTML.split("function ntTab")[1][:400]
+    and "if (NT.tab === 'ai' && SUM.book === RD.book)" in HTML
+    and "sumLoad(false)" in HTML)
 chk("界面：换书 / 换屏时把上一本书的浮层收掉（真机栽过：这五层挂在 body 上，"
     "旧书的小结盖在新书上面，那颗「小结」点下去只会撞在它）",
     "function rdLayersTuck() {" in HTML
@@ -471,8 +478,9 @@ chk("界面：收浮层时编辑器里那篇还没存的先落盘（不能为了
         "NTED.dirty")
     < HTML.split("function rdLayersTuck")[1].split("async function openReader")[0].find(
         "ntEdClose"))
-chk("界面：AI 那层接上了 Esc 与点外关闭（开着的层收不掉，等于把阅读器锁死）",
-    "aiSumClose()" in HTML and "sum = document.getElementById('aiSumLayer')" in HTML)
+chk("界面：小结栏接上了 Esc 与收起钮，也能从页签切回来（开着的栏收不掉，等于把阅读器锁死）",
+    "aiSumClose()" in HTML and "sum = document.getElementById('aiSumLayer')" in HTML
+    and "function aiSumHide()" in HTML and "aiSumAct(t)" in HTML)
 chk("零 emoji：ai_sum 的提示词里一个 emoji 都没有（模型会照着提示词的语气回，界面也跟着学）",
     not EMOJI.search(read_repo("ai_sum.py")))
 
