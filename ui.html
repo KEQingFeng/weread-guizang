@@ -132,26 +132,43 @@
      写在这里也是回归护栏：以后新加的钮忘了 nowrap 也不会重犯。 */
   button{white-space:nowrap}
 
-  /* 环境光：极淡的色晕 + 细颗粒，让玻璃有东西可以透 */
+  /* 环境光：极淡的色晕 + 细颗粒，让玻璃有东西可以透。
+     色点与角度由「外观 → 氛围」写进 --amb-1/2/3 与 --amb-grad；缺省值就是原来那套蓝绿橙，
+     所以没改过设置的人看到的还是熟悉的样子。 */
   .ambient{position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden}
-  .ambient i{position:absolute; display:block; border-radius:50%; filter:blur(70px); opacity:.55}
-  .ambient i:nth-child(1){width:46vw; height:46vw; left:-10vw; top:-14vw; background:rgba(47,127,240,.30)}
-  .ambient i:nth-child(2){width:38vw; height:38vw; right:-8vw; top:6vh; background:rgba(31,158,133,.24)}
-  .ambient i:nth-child(3){width:42vw; height:42vw; left:18vw; bottom:-18vw; background:rgba(214,140,96,.18)}
+  .ambient::before{content:''; position:absolute; inset:-10%;
+    background:linear-gradient(var(--amb-angle, 150deg),
+      var(--amb-1, rgba(47,127,240,.30)) 0%,
+      var(--amb-2, rgba(31,158,133,.24)) var(--amb-mid, 52%),
+      var(--amb-3, rgba(214,140,96,.18)) 100%)}
+  .ambient i{position:absolute; display:block; border-radius:50%; filter:blur(70px); opacity:.55;
+    background:var(--amb-1, rgba(47,127,240,.30))}
+  .ambient i:nth-child(1){width:46vw; height:46vw; left:-10vw; top:-14vw}
+  .ambient i:nth-child(2){width:38vw; height:38vw; right:-8vw; top:6vh;
+    background:var(--amb-2, rgba(31,158,133,.24))}
+  .ambient i:nth-child(3){width:42vw; height:42vw; left:18vw; bottom:-18vw;
+    background:var(--amb-3, rgba(214,140,96,.18))}
   .ambient u{
     position:absolute; inset:0; opacity:.035; mix-blend-mode:multiply;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   @media (prefers-color-scheme:dark){
-    :root:not([data-theme="light"]) .ambient i:nth-child(1){background:rgba(47,127,240,.20); opacity:.5}
-    :root:not([data-theme="light"]) .ambient i:nth-child(2){background:rgba(31,158,133,.15)}
-    :root:not([data-theme="light"]) .ambient i:nth-child(3){background:rgba(180,110,80,.13)}
     :root:not([data-theme="light"]) .ambient u{mix-blend-mode:screen; opacity:.022}
   }
-  html[data-theme="dark"] .ambient i:nth-child(1){background:rgba(47,127,240,.20); opacity:.5}
-  html[data-theme="dark"] .ambient i:nth-child(2){background:rgba(31,158,133,.15)}
-  html[data-theme="dark"] .ambient i:nth-child(3){background:rgba(180,110,80,.13)}
   html[data-theme="dark"] .ambient u{mix-blend-mode:screen; opacity:.022}
+
+  /* 氛围渐变的预设色块：一块小卡片里摆一道渐变，选中的带描边。 */
+  .ambgrid{display:flex; flex-wrap:wrap; gap:6px; padding:2px 12px 10px}
+  .ambsw{width:52px; height:30px; border-radius:8px; border:1px solid var(--line-2);
+    cursor:pointer; padding:0; position:relative; overflow:hidden;
+    background:linear-gradient(135deg, var(--a), var(--b))}
+  .ambsw.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
+  .ambsw i{position:absolute; left:0; right:0; bottom:0; font-style:normal; padding:1px 0;
+    font-size:9px; text-align:center; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.55);
+    background:linear-gradient(transparent, rgba(0,0,0,.34))}
+  .ambc{width:34px; height:24px; padding:0; border:1px solid var(--line-2); border-radius:7px;
+    background:none; cursor:pointer; flex:none}
+  .ambc:disabled{opacity:.45; cursor:default}
 
   .glass{
     background:var(--glass);
@@ -3419,6 +3436,26 @@
                style="flex:1;min-width:0;accent-color:var(--accent)">
         <span class="v" id="v-blur" style="width:44px;text-align:right"></span>
       </div>
+      <div class="sechd">氛围</div>
+      <div class="ambgrid" id="ambPresets"></div>
+      <div class="row">
+        <span class="k">色点</span>
+        <input type="color" id="ambC0" class="ambc" aria-label="色点一">
+        <input type="color" id="ambC1" class="ambc" aria-label="色点二">
+        <input type="color" id="ambC2" class="ambc" aria-label="色点三">
+        <span class="grow"></span>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-2)">
+          <input type="checkbox" id="ambTwo" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
+          两个色点
+        </label>
+      </div>
+      <div class="row">
+        <span class="k">角度</span>
+        <input type="range" id="ambAngle" min="0" max="360" step="5"
+               style="flex:1;min-width:0;accent-color:var(--accent)">
+        <span class="v" id="v-ambAngle" style="width:44px;text-align:right"></span>
+      </div>
+      <div class="hint" id="ambhint">页面底色的氛围渐变。点上面的预设直接换一套；选「自定义」后自己挑两三个色点并调整方向，色点与角度即时生效。设置只保存在本机。</div>
     </section>
 
     <section class="popcat" data-cat="nav">
@@ -8558,6 +8595,9 @@ function applyTheme(t) {
   root.classList.add('theme-switching');
   if (t === 'dark' || t === 'light') root.dataset.theme = t;
   else delete root.dataset.theme;          // auto：交回给系统
+  // 氛围层的色点透明度跟着浅/深主题走；这段代码还没跑起来时（首屏）先不管，
+  // 等 applyAmbient 自己按当时的主题算一遍。ambReady 用 var 声明就是为了在这里读得到。
+  if (ambReady) applyAmbient();
   try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
   [...$('#themeSeg').children].forEach(b => b.classList.toggle('on', b.dataset.t === t));
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
@@ -8607,6 +8647,143 @@ function setLook(k, val) {
 $('#frostRange').addEventListener('input', e => setLook('frost', +e.target.value));
 $('#blurRange').addEventListener('input', e => setLook('blur', +e.target.value));
 applyLook();
+
+/* ── 氛围渐变：几套预设 + 自定义色点与角度，和磨砂一样存在本机的 LOOK_KEY 里 ──
+   预设只是给好颜色起个名字，真相仍是「两三个色点 + 一个角度」；自定义就是把这三个色点
+   换成用户自己挑的。默认那套与老的固定色晕同一个颜色，所以没动过设置的人看到的是原样。 */
+var ambReady = false;          // applyTheme 在首屏会先跑一次，那时这段还没执行，不能叫 applyAmbient
+const AMB_PRESETS = [
+  ['aurora', '极光', ['#2f7ff0', '#1f9e85', '#d68c60']],
+  ['ocean', '静海', ['#1d5fbf', '#2f9fd8', '#7fb8e0']],
+  ['celadon', '青瓷', ['#1f9e85', '#5cc0a8', '#a8ddcd']],
+  ['sunset', '暖霞', ['#e0875a', '#e2688a', '#b45aa8']],
+  ['dusk', '紫暮', ['#5b57c9', '#8a72d8', '#c07ab8']],
+  ['pine', '松墨', ['#33414e', '#54636f', '#7d8b96']],
+];
+const AMB_DEF = {preset: 'aurora', colors: ['#2f7ff0', '#1f9e85', '#d68c60'],
+                 angle: 150, two: false};
+
+function ambCfg() {
+  let a = {};
+  try { a = (look() || {}).ambient || {}; } catch (e) { a = {}; }
+  const known = AMB_PRESETS.some(p => p[0] === a.preset);
+  const preset = (a.preset === 'custom' || known) ? a.preset : AMB_DEF.preset;
+  const colors = (Array.isArray(a.colors) && a.colors.length >= 2)
+    ? a.colors.slice(0, 3).map(c => String(c)) : AMB_DEF.colors.slice();
+  while (colors.length < 3) colors.push(colors[colors.length - 1] || AMB_DEF.colors[0]);
+  return {preset: preset, colors: colors,
+          angle: Number.isFinite(+a.angle) ? +a.angle : AMB_DEF.angle,
+          two: !!a.two};
+}
+
+/** 预设时取预设那三色，自定义时取用户存的三色 —— 界面与底色都拿同一份，不带第二个真相。 */
+function ambColors(c) {
+  const p = AMB_PRESETS.filter(x => x[0] === c.preset)[0];
+  return (p ? p[2] : c.colors).slice();
+}
+
+/** hex → 带透明度的 rgba。氛围层直接铺不透明色会盖过玻璃，所以透明度在这里算。 */
+function ambRGBA(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return 'rgba(47,127,240,' + alpha + ')';
+  const n = parseInt(m[1], 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+}
+
+function ambDark() {
+  const root = document.documentElement;
+  if (root.dataset.theme === 'dark') return true;
+  if (root.dataset.theme === 'light') return false;
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches); }
+  catch (e) { return false; }
+}
+
+function applyAmbient() {
+  const c = ambCfg();
+  const cols = ambColors(c);
+  const root = document.documentElement;
+  const alphas = ambDark() ? [.20, .15, .13] : [.30, .24, .18];
+  root.style.setProperty('--amb-angle', c.angle + 'deg');
+  root.style.setProperty('--amb-1', ambRGBA(cols[0], alphas[0]));
+  root.style.setProperty('--amb-2', ambRGBA(cols[1], alphas[1]));
+  // 两色点就把第三个并到第二个、收起中停位置（52% → 100%），得到干净的 0→100% 两停梯度；
+  // 三停那份的中停放在 52%，和原来的观感更接近。梯度本体留在 CSS 里，JS 只给变量。
+  root.style.setProperty('--amb-3', ambRGBA(c.two ? cols[1] : cols[2], alphas[2]));
+  root.style.setProperty('--amb-mid', c.two ? '100%' : '52%');
+}
+
+/** 只写属性、不重建节点：预设那排色块用一个指纹挡住重铺（每次重铺会把 hover 打掉）。 */
+function paintAmb() {
+  const c = ambCfg();
+  const host = $('#ambPresets');
+  if (host) {
+    const items = AMB_PRESETS.concat([['custom', '自定义', c.colors]]);
+    const sig = c.preset + '|' + items.map(p => p[2].join('')).join(',');
+    if (host.dataset.sig !== sig) {
+      host.dataset.sig = sig;
+      host.replaceChildren(...items.map(p => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ambsw' + (p[0] === c.preset ? ' on' : '');
+        b.dataset.p = p[0];
+        b.style.setProperty('--a', p[2][0]);
+        b.style.setProperty('--b', p[2][1]);
+        b.title = p[1];
+        const t = document.createElement('i');
+        t.textContent = p[1];
+        b.append(t);
+        return b;
+      }));
+    } else {
+      [...host.children].forEach((b, i) => b.classList.toggle('on', items[i][0] === c.preset));
+    }
+  }
+  const custom = c.preset === 'custom';
+  ['ambC0', 'ambC1', 'ambC2'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = c.colors[i] || c.colors[0];
+    el.disabled = !custom;
+  });
+  const cb = $('#ambTwo');
+  if (cb) { cb.checked = c.two; cb.disabled = !custom; }
+  const ang = $('#ambAngle');
+  if (ang) ang.value = c.angle;
+  const va = $('#v-ambAngle');
+  if (va) va.textContent = c.angle + '°';
+}
+
+function ambSet(patch) {
+  const c = ambCfg();
+  Object.assign(c, patch || {});
+  const l = look();
+  l.ambient = {preset: c.preset, colors: c.colors.slice(), angle: c.angle, two: c.two};
+  try { localStorage.setItem(LOOK_KEY, JSON.stringify(l)); } catch (e) { /* 忽略 */ }
+  applyAmbient();
+  paintAmb();
+}
+
+if ($('#ambPresets')) {
+  $('#ambPresets').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (b && b.dataset.p) ambSet({preset: b.dataset.p});
+  });
+}
+['ambC0', 'ambC1', 'ambC2'].forEach((id, i) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', () => {
+    const c = ambCfg();
+    const cols = ambColors(c).slice();
+    cols[i] = el.value;
+    ambSet({preset: 'custom', colors: cols});
+  });
+});
+if ($('#ambAngle')) $('#ambAngle').addEventListener('input', e => ambSet({angle: +e.target.value}));
+if ($('#ambTwo')) $('#ambTwo').addEventListener('change', e => ambSet({two: e.target.checked}));
+applyAmbient();
+paintAmb();
+ambReady = true;
 
 /* ── 笔记索引：状态 + 建立 / 重建 ── */
 
