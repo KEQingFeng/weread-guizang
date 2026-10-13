@@ -8,9 +8,14 @@
 - PDF 借已经装好的 Playwright 铬内核打印。前端本来就靠它取书，多这一个用法
   不用再让用户装东西；铬没装好时由调用方先拦一道（见 ui_server.chromium_ready）。
 
-正文是我们自己抓下来的，语法面很窄（标题、图片、粗斜体、行内码、列表、引用、
-代码块、分隔线、链接），所以这里手写一个够用的 Markdown → HTML，而不是为了
-一个子集去拖进一个第三方库、再把它塞进安装包。
+正文的来源有两处：取书时抓下来的 HTML，和写作页那排工具条产出的 Markdown。
+两边语法面都不宽（标题、图片、粗斜体、行内码、列表、待办、引用、代码块、
+分隔线、链接、表格，加颜色和底色和下划线三个内联标记），所以这里手写一个
+够用的 Markdown → HTML，而不是为了一个子集去拖进一个第三方库、再把它塞进
+安装包。
+
+白名单只放工具条真正会写的那几种标记：稿子里手打的其它尖括号留在转义态，
+导出后仍然是一行看得见的文字，不会变成能执行的东西。
 """
 
 import html
@@ -30,10 +35,33 @@ _INLINE_CODE = re.compile(r"`([^`]+)`")
 _IMG = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_STRIKE = re.compile(r"~~([^~]+)~~")
 _ITAL = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
 _HR = re.compile(r"(-{3,}|\*{3,}|_{3,})")
 _UL = re.compile(r"[-*+]\s+")
 _OL = re.compile(r"\d+[.)]\s+")
+_TASK = re.compile(r"^\[( |x|X)?\]\s*")
+_TROW = re.compile(r"^\|.*\|$")
+_TSEP = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+$")
+
+# 工具条往稿子里写的三种内联标记。写作页存的是真 HTML，而本模块第一步就把整行
+# 转义了（_esc 用 quote=False，双引号原样留着），所以这几条模式必须写成「转义后」
+# 的样子 —— 拿原始尖括号去匹配，永远命不中，导出就是一行看得见的 <span style=…>。
+# 颜色只认 #hex 这一段，别的值一律不放行：宁可少一层颜色，也不要让稿子里凑巧
+# 写的东西变成能生效的属性。
+_SPAN_OPEN = re.compile(
+    r'&lt;span style="(background-color|color):(#[0-9A-Fa-f]{3,8})"&gt;')
+_SPAN_CLOSE = "&lt;/span&gt;"
+_U_OPEN = "&lt;u&gt;"
+_U_CLOSE = "&lt;/u&gt;"
+
+
+def _rich(text):
+    """把白名单里的内联标记放回成真的 HTML；其余尖括号保持转义态。"""
+    text = _SPAN_OPEN.sub(lambda m: '<span style="%s:%s">' % (m.group(1), m.group(2)), text)
+    text = text.replace(_SPAN_CLOSE, "</span>")
+    text = text.replace(_U_OPEN, "<u>").replace(_U_CLOSE, "</u>")
+    return text
 
 
 def _esc(s):
@@ -51,18 +79,122 @@ def _inline(text):
         return "\x00%d\x00" % (len(stash) - 1)
 
     text = _INLINE_CODE.sub(_keep, text)
+    # 白名单放在抽出行内码之后：`<span style="color:#000">` 这种「把标记当例子写」
+    # 的句子该照原样出现在 <code> 里，不该真的染上颜色。
+    text = _rich(text)
     text = _IMG.sub(lambda m: '<img src="%s" alt="%s"/>' % (m.group(2), m.group(1)), text)
     text = _LINK.sub(lambda m: '<a href="%s">%s</a>' % (m.group(2), m.group(1)), text)
     text = _BOLD.sub(lambda m: "<strong>%s</strong>" % m.group(1), text)
+    text = _STRIKE.sub(lambda m: "<s>%s</s>" % m.group(1), text)
     text = _ITAL.sub(lambda m: "<em>%s</em>" % m.group(1), text)
     text = re.sub(r"\x00(\d+)\x00",
                   lambda m: "<code>%s</code>" % stash[int(m.group(1))], text)
     return text
 
 
+def _li(text):
+    """一条列表项。写作页的待办勾存成 - [ ] / - [x]，这里换成带状态 class 的 li。
+    方框由 CSS 画，不产出 <input>：EPUB 阅读器对表单元素的支持参差，打印时又容易
+    被画成「能点」的样子，而导出的成品里没有一处该让人点。"""
+    m = _TASK.match(text)
+    if not m:
+        return "<li>%s</li>" % _inline(text)
+    done = (m.group(1) or "").lower() == "x"
+    return '<li class="task%s">%s</li>' % (" done" if done else "",
+                                          _inline(text[m.end():]))
+
+
+def _tcells(line):
+    """拆一行表格：去掉首尾竖线再按竖线分格。单元格里要写真竖线，写 \\| ——
+    那一处转义在进到这里之前已经被换成占位，所以不会把格子切歪。"""
+    return [c.strip() for c in line.strip()[1:-1].split("|")]
+
+
+def _talign(cell):
+    """分隔行那一格里的冒号决定对齐。左对齐是文字排版的默认，不额外写属性。"""
+    left = cell.startswith(":")
+    if cell.endswith(":"):
+        return "center" if left else "right"
+    return ""
+
+
+def _table_at(lines, i):
+    """i 这一行是不是表头。判据是「这一行像表格行，下一行就是分隔行」——
+    只有这一条能把「段落里一句带竖线的话」和「真表格」分开。"""
+    return (i < len(lines) and _TROW.match(lines[i].strip()) is not None
+            and i + 1 < len(lines) and _TSEP.match(lines[i + 1].strip()) is not None)
+
+
+def _render_table(head, aligns, rows):
+    """列数以表头为准：数据行多了截掉、少了补空，跟 GFM 的处理一致。"""
+    cols = len(head)
+
+    def cells(tag, row):
+        out = []
+        for c in range(cols):
+            txt = row[c] if c < len(row) else ""
+            align = aligns[c] if c < len(aligns) else ""
+            style = ' style="text-align:%s"' % align if align else ""
+            scope = ' scope="col"' if tag == "th" else ""
+            out.append("<%s%s%s>%s</%s>" % (tag, scope, style, _inline(txt), tag))
+        return "".join(out)
+
+    return ("<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>"
+            % (cells("th", head),
+               "".join("<tr>%s</tr>" % cells("td", r) for r in rows)))
+
+
+# 写作页工具条往稿子里写的「这是个字，不是记号」：反斜杠 + 一个对 markdown 有意义
+# 的字符。用户手打 Markdown 那套已经不成立了（正文由工具条生成），所以这一层必须由
+# 生成器写、渲染器认 —— 否则人在正文里打的一个井号，导出后变成一个标题。
+_ESC_CHAR = re.compile(r"\\([\\`*_{}\[\]()#+\-.!>~|])")
+_STASH_MARK = re.compile(r"\x01(\d+)\x01")
+
+
+def _stash_line(line, keep):
+    """把这一行里的 \\X 收进 keep，原地留一个 \\x01 序号 \\x01 的占位。
+
+    占位里不含换行，所以「一行一块」那套判据一律不受影响；行首的井号被换掉之后，
+    `#{1,6}` 那条自然命不中 —— 这一步必须在分块之前做，晚一步标题已经切好了。
+    反引号那一段是代码，里面的字符原样留着：举例写的 `\\d+\\.` 被吃掉一个反斜杠，
+    导出的代码块就成了错的正则。
+    """
+    out = []
+    pos = 0
+
+    def _sub(chunk):
+        def _keep(m):
+            keep.append(m.group(1))
+            return "\x01%d\x01" % (len(keep) - 1)
+        return _ESC_CHAR.sub(_keep, chunk)
+
+    for m in _INLINE_CODE.finditer(line):
+        out.append(_sub(line[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_sub(line[pos:]))
+    return "".join(out)
+
+
+def _restore(text, keep):
+    """占位换回真字。放在整篇拼完之后：那时转义早过了，得自己再补一遍。"""
+    if not keep:
+        return text
+    return _STASH_MARK.sub(lambda m: _esc(keep[int(m.group(1))]), text)
+
+
 def md_to_html(md):
     """块级语法。返回一段一段的 HTML，句首句尾都不带换行，方便拼。"""
-    lines = (md or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    raw = (md or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    keep = []
+    lines = []
+    fenced = False
+    for s in raw:
+        if s.strip().startswith("```"):
+            fenced = not fenced
+            lines.append(s)
+            continue
+        lines.append(s if fenced else _stash_line(s, keep))
     out = []
     i, n = 0, len(lines)
     while i < n:
@@ -103,6 +235,17 @@ def md_to_html(md):
             out.append("<blockquote><p>%s</p></blockquote>"
                        % "<br/>".join(_inline(x) for x in buf))
             continue
+        # 表格（工具条插的那张表就是这副写法）
+        if _table_at(lines, i):
+            head = _tcells(s)
+            aligns = [_talign(c) for c in _tcells(lines[i + 1].strip())]
+            i += 2
+            rows = []
+            while i < n and _TROW.match(lines[i].strip()):
+                rows.append(_tcells(lines[i].strip()))
+                i += 1
+            out.append(_render_table(head, aligns, rows))
+            continue
         # 无序 / 有序列表
         m = _UL.match(s)
         if m:
@@ -110,14 +253,14 @@ def md_to_html(md):
             while i < n and _UL.match(lines[i].strip()):
                 buf.append(_UL.sub("", lines[i].strip(), count=1))
                 i += 1
-            out.append("<ul>%s</ul>" % "".join("<li>%s</li>" % _inline(x) for x in buf))
+            out.append("<ul>%s</ul>" % "".join(_li(x) for x in buf))
             continue
         if _OL.match(s):
             buf = []
             while i < n and _OL.match(lines[i].strip()):
                 buf.append(_OL.sub("", lines[i].strip(), count=1))
                 i += 1
-            out.append("<ol>%s</ol>" % "".join("<li>%s</li>" % _inline(x) for x in buf))
+            out.append("<ol>%s</ol>" % "".join(_li(x) for x in buf))
             continue
         # 段落：一直吃到下一个块级起点
         buf = [s]
@@ -126,12 +269,12 @@ def md_to_html(md):
             nxt = lines[i].strip()
             if (not nxt or nxt.startswith("```") or nxt.startswith(">")
                     or _HR.fullmatch(nxt) or re.match(r"#{1,6}\s+", nxt)
-                    or _UL.match(nxt) or _OL.match(nxt)):
+                    or _UL.match(nxt) or _OL.match(nxt) or _table_at(lines, i)):
                 break
             buf.append(nxt)
             i += 1
         out.append("<p>%s</p>" % "<br/>".join(_inline(x) for x in buf))
-    return "\n".join(out)
+    return _restore("\n".join(out), keep)
 
 
 # ─────────────────────────── 公共小工具 ───────────────────────────
@@ -193,6 +336,23 @@ code { font-family: "SF Mono", Menlo, monospace; font-size: .92em;
 pre code { background: none; padding: 0; }
 hr { border: none; border-top: 1px solid #e2e2e6; margin: 1.6em 0; }
 a { color: #0a6cff; text-decoration: none; }
+u { text-decoration: underline; }
+s { text-decoration: line-through; }
+/* 表格显式写 display：写作页能插表格，而 EPUB 阅读器的默认样式表参差 ——
+   有的把 table 当 block 排，格子就全糊成一行。*/
+table { display: table; width: 100%; border-collapse: collapse; margin: 1em 0; }
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tr { display: table-row; }
+th, td { display: table-cell; border: 1px solid #d8d8dc; padding: .35em .6em;
+         vertical-align: top; text-align: left; }
+th { background: #f5f5f7; font-weight: 600; }
+ul { padding-left: 1.6em; }
+li.task { list-style: none; position: relative; }
+li.task::before { content: ""; position: absolute; left: -1.5em; top: .42em;
+                  width: .85em; height: .85em; border: 1.5px solid #9a9aa0;
+                  border-radius: 3px; }
+li.task.done::before { border-color: #0a6cff; background: #0a6cff; }
 .cover { height: 100%; display: flex; flex-direction: column; justify-content: center;
          align-items: center; text-align: center; padding: 8%; }
 .cover h1 { font-size: 2em; margin: 0 0 .6em; text-indent: 0; }
@@ -351,6 +511,17 @@ pre { background: #f5f5f7; padding: .8em 1em; border-radius: 6px; white-space: p
 code { font-family: "SF Mono", Menlo, monospace; font-size: .92em; }
 hr { border: none; border-top: 1px solid #e2e2e6; margin: 1.6em 0; }
 a { color: #0a6cff; text-decoration: none; }
+u { text-decoration: underline; }
+s { text-decoration: line-through; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td { border: 1px solid #d8d8dc; padding: .35em .6em; vertical-align: top;
+         text-align: left; }
+th { background: #f5f5f7; font-weight: 600; }
+li.task { list-style: none; position: relative; }
+li.task::before { content: ""; position: absolute; left: -1.5em; top: .42em;
+                  width: .85em; height: .85em; border: 1.5px solid #9a9aa0;
+                  border-radius: 3px; }
+li.task.done::before { border-color: #0a6cff; background: #0a6cff; }
 """
 
 

@@ -504,30 +504,89 @@ def load_catalog_ordered(catalog_path):
     return out
 
 
-def resume_catalog_index(catalog_path, md_dir):
-    """断点续传该从目录第几项接着读 = 「最后一个已写出项」的下一项。
+def resume_catalog_index(catalog_path, md_dir, skip=()):
+    """断点续传该从目录第几项接着读 = **目录里第一个还没写出来的那一项**。
 
-    为什么不取「第一个缺项」：目录里的「缺」有一大半是假缺 —— 标题没被正文单独
-    画出来（跟正文粘在同一个块里），于是匹配不上、切不出章，可它的正文其实已经
-    落在相邻那章里了（实测《你身体里的奥秘》：223 项只切出 84 章，缺的散在
-    1、2、11、14~30… 中段，而 弱视/谵妄的症状 这些「缺项」的文字在成书里搜得到）。
-    真按第一个缺项重读一遍，已写出的几章内容会被整段塞进下一个缺章 —— 那是重复，
-    不是补缺。而阅读本来就是顺序的，所以正确的续传语义是「接着往下读」：
-    从最后一个写出来的目录项之后继续。这样每一轮都能往前推进，也不会重复。
+    这里换过一次口径，理由是量出来的（2026-10-13）：原先取的是「最后一个已写出项的
+    下一项」，理由是「目录里的缺项多半是假缺 —— 标题没被正文单独画出来，可文字其实
+    已经落在相邻那章里了」。拿《你身体里的奥秘》那 139 个缺项实测（缺项标题与全书
+    正文都走 bare() 去装饰，再子串比对）：**126 项的标题一个字都没出现过** ——
+    那 126 节根本没被画出来过，是真漏。全仓 13 本书里 6 本落盘数远低于目录项数
+    （151/44、223/84…），不是孤例。
+    旧口径在这本书上算出来的是 220（末项附近），于是每一轮都钉在同一个死点：
+    翻不出新内容 → 本轮 0 章 → 收工，用户看到的就是「每次都在相同的地方卡住」。
+
+    按第一个缺项回填就不一样：每一轮都从最早的缺口起跑，缺口只会越来越小。
+    代价是路上会重新读到已经写过的章节 —— 那部分由 ChapterSplitter 的 gapfill
+    模式丢掉，不会重复落盘（见那个类的 docstring）。
+
+    skip 是「这一项我们已经钉过、连着两轮什么都没写出来」的目录项下标
+    （见 stuck_skip）。没有它的话，最前面那个真跳不到的缺口会把每一轮都吃掉，
+    下一次取书又钉回同一处 —— 症状和用户报的一模一样，只是换了个位置。
+
+    返回 None 有两种意思，调用处分开处理：目录文件不在（没位置可钉）、
+    或者目录项不是写过了就是跳不到（没内容可读）。
     """
     ordered = load_catalog_ordered(catalog_path)
     if not ordered:
         return None
     used = load_used_titles(md_dir)
-    last = -1
     for i, (n, _o) in enumerate(ordered):
-        if n in used:
-            last = i
-    if last < 0:
-        return 0              # 一章都没写出来：从目录第一项开始
-    if last + 1 >= len(ordered):
-        return None           # 目录末项都写出来了，没有「下一项」可续
-    return last + 1
+        if i in skip:
+            continue
+        if n not in used:
+            return i
+    return None
+
+
+# 连着这么多轮「钉在这一项却一个字都写不出来」，才认定这一项当下跳不到。
+STUCK_LIMIT = 2
+
+
+def load_stuck(stuck_path, catalog_len):
+    """读「钉不住」的记录：{目录项数, {下标: 失败轮数}}。
+
+    目录项数对不上就当没记过：目录重新 dump 过一次，下标全变了，
+    拿老记录去跳新目录只会跳过本该读的那一节。
+    """
+    try:
+        with open(stuck_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if data.get("catalog") != catalog_len:
+        return {}
+    out = {}
+    for k, v in (data.get("strikes") or {}).items():
+        try:
+            out[int(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def stuck_skip(stuck_path, catalog_len):
+    """够格跳过的目录项下标（失败轮数已到 STUCK_LIMIT）。"""
+    return {i for i, n in load_stuck(stuck_path, catalog_len).items() if n >= STUCK_LIMIT}
+
+
+def stuck_bump(stuck_path, catalog_len, idx):
+    """记一次「钉在第 idx 项却没写出新章节」，返回它是否已经到上限（该跳过）。
+
+    为什么要攒够两轮才跳：一次钉不住多半是浮层还盖着、网络抖了一下、
+    或者那一屏阅读器就是不肯重画 —— 误跳等于把一章永久判死刑。
+    两遍才跳，代价只是多烧一轮会话（浏览器重启 + 十页空翻，一两分钟）。
+    """
+    strikes = load_stuck(stuck_path, catalog_len)
+    strikes[idx] = strikes.get(idx, 0) + 1
+    try:
+        with open(stuck_path, "w", encoding="utf-8") as f:
+            json.dump({"catalog": catalog_len,
+                       "strikes": {str(k): v for k, v in strikes.items()}},
+                      f, ensure_ascii=False)
+    except OSError:
+        pass                      # 记不上就不跳，下一轮重新钉同一处（老行为）
+    return strikes[idx] >= STUCK_LIMIT
 
 
 def match_heading(line, titles, used):
@@ -599,26 +658,36 @@ class ChapterSplitter:
 
     titles 是 [(norm_title, orig)]（长标题在前），used 是已切出过的 norm 标题集合
     （跨会话续传用，同一个标题不会切第二次）。
+
+    gapfill=True 是「按目录回填缺口」那一轮专用的口径：落点是**第一个还没写出来的
+    目录项**（见 resume_catalog_index），从那儿往前翻页会一路重新读到已经写过的章节。
+    这些旧内容不能进新章 —— 否则补缺顺便把隔壁三章重抄一遍，比缺章更难看。
+    所以开两件事：撞到「已经写出去过的标题」就把当前章封住并转进丢弃态，直到遇见
+    下一个没写过的标题才重新开章。旧章的内容本来就在盘上，丢掉不损失任何东西。
     """
 
     HOLD_MAX_PIECES = 5        # 标题最多被拆成几行
     HOLD_MAX_BARE = 80         # 拼接后最多比对多少实质字符
     HOLD_START_MAX = 20        # 只有足够短的开头行才当标题碎片（正文一行通常 25~45）
 
-    def __init__(self, titles, used):
+    def __init__(self, titles, used, gapfill=False):
         self.titles = titles
         self.used = used
-        self.pairs = []        # (bare_title, orig, nt)
+        self.gapfill = gapfill
+        self.pairs = []        # 还没写出去的标题：(bare_title, orig, nt)
+        self.used_pairs = []   # 盘上已有的标题：只用来当「这段读过了」的路标
         for nt, orig in titles:
             bt = bare(orig)
-            if bt and nt not in used:
-                self.pairs.append((bt, orig, nt))
+            if bt:
+                (self.used_pairs if nt in used else self.pairs).append((bt, orig, nt))
         self.cur = []          # 在手的块
         self.title = None      # 在手这一章的标题
         self.completed = []    # 已切完待落盘
         self.cuts = 0          # 本次会话靠正文标题切出过几章
         self.hold = []         # 疑似标题碎片（原始块）
         self.hold_bare = ""
+        self.discard = False   # gapfill：正在走过一段已经写过的内容
+        self.grace = False     # gapfill：落点那一页不当边界看（页眉可能挂着旧章名）
 
     # ---- 内部 ----
     def _find_exact(self, cand):
@@ -636,15 +705,51 @@ class ChapterSplitter:
     def _drop(self, nt):
         self.pairs = [p for p in self.pairs if p[2] != nt]
 
-    def _open(self, orig, nt, rest=""):
+    def _seal(self):
+        """把手里这一章封盘（没内容就不占一章）。"""
         if self.cur:
             self.completed.append((self.title, self.cur))
+        self.cur, self.title = [], None
+
+    def _open(self, orig, nt, rest=""):
+        self._seal()
         self.title = orig
         self.cur = [{"type": "text", "text": rest}] if rest else []
         self.used.add(nt)
         self._drop(nt)
         self.cuts += 1
         self.hold, self.hold_bare = [], ""
+
+    def anchor(self, orig, nt):
+        """续传落点：目录已经把我们带到这一章的开头，标题当场认下来。
+
+        为什么要有这一步：刚落点那一页常常根本不再画一遍标题（阅读器认为早画过了，
+        见 capture_landing 里那段实测），等正文标题再切章就等不到 —— 这一页的内容
+        会挂到上一个标题名下，甚至因为没有标题而变成「未题名」。目录报出来的那一项
+        就是这一页的章名，直接拿来开章最准。
+        """
+        if not nt or nt in self.used:
+            return False
+        self._open(orig, nt)
+        self.discard = False
+        self.grace = True      # 落点这一页里的旧标题（页眉）先不当边界
+        return True
+
+    def _used_boundary(self, line):
+        """这一整行正好等于某个已经写出去过的目录标题 → 从这儿开始是旧内容。
+
+        只认整行相等（比装饰前后各一次），不许 startswith：正文里一句「正如第二章
+        所说」不该把章切断。标题被排成好几行的那种书在这儿认不出来，退化成
+        「旧内容并进当前章」——与本轮改动前的行为一致，不会更糟。
+        """
+        b = bare(line)
+        if len(b) < 3:
+            return False
+        n = norm_title(line)
+        for bt, _orig, nt in self.used_pairs:
+            if bt == b or (nt and nt == n):
+                return True
+        return False
 
     def release_hold(self):
         """拼不出标题了：把手里的碎片当正文放回（内容绝不丢弃）。"""
@@ -657,10 +762,28 @@ class ChapterSplitter:
         for b in blocks:
             if b["type"] != "text":
                 self.release_hold()          # 插图会打断标题拼接
-                self.cur.append(b)
+                if not self.discard:
+                    self.cur.append(b)
                 continue
             line = b["text"]
             bl = bare(line)
+
+            # ⓪ gapfill 正在走旧内容：只有「还没写过的标题」能把我们放出来
+            if self.discard:
+                if bl:
+                    hit = match_heading(line, self.titles, self.used)
+                    if hit:
+                        nt, orig = hit
+                        self.discard = False
+                        self._open(orig, nt, strip_title_prefix(line, nt))
+                continue
+
+            # gapfill：整行是已经写过的章名 → 就地封章，往后先丢着
+            if self.gapfill and not self.grace and bl and self._used_boundary(line):
+                self.release_hold()
+                self._seal()
+                self.discard = True
+                continue
 
             # ① 正在拼标题：先看这一行能不能把标题接完
             if self.hold and bl:
@@ -692,6 +815,7 @@ class ChapterSplitter:
                 continue
 
             self.cur.append(b)
+        self.grace = False
 
     def captured_chars(self):
         return sum(len(b.get("text") or "") for b in self.cur if b["type"] == "text")
@@ -1070,16 +1194,16 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
             await run_bounded(wait_position_settled(page), 25, "等阅读器恢复上次位置")
 
         if resume_at is not None:
-            # 断点重定位续传：阅读器自己的「上次读到」有时停在一个再也翻不出内容
-            # 的地方（实测《你身体里的奥秘》卡在 84/223：重跑照样落在同一个死点，
-            # 方向键按 12 次一个字都抓不到，外层就因为「本轮没有写出新章节」永久收工）。
-            # 这时候只有目录能把位置拽回来：直接点到「第一个还没写出来的章节」。
+            # 续传的落点由目录钉死（不是阅读器自己的「上次读到」）：跳到「第一个还没
+            # 写出来的目录项」。实测《你身体里的奥秘》卡在 84/223 就是这么来的 ——
+            # 阅读器停在一个再也翻不出内容的地方（方向键按 12 次一个字都抓不到），
+            # 而那条记录不认目录跳转，重跑必然回到同一个死点。
             # 上面那一下点击 + 等落定照做（它唤醒恢复动作，先让它落定才不跟跳转打架）；
             # 跳完绝对不再点正文中心 —— 一点就被拉回旧阅读位置（见 one_turn 注释）。
             land_title = (await run_bounded(jump_to_catalog_item(page, resume_at),
                                             PREP_TIMEOUT, "按目录定位到续传章节")) or ""
             land_title = re.split(r"当前读到", land_title)[0].strip()
-            print(f"  ↻ 已用目录重新定位到第 {resume_at + 1} 项:「{land_title}」")
+            print(f"  ↻ 已用目录定位到第 {resume_at + 1} 项:「{land_title}」")
 
         current_chapter = await run_bounded(_title(page), 20, "读取章节名")
         print(f"  📖 {book_title} — {book_author}")
@@ -1111,9 +1235,11 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
         # 连续累积 + 按正文标题切章。
         # 分章逻辑抽成 ChapterSplitter（模块级、可单测）：既认整行标题，
         # 也认被排版拆成 2~5 行的标题 —— 后者是 2026-09-30「翻了几十页 0 章 0 字」的根因。
+        # 按目录回填缺口的每一轮都开 gapfill：路上重新读到的那些「已经写出去过的章节」
+        # 只当路标用，内容直接丢掉，不会抄第二遍（见 ChapterSplitter 的 docstring）。
         titles = load_catalog_titles(catalog_path) if catalog_path else []
         used = load_used_titles(md_dir)
-        sp = ChapterSplitter(titles, used)
+        sp = ChapterSplitter(titles, used, gapfill=resume_at is not None)
         # 目录里去掉重名后到底有多少章 —— 用来认出「已经全切完了」，
         # 不然翻到头还会继续翻，阅读器只会把同一页反复吐回来。
         cat_uniq = len({n for n, _ in titles})
@@ -1241,8 +1367,10 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
             at = front_title_index(blocks, want)
             top = await _title(page) if titles else ""
             if at is None:
-                print(f"  ⚠️  这一屏认不出首章标题「{want}」（当前:「{top}」），"
-                      f"按原样收下 {len(blocks)} 块，收尾时会核对目录是否缺章")
+                # 回填缺口时这一条很常见：那一节的标题从来没被单独画出来过（正因如此
+                # 它才是缺项）。整屏收下，章名由目录那边钉（见 sp.anchor）。
+                print(f"  这一屏画不出标题「{want}」那一行（当前:「{top}」），"
+                      f"整屏 {len(blocks)} 块按原样收下，收尾时会核对目录是否缺章")
                 at = 0
             elif at:
                 print(f"  这一屏前 {at} 块是「上次读到」的残留，丢掉")
@@ -1254,6 +1382,16 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
         elif resume_at is not None:
             # 目录跳转同样会强制重画，但第一屏也可能已经画过 —— 走和「开头这一页」
             # 一模一样的收法，别让续传章节的第一屏也跟着丢掉。
+            # 先把落点这一章按目录报出来的名字开起来：正文里往往不会再画一遍这一节的
+            # 标题（阅读器认为早画过了，见 capture_landing 里的实测），光等正文切章就
+            # 等不到 —— 这一屏的内容会挂到上一个章名下，甚至因为没有标题变成「未题名」。
+            hit = next(((nt, orig) for nt, orig in titles
+                        if nt and nt == norm_title(land_title)), None)
+            if hit:
+                sp.anchor(hit[1], hit[0])
+            elif land_title:
+                print(f"  （第 {resume_at + 1} 项「{land_title}」在标题表里对不上，"
+                      "这一轮仍按正文切章）")
             landed = await run_bounded(capture_landing(land_title, resume_at),
                                        ITER_TIMEOUT, "续传这一页")
             print(f"  续传这一页抓到 {landed} 块", flush=True)
@@ -1406,9 +1544,9 @@ async def main(book_id):
     # 用户按成功去用那份 md，才发现少了大半 —— 这是比抓不到更糟的骗人。
     full_book = False
     stop_reason = ""
-    # 上一轮是不是「一章都没写出来」。是的话下一轮不赌阅读器自己的「上次读到」，
-    # 改用目录把落点钉到第一个还没写出来的章节（见 resume_at）。
-    recovering = False
+    # 一轮「钉在某个缺口却一章都没写出来」就给它记一次；连着 STUCK_LIMIT 轮
+    # 才认定这一项跳不到、往后跳过它（见 stuck_bump / stuck_skip）。
+    stuck_path = os.path.join(book_dir, "_stuck.json")
     while session < MAX_SESSIONS:
         if STOP:
             stop_reason = "用户中止"
@@ -1427,15 +1565,35 @@ async def main(book_id):
         print(f"  上次: {last_title or '(无)'}, 编号: {last_idx}")
         goto_first = (session == 1 and last_idx == 0)
         resume_at = None
-        if recovering:
-            resume_at = resume_catalog_index(catalog_path, md_dir)
-            if resume_at is None:
-                stop_reason = "已读到目录最后一项，没法再往下读"
-                print("\n  已经读到目录最后一项了 —— 再往下没有新章节可读。"
-                      "\n  收尾时若还列出「缺项」，那些多半是标题没被正文单独画出来"
-                      "（跟正文粘在同一段里），文字已在相邻章节中，不是漏抓。")
+        cat_len = len(load_catalog_ordered(catalog_path))
+        if not goto_first:
+            # 每一轮续传都由目录钉落点，不再赌阅读器自己的「上次读到」。
+            # 那条记录不认目录跳转：一旦停在一个翻不出内容的死点，重跑必然回到同一个
+            # 点上（《你身体里的奥秘》永久卡在 84/223、用户说的「每次都在相同的地方卡住」
+            # 就是这么来的）。落点取「第一个还没写出来的目录项」，缺口按顺序回填，
+            # 每一轮都只会往前挪（见 resume_catalog_index 与 ChapterSplitter 的 gapfill）。
+            resume_at = resume_catalog_index(catalog_path, md_dir,
+                                             stuck_skip(stuck_path, cat_len))
+            if resume_at is not None:
+                print(f"  ↻ 按目录钉住续传落点：从第 {resume_at + 1} 项接着回填缺口")
+            elif cat_len:
+                # 目录还在、却没有可钉的项：要么全都写出来了，要么剩下的都被记成跳不到。
+                # 这时候再开一轮只会让阅读器从它自己的旧位置白翻 12 页，直接收工。
+                stuck = load_stuck(stuck_path, cat_len)
+                if stuck:
+                    stop_reason = "目录里剩下的缺口都跳不到"
+                else:
+                    stop_reason = "目录里的项都已写出"
+                    # 一项不漏地全写出来了 —— 这就是全本。下面核对目录缺章时会兜底：
+                    # 真数出缺项来会把 full_book 降回去，所以这里不会说谎。
+                    full_book = True
+                print(f"\n  {stop_reason} —— 收尾。已导出的章节都在。")
+                if stuck:
+                    print("  （这些项是连着两轮钉不住才被跳过的；"
+                          "重新 dump 目录或再取一次书不会永久丢掉它们）")
                 break
-            print(f"  ↻ 改用目录定位续传：从目录第 {resume_at + 1} 项接着读")
+            else:
+                print("  （没有目录文件：没位置可钉，按阅读器自己的位置继续）")
         kill_stray_browsers()   # 上一轮卡死/异常留下的浏览器会占着 profile，先清掉再起
         try:
             title, author, added, chars_added, end_idx, reached_end = await run_session(
@@ -1471,18 +1629,26 @@ async def main(book_id):
         if added == 0:
             # 关键：这里数的是「真的写出了内容的章节数」。
             # 旧实现数的是「顶栏标题变化次数」，而顶栏每翻一页都会变 → 每轮都 >0 → 死循环。
-            if not recovering:
-                # 但「本轮 0 章」不等于到头了：阅读器自己的「上次读到」可能停在一个
-                # 再也翻不出内容的地方，重跑还会落在同一个点上（这就是《你身体里的
-                # 奥秘》永久卡在 84/223 的原因）。给它一次「用目录重新定位」的机会。
-                recovering = True
-                print("\n  本轮没有写出新章节 —— 换用目录重新定位续传，再试一轮。")
-                await asyncio.sleep(2)
-                continue
-            stop_reason = "目录重新定位后仍然写不出新章节"
-            print("\n  重新定位后仍然没有写出新章节，先收尾。已导出的章节都在。")
-            break
-        recovering = False      # 有进展，后面的会话恢复正常续传
+            if resume_at is None:
+                # cat_len 是这一轮「开始」时读的：第一轮那份目录是本轮里才 dump 出来的，
+                # 所以这里要重新看一眼盘，别把「刚拿到目录」当成「没有目录」。
+                if load_catalog_ordered(catalog_path):
+                    # 只有开头那一轮会走到这儿（钉落点还来不及）：下一轮就有目录可钉了，
+                    # 别把「开头这一轮没写出来」当成到头。
+                    print("\n  本轮没有写出新章节 —— 下一轮按目录钉落点再读。")
+                    await asyncio.sleep(2)
+                    continue
+                stop_reason = "没有目录文件，本轮又没写出新章节"
+                print("\n  这一轮没有写出新章节，先收尾。已导出的章节都在。")
+                break
+            if stuck_bump(stuck_path, cat_len, resume_at):
+                print(f"\n  第 {resume_at + 1} 项连着 {STUCK_LIMIT} 轮都写不出东西 —— "
+                      f"跳过它，下一轮从它后面的第一个缺口接着钉。")
+            else:
+                print("\n  本轮没有写出新章节 —— 同一个落点再试一轮（可能是浮层盖着、"
+                      "或那一屏没重画）。")
+            await asyncio.sleep(2)
+            continue
         print("  3 秒后自动重开继续..."); await asyncio.sleep(3)
     else:
         stop_reason = f"会话数达到上限 {MAX_SESSIONS}"

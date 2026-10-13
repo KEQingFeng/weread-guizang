@@ -14,6 +14,13 @@
 在 DOM 上根本不存在，读它得到 undefined，赋值则只是往对象上挂个没人看的字段 —— 界面看着正常、
 功能静默失效，真机走查还容易跟着一起读错（本轮就同时踩了实现和自查两份）。这类一律算 FAIL。
 
+第三条规则管「一个名字两件事」：同一个内联脚本里最外层写了两份同名的 function，提升时后一份
+把前一份整个顶掉，先前那些调用点拿到的全是另一件事 —— 编译器不报错、浏览器不报错，
+只有走到那条路的时候才炸。本轮栽的是「要一份空文档」的那个 ntEmpty，被下面模板栏里
+「画空状态文案」的同名 ntEmpty（签名是 ntEmpty(box, text)，不传参什么都不回）顶掉：
+笔记读取失败时 `d.doc || ntEmpty()` 拿到的不是空文档而是 undefined，紧接着 ntDoc()
+读 .marks 就抛 TypeError。缩进里的函数关各自的作用域，撞名合法，所以只看行首。
+
 跑法：.venv/bin/python tests/check_js_refs.py [文件…]
       默认查 ui.html 与 shell/onboarding.html
 """
@@ -155,6 +162,22 @@ def check(path):
     return bad
 
 
+def top_level_dupes(path):
+    """最外层里撞名的函数：后一份声明把前一份整个顶掉，先前那些调用点拿到的全是另一件事。
+
+    为什么要单开这一条：笔记那一栏撞过一次 —— 一个 ntEmpty 管「给一份空文档」、
+    另一个 ntEmpty 管「往容器里铺这句为什么是空的」，两个都写在最外层。JS 只认名字不认用途，
+    于是「要一份空文档」的三处拿回 undefined，往后每次建文档都抛 TypeError，而界面当时看着
+    一切正常（到处都是 NT.doc && …，画得出来）。真机走查走不到那条错误分支，静态这一扫一把逮住。
+    只盯行首那一份：缩进里的函数关各自的作用域，撞名是合法的。
+    """
+    src = path.read_text(encoding="utf-8")
+    where = {}
+    for m in re.finditer(r"(?m)^function\s+([A-Za-z_$][\w$]*)\s*\(", src):
+        where.setdefault(m.group(1), []).append(src[:m.start()].count("\n") + 1)
+    return {k: v for k, v in where.items() if len(v) > 1}
+
+
 targets = [pathlib.Path(a) for a in sys.argv[1:]] or [selftest.REPO / "ui.html",
                                                       selftest.REPO / "shell" / "onboarding.html"]
 fail = 0
@@ -170,4 +193,12 @@ for t in targets:
             print(f"        {name}  {t.name}:{line}")
     else:
         print(f"PASS  {t.name}：内联脚本没有「调了却没定义」的函数，也没写小写形式的 DOM 属性")
+    dup = top_level_dupes(t)
+    if dup:
+        fail = 1
+        print(f"FAIL  {t.name}：{len(dup)} 个最外层函数撞名（后一份把前一份顶掉，前面的调用点全废）")
+        for name, lines in sorted(dup.items()):
+            print(f"        {name}  {t.name}:" + " / ".join(str(n) for n in lines))
+    else:
+        print(f"PASS  {t.name}：最外层没有同名函数（一个名字只管一件事）")
 sys.exit(fail)
