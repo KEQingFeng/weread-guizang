@@ -4530,8 +4530,15 @@ function cardBits(b) {
   cardIds.set(id, {store: storeId, reader: readerId, title: b.title || ''});
   return {
     readerId, id, storeId, detailStore, detailReader, mine, busy, part, stt,
-    coverUrl: typeof b.cover === 'string' ? b.cover
-      : (b.cover ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
+    // 微信书架的封面是官方给的一条 URL，但个别书官方就是不给（老书、文章合辑）。
+    // 那种退回本地这一口：`/api/cover?book=<书城短 id>` 配了 Key 时现取一次并缓存，
+    // 真取不到也只是 404 —— 总比整张卡空着像界面坏了强。
+    coverUrl: (typeof b.cover === 'string' && b.cover ? b.cover : '')
+      || (storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
+    // 远端那条 URL 打不开时（图床拒了来路、链接过期）再退到本地这口试一次；
+    // 只试一次，不然两个地址会互相打转。
+    coverAlt: (typeof b.cover === 'string' && b.cover && storeId)
+      ? '/api/cover?book=' + encodeURIComponent(storeId) : '',
     // 骨架形状：只有这三件事会让卡片结构变化（进度条、取书↔正文、取完↔没取完）
     shape: (busy ? 'b' : '-') + (mine ? (part ? 'p' : 'm') : '-'),
     tagText: busy ? '正在取'
@@ -4587,7 +4594,13 @@ function shelfCard(b, bits) {
     img.loading = 'lazy';
     img.decoding = 'async';   // 解码放到别的线程，滚动时不被大图卡住主线程
     img.src = coverUrl;
-    img.onerror = () => img.replaceWith(ph());
+    // 官方那条 URL 打不开就悄悄换成 /api/cover 再试一次（有些图床拒外链），
+    // 两条都落空才给生成式封面。
+    let alt = t.coverAlt || '';
+    img.onerror = () => {
+      if (alt) { const u = alt; alt = ''; img.src = u; return; }
+      img.replaceWith(ph());
+    };
     img.onload = () => img.classList.add('in');   // 到了再淡入，别「啪」地砸出来
     if (img.complete && img.naturalWidth) img.classList.add('in');
     cv.append(img);
