@@ -4586,6 +4586,31 @@ function spineHue(seed) {
   return h;
 }
 
+/** 远端封面图（微信读书 / QQ 图床那一条 URL）统一从这里造。
+ *
+ *  两个坑都在这一处收口，别每建一张卡再抄一遍：
+ *  · 图床看 Referer：页面是从 127.0.0.1 打开的外站，微信 / QQ 图床对陌生来路
+ *    会直接 403 —— 表现就是「有些书的封面加载不出来」（正文图那条路 rdFixMedia
+ *    早就把来路去掉了，封面也该去）；
+ *  · 协议相对地址（//cdn…）：浏览器会拿本地服务当参照，结果必然是 404，补成 https。
+ */
+function extCoverImg(src) {
+  const im = document.createElement('img');
+  im.alt = '';
+  im.loading = 'lazy';
+  im.decoding = 'async';           // 解码放到别的线程，滚动时不被大图卡住主线程
+  im.referrerPolicy = 'no-referrer';
+  im.src = coverSrc(src);
+  return im;
+}
+
+/** 封面地址归一：协议相对（//cdn…）补成 https —— 不补的话浏览器会拿本地服务
+ *  当参照，必然 404。拼 HTML 字符串那条路（详情页大图）也要用。 */
+function coverSrc(src) {
+  const u = String(src || '').trim();
+  return u.startsWith('//') ? 'https:' + u : u;
+}
+
 /** 「最近读过」说成人话，别丢一串日期给用户自己算 */
 function daysAgo(ts) {
   if (!ts) return '';
@@ -4696,11 +4721,9 @@ function shelfCard(b, bits) {
     return d;
   };
   if (coverUrl) {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';   // 解码放到别的线程，滚动时不被大图卡住主线程
-    img.src = coverUrl;
+    // 走 extCoverImg：远端封面去掉 Referer（图床拒外站来路就是「有些封面加载不出来」
+    // 的那一半原因），协议相对地址也顺手补成 https。
+    const img = extCoverImg(coverUrl);
     // 官方那条 URL 打不开就悄悄换成 /api/cover 再试一次（有些图床拒外链），
     // 两条都落空才给生成式封面。
     let alt = t.coverAlt || '';
@@ -15786,7 +15809,8 @@ async function renderDetailView(storeId, readerId, title) {
 
   let t = '<div class="dtop">';
   t += '<div class="cv">' + (coverUrl
-    ? `<img src="${esc(coverUrl)}" alt="" onerror="this.remove()">` : '') + '</div>';
+    ? `<img src="${esc(coverSrc(coverUrl))}" alt="" referrerpolicy="no-referrer"
+         onerror="this.remove()">` : '') + '</div>';
   t += '<div class="tx"><h2>' + esc(info.title || title || id) + '</h2>';
   const byline = [info.author, info.publisher, info.publishTime ? String(info.publishTime).slice(0, 10) : '']
     .filter(Boolean).join(' · ');
