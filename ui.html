@@ -197,6 +197,20 @@
   }
   .bar .name{font-size:14px; font-weight:600}
   .bar .spacer{flex:1}
+  /* 顶栏正中那颗「AI 导航」：绝对定位是为了不跟着左右两组图标走 —— 左边是「我是谁」，
+     右边是主题与刷新，只有它恒定在视口正中，用户才找得回来。窄到放不下时只留图标。 */
+  .ainavbtn{
+    position:absolute; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:6px; height:30px; padding:0 12px;
+    border-radius:999px; border:1px solid var(--line-2); background:var(--surface-2);
+    color:var(--ink-2); font:inherit; font-size:12.5px; cursor:pointer; white-space:nowrap;
+    transition:background .16s ease, color .16s ease, border-color .16s ease, transform .12s ease;
+  }
+  .ainavbtn:hover{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  .ainavbtn:active{transform:translateX(-50%) scale(.95)}
+  .ainavbtn svg{width:15px; height:15px; flex:none}
+  .ainavbtn.on{background:var(--accent-soft); color:var(--accent); border-color:rgba(47,127,240,.3)}
+  @media (max-width:720px){ .ainavbtn span{display:none} .ainavbtn{padding:0 9px} }
 
   .iconbtn{
     width:30px; height:30px; flex:none; display:grid; place-items:center;
@@ -1274,7 +1288,10 @@
   /* 写作台同理：稿列、正文、坞各自滚，整页不动 —— 打字时页面跟着跳是最刺眼的。 */
   /* 搜索页只有一栏，同样收在这套高度算法里：结果在栏内滚，翻的时候工具条不会滚出视野。 */
   body.feedfit #view > .vpane[data-pane="search"],
-  body.feedfit #view > .vpane[data-pane="write"]{height:calc(100vh - 106px); min-height:0}
+  body.feedfit #view > .vpane[data-pane="write"],
+  /* 内置浏览器同属「一屏刚好」：网页在 iframe 里滚，整页不动。 */
+  body.feedfit #view > .vpane[data-pane="browse"]{height:calc(100vh - 106px); min-height:0}
+  body.feedfit #view > .vpane[data-pane="browse"] > .vbody{overflow:hidden}
   /* 搜索这一屏内部自己收口（.zsplit / .zscroll 各自滚），vbody 不必再滚一层。 */
   body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:hidden}
   @media (min-width:841px){ body.feedfit main{padding-bottom:22px} }
@@ -1294,7 +1311,33 @@
        结果藏掉，连滚都滚不到。 */
     body.feedfit #view > .vpane[data-pane="search"]{height:auto; min-height:0}
     body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:visible}
+    /* 内置浏览器在窄窗也回到整页滚：页面在这一格里放不下时，硬定高只会让 iframe 更窄。 */
+    body.feedfit #view > .vpane[data-pane="browse"]{height:auto; min-height:0}
+    body.feedfit #view > .vpane[data-pane="browse"] > .vbody{overflow:visible}
   }
+  /* ── 内置浏览器（AI 导航那一栏的落脚点）─────
+     上面是地址条，下面整块留给 iframe。iframe 带 sandbox 且不给 allow-same-origin：
+     外面取回来的页面在浏览器看来是不透明源，读不到界面的 localStorage、也调不到本机接口；
+     它要跳转只能靠我们补的那段脚本 postMessage 回来。 */
+  .bzwrap{display:flex; flex-direction:column; min-height:0}
+  body.feedfit .bzwrap{height:100%}
+  .bzbar{flex:none; display:flex; align-items:center; gap:7px;
+    padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper-2)}
+  .bzbar .iconbtn{width:28px; height:28px}
+  .bzbar .iconbtn:disabled{opacity:.32; cursor:default}
+  .bzurl{flex:1; min-width:0; height:30px; padding:0 11px; border-radius:9px;
+    border:1px solid var(--line-2); background:var(--surface-2); color:var(--ink);
+    font:inherit; font-size:12.5px; outline:none}
+  .bzurl:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .bzbody{position:relative; flex:1; min-height:0}
+  .bzframe{width:100%; height:100%; min-height:320px; border:0; display:block; background:#fff}
+  body.feedfit .bzframe{min-height:0}
+  /* 「正在取回」压在 iframe 上：页面自己会盖住它，取回来那一刻才淡出。 */
+  .bzload{position:absolute; inset:0; display:grid; place-items:center; z-index:1;
+    background:var(--surface-2); color:var(--ink-3); font-size:12.5px;
+    transition:opacity .22s ease; pointer-events:none}
+  .bzload.off{opacity:0}
+  @media (prefers-reduced-motion:reduce){ .bzload{transition:none} }
   /* 中栏与右栏自己不平滚：滚的必须是里面那一片（列表 / 正文）。三层都开 overflow
      的话，鼠标滚轮一碰到就整栏一起动，工具条会被滚出视野，也就白设了。 */
   .fewrap > .felist, .fewrap > .feread{overflow:hidden}
@@ -3394,6 +3437,17 @@
     </svg>
   </div>
   <div class="name">归藏</div>
+  <!-- 顶端正中这一颗是「AI 功能导航」：点开在归藏自己的内置浏览器里看 ai-bot.cn，
+       不跳去系统浏览器。地址条就在那一屏顶上，想换哪个站直接改地址。 -->
+  <button class="ainavbtn" id="aiNavBtn" title="AI 功能导航（在归藏里打开）">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="7.2"/>
+      <path d="M2.8 10h14.4"/>
+      <path d="M10 2.8c2 2.1 3 4.5 3 7.2s-1 5.1-3 7.2c-2-2.1-3-4.5-3-7.2s1-5.1 3-7.2z"/>
+    </svg>
+    <span>AI 导航</span>
+  </button>
   <div class="spacer"></div>
   <button class="iconbtn" id="refresh" title="刷新（换过接口 Key 之后点一下就能拿到新书架）">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -5389,6 +5443,9 @@ $('#meHead').onclick = toMe;
 $('#meHead').onkeydown = e => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toMe(); }
 };
+
+// 顶端正中那颗「AI 导航」：在归藏自己的内置浏览器里打开 ai-bot.cn。
+$('#aiNavBtn').onclick = () => openBrowse(BZ_HOME);
 
 /** 把头像与名字、简介涂到每一个标了 data-av 的位置。
  *  一处涂法多处共用：顶栏那颗、侧边栏顶部那一颗、个人主界面那一屏那一大颗，
@@ -9318,7 +9375,7 @@ function paneEl(name) {
   // 「安娜的档案」不进这个名单 —— 它是一页状态 + 两串记录，本来就该整页滚。
   document.body.classList.toggle('feedfit',
     name === 'feed' || name === 'video' || name === 'flomo' || name === 'write'
-    || name === 'search');
+    || name === 'search' || name === 'browse');
   if (changed) {
     shownPane = name;
     slideView(slideDir, name);
@@ -9637,6 +9694,7 @@ function renderView() {
   if (v === 'pick') { renderPickView(); return; }
   if (v === 'me') { renderMeView(); return; }
   if (v === 'anna') { renderAnnaView(); return; }
+  if (v === 'browse') { renderBrowseView(); return; }
   renderSearchView();
 }
 
@@ -15151,7 +15209,9 @@ async function annaListing() {
 
 function renderAnnaView() {
   const {p, body, fresh} = viewPane('anna', viewHeader('安娜的档案',
-    `<button class="deed" id="anOpen" style="height:30px">打开浏览器窗口</button>
+    `<button class="deed" id="anWeb" style="height:30px"
+       title="在归藏的内置浏览器里打开这个镜像（要登录 / 有验证时仍请用窗口）">内置浏览器</button>
+     <button class="deed" id="anOpen" style="height:30px">打开浏览器窗口</button>
      <button class="deed" id="anStop" style="height:30px" hidden>关掉窗口</button>`));
   if (fresh) {
     body.innerHTML = `
@@ -15213,6 +15273,14 @@ function wireAnna(p) {
 
   q('#anLog').onclick = () => showTaskLog({title: '安娜的档案窗口', state: 'running'});
 
+  // 内置浏览器这条路不用等浏览器组件：它由本机后端取回来重送，先看一眼镜像页；
+  // 真登录 / 过验证还是得用上面那颗「打开浏览器窗口」——那一份才有浏览器档案与 cookie。
+  q('#anWeb').onclick = () => {
+    const raw = ((annaState || {}).domain || 'annas-archive.is').trim();
+    const host = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    openBrowse('https://' + host + '/');
+  };
+
   q('#anGo').onclick = async () => {
     const kw = qv();
     if (!kw) { q('#anQ').focus(); whisper('先写个书名或关键词'); return; }
@@ -15265,6 +15333,135 @@ function wireAnna(p) {
     });
   };
 }
+
+/* ── 内置浏览器 ─────────────────────────────
+   「AI 导航」那颗钮与安娜那一栏的「内置浏览器打开」都从这里进。外站地址交给后端
+   /api/browse 取回来重送，iframe 就不再撞 X-Frame-Options 的空白页；页面里点链接由
+   web_browse 补的那段脚本 postMessage 回来，这里接着再取下一页 —— 后退 / 前进就是
+   这份历史在挪。整屏按「一屏刚好」排（body.feedfit），网页在 iframe 里滚，整页不动。 */
+const BZ_HOME = 'https://ai-bot.cn/';
+let BZ = {hist: [], at: -1};
+
+function bzCur() { return BZ.hist[BZ.at] || ''; }
+
+function bzPush(url) {
+  if (!url) return;
+  if (bzCur() === url) return;
+  BZ.hist = BZ.hist.slice(0, BZ.at + 1);
+  BZ.hist.push(url);
+  BZ.at = BZ.hist.length - 1;
+}
+
+/** 从界面任意一处打开内置浏览器。已经在这一屏时只换页、不重铺结构。 */
+function openBrowse(url) {
+  bzPush(url || BZ_HOME);
+  setView('browse');
+}
+
+function bzNav(step) {
+  const to = BZ.at + step;
+  if (to < 0 || to >= BZ.hist.length) return;
+  BZ.at = to;
+  bzLoad(bzCur(), false);
+}
+
+function bzBar() {
+  const p = PANES.browse;
+  if (!p) return;
+  const back = p.querySelector('#bzBack'), fwd = p.querySelector('#bzFwd');
+  if (back) back.disabled = BZ.at <= 0;
+  if (fwd) fwd.disabled = BZ.at >= BZ.hist.length - 1;
+}
+
+function bzLoad(url, push) {
+  if (!url) return;
+  if (push !== false) bzPush(url);
+  const p = PANES.browse;
+  if (!p) return;
+  const f = p.querySelector('#bzFrame');
+  const inp = p.querySelector('#bzUrl');
+  const load = p.querySelector('#bzLoad');
+  if (inp) inp.value = url;
+  if (load) load.classList.remove('off');
+  // 同一地址不重发：/api/state 每 2.6 秒一轮，force 那几趟会走到这里重画这一屏，
+  // 不拦就成了「每几秒刷一次页面」。
+  if (f && f.dataset.src !== url) {
+    f.dataset.src = url;
+    f.src = '/api/browse?url=' + encodeURIComponent(url);
+  }
+  bzBar();
+}
+
+function renderBrowseView() {
+  const {p, body, fresh} = viewPane('browse', viewHeader('内置浏览器',
+    `<button class="deed" id="bzHome" style="height:30px"
+       title="回到 AI 功能导航（ai-bot.cn）">AI 导航</button>`));
+  if (fresh) {
+    body.innerHTML = `
+      <div class="bzwrap">
+        <div class="bzbar">
+          <button class="iconbtn" id="bzBack" title="后退">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4.5L7 10l5.5 5.5"/></svg>
+          </button>
+          <button class="iconbtn" id="bzFwd" title="前进">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5L13 10l-5.5 5.5"/></svg>
+          </button>
+          <button class="iconbtn" id="bzReload" title="刷新这一页">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.7-6.2"/>
+              <path d="M21 4v5h-5"/></svg>
+          </button>
+          <input class="bzurl" id="bzUrl" placeholder="https://ai-bot.cn/" spellcheck="false"
+            autocomplete="off" aria-label="地址">
+          <button class="deed" id="bzGo" style="height:30px">访问</button>
+        </div>
+        <div class="bzbody">
+          <div class="bzload" id="bzLoad">正在取回这一页</div>
+          <iframe class="bzframe" id="bzFrame" title="内置浏览器"
+            referrerpolicy="no-referrer"
+            sandbox="allow-scripts allow-forms"></iframe>
+        </div>
+      </div>`;
+    wireBrowse(p);
+  }
+  bzLoad(bzCur() || BZ_HOME, false);
+}
+
+function wireBrowse(p) {
+  const q = sel => p.querySelector(sel);
+  q('#bzBack').onclick = () => bzNav(-1);
+  q('#bzFwd').onclick = () => bzNav(1);
+  q('#bzReload').onclick = () => {
+    const f = q('#bzFrame');
+    if (f && f.dataset.src) {
+      q('#bzLoad').classList.remove('off');
+      f.src = '/api/browse?url=' + encodeURIComponent(f.dataset.src);
+    }
+  };
+  q('#bzHome').onclick = () => bzLoad(BZ_HOME, true);
+  q('#bzGo').onclick = () => {
+    const u = q('#bzUrl').value.trim();
+    if (u) bzLoad(u, true);
+  };
+  q('#bzUrl').addEventListener('keydown', e => { if (e.key === 'Enter') q('#bzGo').click(); });
+  q('#bzFrame').addEventListener('load', () => {
+    const l = q('#bzLoad');
+    if (l) l.classList.add('off');
+  });
+}
+
+// 网页里点链接 → 那一段补的脚本 postMessage 回来 → 这里接着取下一页。
+// 认一下 e.source：别的窗口 / 扩展发来的消息一概不理。
+window.addEventListener('message', e => {
+  const d = e.data;
+  if (!d || typeof d !== 'object' || typeof d.gzBrowse !== 'string' || !d.gzBrowse) return;
+  const p = PANES.browse;
+  const f = p && p.querySelector('#bzFrame');
+  if (!f || e.source !== f.contentWindow) return;
+  bzLoad(d.gzBrowse, true);
+});
 
 /* ── 书籍详情页 ───────────────────────── */
 

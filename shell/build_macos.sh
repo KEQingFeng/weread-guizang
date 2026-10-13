@@ -47,6 +47,7 @@ APP_FILES=(
   ai_sum.py
   clip_article.py
   web_parse.py
+  web_browse.py
   feed.py
   anna_state.py
   anna_browser.py
