@@ -56,32 +56,37 @@ _FILL_AUTO = ("#e7dcc4", "#d6dfeb", "#d5e5da", "#edd6d0", "#ded5ec", "#e9e0cf", 
 _FONT = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
 
 # ── 排版尺度：框的尺寸四种形态共用，只有坐标各算各的 ──
-_ROW = 17.0                   # 行高
-_PAD_X, _PAD_Y = 11.0, 8.0    # 文字到框边
+# 1.2.0：用户报「节点文字一多，框就挤在一起」。根子是两条 —— 折行太窄（十个字一断，
+# 长句子被堆成三行）＋ 层与层、框与框之间的缝只有十几像素。这里统一放宽：行内多放几个字、
+# 框内多留白、列距与行距翻近一倍；框整体变大，四种形态的画布自然跟着放大，
+# 不用对每种形态各改一套魔法数。CSS 的 .mmnode 内边距与行高跟这里的 _PAD_/_ROW 对齐，
+# 屏幕上的框与导出的 SVG 才对得上（改一处要两处一起改）。
+_ROW = 17.0                   # 行高（与 ui.html .mmnode 的 line-height 同一个数）
+_PAD_X, _PAD_Y = 14.0, 10.0   # 文字到框边（与 .mmnode 的 padding 对齐）
 _CHAR_W = 13.2                # 中文按字宽算，一个字号约这么多像素
-_WRAP_NODE, _WRAP_LEAF = 10, 16
+_WRAP_NODE, _WRAP_LEAF = 12, 20
 _MAX_LINES = 3                # 折三行就截：中途省略比把框撑到屏幕外好
-_BOX_MAX_W = 300.0
-_COL_GAP = 46.0               # 括号图列间距
-_V_GAP = 12.0                 # 同层上下间隔
-_ROOT_GAP = 56.0              # 括号图里两棵树之间
-_MARGIN = 36.0                # 画布留白
+_BOX_MAX_W = 360.0
+_COL_GAP = 64.0               # 括号图列间距
+_V_GAP = 20.0                 # 同层上下间隔
+_ROOT_GAP = 76.0              # 括号图里两棵树之间
+_MARGIN = 44.0                # 画布留白
 _TITLE_ROOM = 24.0            # 标题行占的高度
 _MIN_CANVAS = (360.0, 200.0)  # 空图也要有形状，前端摆视口才不会塌成一条线
 
 # 辐射图：半径按层递增，分支 ≥5 时上下各一半
-_R_INNER = 120.0
-_R_BASE = 205.0
-_R_STEP = 130.0
+_R_INNER = 140.0
+_R_BASE = 235.0
+_R_STEP = 155.0
 _RADIAL_SPLIT = 5
 _ARC_DEG = 160.0
 
 # 鱼骨图：一条脊 + 上下交替的大骨
-_HEAD_GAP = 70.0
-_BONE_RISE = 150.0
-_BONE_LEAN = 78.0
-_BONE_SPAN = 300.0
-_SUB_STEP = 150.0             # 再往外的深度层每条列的间隔
+_HEAD_GAP = 84.0
+_BONE_RISE = 175.0
+_BONE_LEAN = 92.0
+_BONE_SPAN = 340.0
+_SUB_STEP = 175.0             # 再往外的深度层每条列的间隔
 
 
 Node = dict           # 契约里的 Node / Link 都是普通 dict，没类型可继承
