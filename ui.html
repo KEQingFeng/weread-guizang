@@ -2276,7 +2276,9 @@
   .mmsheet>svg.mmedges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none}
   .mmsheet>svg.mmedges path{fill:none}
   .mmsheet>svg.mmedges text{font-size:10px; fill:var(--ink-3)}
-  .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:7px 11px;
+  /* 内边距与行高必须跟 mindmap.py 的 _PAD_X/_PAD_Y/_ROW 对齐：屏幕上量到的框，
+     要跟导出的 SVG 一模一样大，不然「看着不挤」只是这一端的错觉。 */
+  .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:10px 14px;
     font-size:13px; line-height:17px; color:var(--ink);
     border:1px solid rgba(20,30,45,.13); box-shadow:0 1px 2px rgba(20,30,45,.07);
     cursor:grab; user-select:none; overflow:hidden; word-break:break-word;
