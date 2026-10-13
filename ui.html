@@ -1033,6 +1033,33 @@
   .clipta.one{min-height:0; height:34px; line-height:1.5; resize:none; padding:0 13px}
   .clipta:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
   .clipin .stools{padding:11px 0 12px; border-bottom:1px solid var(--line)}
+  /* 顶部不再放常驻粘贴框：复制链接后点这颗手指，自己去读剪贴板并开始解析。
+     解析时外圈那条环从 0 慢慢走到满，解析完成正好转满一圈（见 clipRingStart/Done）。 */
+  .clipdrop{display:flex; flex-direction:column; align-items:center; gap:9px; padding:20px 0 6px}
+  .clipfinger{
+    position:relative; width:72px; height:72px; padding:0; border:0; border-radius:50%;
+    background:transparent; color:var(--accent); cursor:pointer;
+    display:grid; place-items:center; transition:transform .15s ease;
+  }
+  .clipfinger::before{
+    content:''; position:absolute; inset:8px; border-radius:50%;
+    background:var(--accent-soft); transition:background .15s ease;
+  }
+  .clipfinger:hover::before{background:rgba(47,127,240,.2)}
+  .clipfinger:active{transform:scale(.94)}
+  .clipfinger:disabled{color:var(--ink-3); cursor:default}
+  .clipfinger:disabled::before{background:rgba(127,140,160,.12)}
+  .cf-ico{position:relative; z-index:1; width:30px; height:30px}
+  .cf-ring{
+    position:absolute; inset:0; width:72px; height:72px; pointer-events:none;
+    transform:rotate(-90deg);   /* 12 点方向起笔：进度是「从顶上顺时针转一圈」 */
+  }
+  .cf-ring circle{fill:none; stroke-width:3; stroke-linecap:round}
+  .cf-track{stroke:transparent}
+  .clipfinger.busy .cf-track{stroke:rgba(47,127,240,.16)}
+  .cf-bar{stroke:var(--accent); opacity:0}
+  .clipfinger.busy .cf-bar,.clipfinger.done .cf-bar{opacity:1}
+  .cliphelp{font-size:12px; color:var(--ink-3); text-align:center; line-height:1.7; min-height:20px}
   .cliprow{display:flex; align-items:flex-start; gap:12px; padding:12px 15px; border-top:1px solid var(--line)}
   .cliprow:first-child{border-top:0}
   .cliprow .bd{flex:1; min-width:0}
@@ -11052,8 +11079,11 @@ async function importFiles(files) {
 let clipItems = [];      // [{url, state, title, sub, preview, book}]，state: pending/doing/ready/done/bad
 let clipBusy = false;    // 串行抓取时锁住按钮：同一链接点两遍会白跑一趟
 let clipGridSig = '';    // 「最近剪的」网格指纹：书目不变就不重画，切回来不闪
+let clipText = '';       // 从剪贴板读到的原始链接文本（界面顶部不再有常驻粘贴框，存这里）
+let clipRingT = null;    // 环形进度收尾（转满一圈后停一会儿再复位）的定时器
 const CLIP_MAX = 20;     // 与后端 MAX_CLIP_URLS 对齐，超出的先不排队（一次抓太多容易被限流）
-const CLIP = {ta: null, list: null, shelf: null, cnt: null, all: null, parse: null};
+const CLIP = {list: null, shelf: null, cnt: null, all: null, pick: null, hint: null};
+const CLIP_RING_C = 2 * Math.PI * 33;   // 与 SVG 里 r=33 对齐：解析完成正好转满一圈
 const CLIP_ST = {pending: '待抓', doing: '抓取中', ready: '已解析', done: '已入库', bad: '没抓到'};
 
 /** 粘贴框里常有的脏东西：前后的引号、书名号、序号点。两端剥干净再判断。 */
@@ -11080,10 +11110,12 @@ function clipHost(url) {
   try { return decodeURIComponent(seg[2] || ''); } catch (e) { return seg[2] || ''; }
 }
 
-/** 粘贴框 → 待办列表。已经抓过的链接保留它的状态和结果，
- *  新贴进来的排在后面；文本删掉就等于这条不要了（不必单独点「移除」）。 */
-function clipSync() {
-  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+/** 链接文本 → 待办列表。已经抓过的链接保留它的状态和结果，
+ *  新来的排在后面；文本删掉就等于这条不要了（不必单独点「移除」）。
+ *  传了 text 就换一份底稿（剪贴板那一下），不传就按现有底稿重算。 */
+function clipSync(text) {
+  if (text !== undefined) clipText = String(text || '');
+  const links = clipLinks(clipText);
   const prev = new Map(clipItems.map(x => [x.url, x]));
   clipItems = links.slice(0, CLIP_MAX)
     .map(u => prev.get(u) || {url: u, state: 'pending'});
@@ -11146,13 +11178,18 @@ async function clipStep(i, mode, forced) {
   return res;
 }
 
-/** 批量：从头到尾串行，一条落定再动下一条，表头写着「第 3 / 7 条」。 */
-async function clipRunAll(mode) {
-  if (clipBusy) return;
+/** 批量：从头到尾串行，一条落定再动下一条，表头写着「第 3 / 7 条」。
+ *  quiet 是给「点手指自动解析」用的：那边收尾要弹一个「解析已完成」的框，
+ *  不必再让顶部的小纸条说一遍同样的话。返回这一趟的成效，交给调用方去说话。 */
+async function clipRunAll(mode, quiet) {
+  if (clipBusy) return null;
   const todo = clipItems.map((x, i) => ({x, i}))
     .filter(o => (mode === 'save' ? o.x.state !== 'done'
                                   : o.x.state !== 'ready' && o.x.state !== 'done'));
-  if (!todo.length) { whisper(mode === 'save' ? '都入库了，没有要处理的' : '都解析过了'); return; }
+  if (!todo.length) {
+    if (!quiet) whisper(mode === 'save' ? '都入库了，没有要处理的' : '都解析过了');
+    return {okc: 0, failc: 0, n: 0};
+  }
   clipBusy = true;
   renderClipRows();                       // 先把按钮锁住，别让批量途中再点出一条并发的
   const was = clipItems.map(x => x.state);
@@ -11167,9 +11204,113 @@ async function clipRunAll(mode) {
   const failc = clipItems.filter((x, i) => x.state === 'bad' && was[i] !== 'bad').length;
   renderClipRows();
   if (mode === 'save') await drawState(true);   // 新书落架：徽章、最近剪的、本地书库一起接手
-  whisper(mode === 'preview'
-    ? (failc ? `解析好 ${okc} 篇，${failc} 篇没抓出来` : `解析好 ${okc} 篇`)
-    : (failc ? `入库 ${okc} 篇，${failc} 篇没成` : `入库 ${okc} 篇`));
+  if (!quiet) {
+    whisper(mode === 'preview'
+      ? (failc ? `解析好 ${okc} 篇，${failc} 篇没抓出来` : `解析好 ${okc} 篇`)
+      : (failc ? `入库 ${okc} 篇，${failc} 篇没成` : `入库 ${okc} 篇`));
+  }
+  return {okc, failc, n: todo.length};
+}
+
+/* 顶部那颗手指：复制链接后点一下，自己去读剪贴板并开始解析。
+   解析那几秒外圈有环形进度，走到头正好是解析收尾（clipRingDone 把最后一段补满）。 */
+async function clipPick() {
+  if (clipBusy) return;
+  let text = '';
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard');
+    text = await navigator.clipboard.readText();
+  } catch (e) {
+    clipPasteFallback();
+    return;
+  }
+  const links = clipLinks(text);
+  if (!links.length) {
+    whisper('剪贴板里没找到链接：先把文章链接复制上，再点这颗手指');
+    if (CLIP.hint) CLIP.hint.textContent = '剪贴板里没找到链接';
+    return;
+  }
+  await clipAutoParse(links);
+}
+
+/** 浏览器不放行读剪贴板时的退路：弹一栏让人手动粘。
+ *  这是弹层，不是屏顶那个常驻输入框 —— 常驻的位置只留给手指按钮。 */
+function clipPasteFallback() {
+  sheet({
+    title: '读不到剪贴板',
+    text: '浏览器没放行读剪贴板。把链接粘到下面这一栏，一行一个，点「解析正文」就开始。',
+    body: '',
+    editable: true,
+    one: true,
+    ph: '粘贴文章链接，一行一个',
+    actions: [{
+      label: '解析正文', lead: true,
+      run: () => {
+        const links = clipLinks(sBody.value);
+        if (!links.length) { whisper('这一栏里没找到链接'); return; }
+        clipAutoParse(links);
+      },
+    }],
+  });
+}
+
+/** 拿到链接之后的同一条路：填进列表 → 起环形进度 → 串行解析 → 弹框收尾。
+ *  「解析已完成」这个框是需求点名要的：文章这时已经铺在下方列表里等着入库。 */
+async function clipAutoParse(links) {
+  clipSync(links.join('\n'));
+  renderClipRows();
+  if (CLIP.hint) CLIP.hint.textContent = `认出 ${clipItems.length} 条，正在解析正文…`;
+  clipRingStart();
+  const r = await clipRunAll('preview', true);
+  clipRingDone();
+  const good = clipItems.filter(x => x.state === 'ready' || x.state === 'done').length;
+  const bad = clipItems.filter(x => x.state === 'bad').length;
+  if (CLIP.hint) {
+    CLIP.hint.textContent = good
+      ? `解析好 ${good} 篇，在下面等着入库`
+      : '这次没抓出正文，点那一行的「解析」可以再试';
+  }
+  sheet({
+    title: '解析已完成',
+    text: !r || !r.n
+      ? '这些链接之前已经解析过了，文章就在下方列表里。'
+      : good
+        ? `抓出 ${good} 篇正文${bad ? `，另有 ${bad} 篇没抓出来` : ''}。文章已在下方列表里，确认后点「全部入库」。`
+        : '这一趟没抓出正文：对方可能放了验证页。换一条链接再试，或稍后再来。',
+    actions: [{label: '知道了', lead: true}],
+  });
+}
+
+/** 环形进度起步：先把弧归零，再用一段长过渡慢慢挪到 ~92%。
+ *  剩下那一点留给 clipRingDone 在解析真收尾时补满 —— 完成正好转满一圈。 */
+function clipRingStart() {
+  const bar = document.getElementById('cRing');
+  if (!bar) return;
+  clearTimeout(clipRingT);
+  if (CLIP.pick) { CLIP.pick.classList.remove('done'); CLIP.pick.classList.add('busy'); }
+  bar.style.transition = 'none';
+  bar.style.strokeDasharray = CLIP_RING_C;
+  bar.style.strokeDashoffset = CLIP_RING_C;   // 0%：整条弧收在起点
+  void bar.getBoundingClientRect();           // 强制落一下，不然过渡会从上一趟的终点接着跑
+  bar.style.transition = 'stroke-dashoffset 14s cubic-bezier(.16,.68,.35,1)';
+  bar.style.strokeDashoffset = CLIP_RING_C * 0.08;   // 慢慢走到 92%
+}
+
+function clipRingDone() {
+  const bar = document.getElementById('cRing');
+  if (!bar) return;
+  bar.style.transition = 'stroke-dashoffset .35s ease-out';
+  bar.style.strokeDashoffset = 0;             // 补满：正好一圈
+  clearTimeout(clipRingT);
+  clipRingT = setTimeout(() => {
+    bar.style.transition = 'none';
+    bar.style.strokeDashoffset = CLIP_RING_C;
+    if (CLIP.pick) {
+      CLIP.pick.classList.remove('busy');
+      CLIP.pick.classList.add('done');
+      setTimeout(() => CLIP.pick.classList.remove('done'), 800);
+    }
+  }, 900);
 }
 
 /** 一行：左边说清「这是哪篇」，中间一枚状态，右边三个动作。
@@ -11227,10 +11368,8 @@ function clipRemove(i) {
   const it = clipItems[i];
   if (!it) return;
   clipItems.splice(i, 1);
-  if (CLIP.ta) {
-    const kept = clipItems.map(x => x.url).join('\n');
-    CLIP.ta.value = kept;
-  }
+  // 底稿跟着列表走：移除一条就等于那一条链接也不要了，下次「全部入库」不会又冒出来
+  clipText = clipItems.map(x => x.url).join('\n');
   renderClipRows();
 }
 
@@ -11260,13 +11399,13 @@ function renderClipRows() {
   } else {
     CLIP.list.replaceChildren(...clipItems.map((x, i) => clipRowEl(x, i)));
   }
-  // 「解析 / 入库」看的是粘贴框里有没有链接，不是列表：列表要按了才铺出来，
+  // 「全部入库」看的是手上有没有链接，不是列表：列表要解析完才铺出来，
   // 用它来决定能不能点就成了「先点才亮、亮了才能点」。
-  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+  const links = clipLinks(clipText);
   const left = clipItems.filter(x => x.state !== 'done').length;
   const busy = clipItems.filter(x => x.state === 'doing').length;
   CLIP.cnt.textContent = !links.length
-    ? '还没贴链接'
+    ? '还没读到链接'
     : !clipItems.length
       ? `认出 ${Math.min(links.length, CLIP_MAX)} 条链接`
         + (links.length > CLIP_MAX ? `（一次最多 ${CLIP_MAX} 条，其余的先留着）` : '')
@@ -11274,7 +11413,7 @@ function renderClipRows() {
              : `${clipItems.length} 条 · 待处理 ${left}`;
   const lock = clipBusy;
   if (CLIP.all) CLIP.all.disabled = lock || !links.length;
-  if (CLIP.parse) CLIP.parse.disabled = lock || !links.length;
+  if (CLIP.pick) CLIP.pick.disabled = lock;
 }
 
 /** 剪藏那一格的文章：卡片与本地书架同款（阅读 / 原文 / 分类 / 标签 / 定位 / 删除）。
@@ -11326,12 +11465,12 @@ function renderClipShelf() {
 }
 
 function wireClip(p) {
-  CLIP.ta = p.querySelector('#cTa');
   CLIP.list = p.querySelector('#cList');
   CLIP.shelf = p.querySelector('#cShelf');
   CLIP.cnt = p.querySelector('#cCnt');
   CLIP.all = p.querySelector('#cAll');
-  CLIP.parse = p.querySelector('#cParse');
+  CLIP.pick = p.querySelector('#cPick');
+  CLIP.hint = p.querySelector('#cHint');
 
   const open = p.querySelector('#cOpen');
   // 剪藏的文章住在自己那一格：打开的就是这一格的文件夹，不是整个书库
@@ -11347,27 +11486,16 @@ function wireClip(p) {
       t = setTimeout(() => { clipGridSig = ''; renderClipShelf(); }, 160);
     });
   }
-  CLIP.parse.onclick = () => { clipSync(); renderClipRows(); clipRunAll('preview'); };
+  // 手指按钮：读剪贴板 → 自动解析。这是这一屏唯一的入口。
+  CLIP.pick.onclick = clipPick;
   CLIP.all.onclick = () => { clipSync(); renderClipRows(); clipRunAll('save'); };
   p.querySelector('#cClear').onclick = () => {
     if (clipBusy) return;
     clipItems = [];
-    CLIP.ta.value = '';
+    clipText = '';
+    if (CLIP.hint) CLIP.hint.textContent = '复制文章链接，点手指自动解析正文';
     renderClipRows();
   };
-  // 贴完直接 Cmd/Ctrl+Enter 开抓，不必再把鼠标移到按钮上
-  CLIP.ta.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (!clipBusy) { clipSync(); renderClipRows(); clipRunAll('preview'); }
-    }
-  });
-  let timer = null;
-  CLIP.ta.addEventListener('input', () => {
-    clearTimeout(timer);
-    // 只数不抓：贴的过程里就把「认出几条」和按钮亮灭跟上，按下去才真的动网络
-    timer = setTimeout(renderClipRows, 220);
-  });
 }
 
 function renderClipView() {
@@ -11375,12 +11503,26 @@ function renderClipView() {
     `<button class="deed" id="cOpen" style="height:30px">打开这一格的文件夹</button>`, 'clip'));
   if (fresh) {
     body.innerHTML = `<div class="clipin">
-        <textarea class="clipta" id="cTa" spellcheck="false"
-          placeholder="粘贴文章链接，一行一个。微信公众号认得最准；知乎、小红书、X（推特）有专门解析 —— X 的推文能直接取到，知乎和小红书要对方先放行（没登录时常常只回验证页，那就拿不到）。&#10;例：https://mp.weixin.qq.com/s/…"></textarea>
+        <div class="clipdrop">
+          <button class="clipfinger" id="cPick" type="button"
+            title="复制文章链接后点一下：自动读取剪贴板并解析正文"
+            aria-label="读取剪贴板并解析正文">
+            <svg class="cf-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9.6 11.2V4.9a1.7 1.7 0 0 1 3.4 0v6.3"/>
+              <path d="M13 11V9.7a1.55 1.55 0 0 1 3.1 0V11"/>
+              <path d="M16.1 11.3v-.6a1.55 1.55 0 0 1 3.1 0v4.2a6.1 6.1 0 0 1-6.1 6.1h-1.2a5.2 5.2 0 0 1-3.7-1.5l-3.1-3.1a1.6 1.6 0 0 1 2.3-2.3l1.6 1.6"/>
+            </svg>
+            <svg class="cf-ring" viewBox="0 0 72 72" aria-hidden="true">
+              <circle class="cf-track" cx="36" cy="36" r="33"/>
+              <circle class="cf-bar" id="cRing" cx="36" cy="36" r="33"/>
+            </svg>
+          </button>
+          <div class="cliphelp" id="cHint">复制文章链接，点手指自动解析正文</div>
+        </div>
         <div class="stools">
           <span class="cnt" id="cCnt"></span>
           <span class="grow"></span>
-          <button class="deed" id="cParse" style="height:30px">解析正文</button>
           <button class="deed sure" id="cAll" style="height:30px">全部入库</button>
           <button class="deed" id="cClear" style="height:30px">清空</button>
         </div>

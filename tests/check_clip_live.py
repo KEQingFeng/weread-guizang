@@ -53,8 +53,12 @@ def shots(page, tag):
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
-    page = browser.new_page(viewport={"width": 1440, "height": 900},
-                            device_scale_factor=2)
+    # 1.2.0 起剪藏顶部没有粘贴框：点手指读剪贴板。真机走查也得先拿到剪贴板权限，
+    # 否则 readText 被拒，界面只会弹「读不到剪贴板」那条退路。
+    context = browser.new_context(viewport={"width": 1440, "height": 900},
+                                  device_scale_factor=2)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page = context.new_page()
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -64,12 +68,13 @@ with sync_playwright() as pw:
 
     # 1. 进剪藏那一屏
     page.click('#nav button[data-v="clip"]')
-    page.wait_for_selector(f'{PANE} #cTa', timeout=8000)
+    page.wait_for_selector(f'{PANE} #cPick', timeout=8000)
     page.wait_for_timeout(400)
     cnt0 = page.inner_text(f'{PANE} #cCnt')
     clip_total = page.inner_text('#bgClip')
-    check("进剪藏：粘贴框在位", page.is_visible(f'{PANE} #cTa'))
-    check("进剪藏：空列表有话说明", "还没贴链接" in cnt0, cnt0)
+    check("进剪藏：手指按钮在位，老粘贴框已撤", page.is_visible(f'{PANE} #cPick')
+          and page.locator(f'{PANE} #cTa').count() == 0)
+    check("进剪藏：空列表有话说明", "还没读到链接" in cnt0, cnt0)
     # 空态只在「书库里确实一篇剪来的都没有」时才该出现；沙盒里之前跑剩下的，不算 bug
     if clip_total.strip() in ("", "0"):
         check("进剪藏：一篇没有时空态在位", page.is_visible(f'{PANE} #cShelf .emptyline'))
@@ -79,19 +84,25 @@ with sync_playwright() as pw:
               f"徽章 {clip_total} 张卡片")
     shots(page, "01-empty")
 
-    # 2. 贴链接（含一行噪声文本，验证只认 http）
+    # 2. 把链接（含一行噪声文本，验证只认 http）写进剪贴板，再点手指
     noise = "顺手贴的一句说明文字"
-    page.fill(f'{PANE} #cTa', "\n".join([noise] + links))
-    page.wait_for_timeout(700)
-    hint = page.inner_text(f'{PANE} #cCnt')
-    check("贴上去就先数出条数", f"认出 {len(links)} 条" in hint, hint)
-
-    # 3. 解析正文
-    page.click(f'{PANE} #cParse')
+    page.evaluate("t => navigator.clipboard.writeText(t)", "\n".join([noise] + links))
+    page.click(f'{PANE} #cPick')
     page.wait_for_function(
         "() => {const p=document.querySelector('%s');"
-        "return [...p.querySelectorAll('.cliprow .st')].every(s => !/待抓|抓取中/.test(s.textContent));}"
-        % PANE, timeout=120000)
+        "const a=[...p.querySelectorAll('.cliprow .st')];"
+        "return a.length && a.every(s => !/待抓|抓取中/.test(s.textContent));}" % PANE,
+        timeout=120000)
+    # 解析完会弹「解析已完成」，先确认它在，再关掉继续往下走
+    page.wait_for_selector("#veil.open", timeout=8000)
+    sheet_title = page.inner_text("#sheetTitle") if page.is_visible("#sheetTitle") else ""
+    check("解析完弹「解析已完成」", "解析已完成" in sheet_title, sheet_title)
+    page.locator("#sheetActs button", has_text="知道了").click()
+    page.wait_for_timeout(300)
+    hint = page.inner_text(f'{PANE} #cCnt')
+    check("解析后数出条数", f"{len(links)} 条" in hint, hint)
+
+    # 3. 解析正文
     rows = page.evaluate(ROWS)
     print("  行：%s" % [(r["st"], r["nm"][:18]) for r in rows])
     check("解析后行数=链接数（噪声行被丢掉）", len(rows) == len(links), len(rows))
@@ -155,7 +166,7 @@ with sync_playwright() as pw:
     shots(page, "06-reader")
     page.click('div[data-pane="read"] #rdBack')
     page.wait_for_timeout(900)
-    check("返回回到剪藏那一屏", page.is_visible(f'{PANE} #cTa'))
+    check("返回回到剪藏那一屏", page.is_visible(f'{PANE} #cPick'))
 
     # 9. 移除一条：只删列表项，不动书库
     before = page.locator(f'{PANE} .cliprow').count()
