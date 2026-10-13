@@ -1468,6 +1468,14 @@
   .vtbook .lt i{font-style:normal; font-size:10px; line-height:1; padding:3px 6px; border-radius:6px;
     border:1px solid var(--line-2); color:var(--ink-3); background:var(--paper)}
   .vtbook .lt i.on{color:var(--accent); border-color:var(--accent); background:var(--accent-soft)}
+  /* 「转写中」那一行：它还不是一本书，点不动，只把任务摆出来给人看 */
+  .vtbook.pending{cursor:default}
+  .vtbook.pending:hover{background:transparent}
+  .vtbook.pending .nm{color:var(--ink-2)}
+  .vtbook.pending .ct{color:var(--accent)}
+  .vtbook .ct .spin{display:inline-block; width:8px; height:8px; margin-right:2px;
+    border:1.5px solid var(--accent); border-top-color:transparent; border-radius:50%;
+    vertical-align:-1px; animation:spin .8s linear infinite}
   /* 任务区（能力灯 + 贴链接 + 进度）占上头一块，长视频转完的日志也不会把工作台顶出视野 */
   .vttask{flex:none; min-height:0; max-height:46%; overflow:auto; overscroll-behavior:contain}
   .vtwork{flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line)}
@@ -4110,7 +4118,7 @@
 <script>
 const $ = s => document.querySelector(s);
 
-let running = false, runningBook = '', runningKind = '', lastStarted = null, tick = null, busyLog = false;
+let running = false, runningBook = '', runningKind = '', runningAt = 0, lastStarted = null, tick = null, busyLog = false;
 // 订阅/视频这两屏的「上一次长什么样」：轮询里拿来比对，变了才重铺，不然每 2.6 秒白刷一遍
 let feedStamp = '';
 let local = {};            // 已导出的书：bookId → 统计（含 total，用来算百分比）
@@ -5000,6 +5008,9 @@ async function drawState(force) {
   // 正好关了页面），卡片就永远显示「正在取」且再也点不动 —— 用户说的「终止后不能再取」。
   runningBook = running ? String(t.book || '') : '';
   runningKind = running ? String(t.kind || '') : '';
+  // 这一趟任务的开工时刻：日志是环形缓冲，上一支的 [done 100%] 还挂在尾部，
+  // 不按时间截一刀，新任务会被读成「已经转完」（进度条要么不走、要么一上来就 100%）。
+  runningAt = running ? Number(t.started_at || 0) : 0;
   loggedIn = !!(s.login && s.login.logged_in);
   keySet = !!(s.weread && s.weread.key_set);
   flomoSet = !!(s.flomo && s.flomo.url_set);
@@ -13218,6 +13229,7 @@ function renderFlomoView() {
    这条线是分钟级长任务：进度从「进展」日志里读那一行 [阶段 45%] 说明，收尾用##GUIZANG##那行
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
+let vidStopping = false;   // 「停止」已经点下、收尾还没走完：按钮立刻改成「正在停」
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
 let annaDomDirty = false;   // 安娜的档案域名输入被改过、还没保存（同上，别被轮询盖回）
 // 安娜的档案那一栏的状态账本（窗口开没开、接住几份、进书架几本）。
@@ -13253,6 +13265,23 @@ function vidHrs(sec) {
   const m = Math.floor(s / 60), r = s % 60;
   if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`;
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+}
+
+/* 正在转的那一支记在本机：刷新后左栏要能把它摆回来、标成「转写中」，而不是整条消失。
+   真源仍是后端那句 running —— 任务一停，这一行立刻收掉，localStorage 只补标题。 */
+const VID_PENDING_KEY = 'gz_video_pending';
+function vidPendingSet(title) {
+  try {
+    localStorage.setItem(VID_PENDING_KEY,
+      JSON.stringify({title: String(title || '').slice(0, 120), at: Date.now()}));
+  } catch (e) {}
+}
+function vidPendingGet() {
+  try { return JSON.parse(localStorage.getItem(VID_PENDING_KEY) || 'null') || null; }
+  catch (e) { return null; }
+}
+function vidPendingClear() {
+  try { localStorage.removeItem(VID_PENDING_KEY); } catch (e) {}
 }
 
 /** 「能不能跑」那一行：一项一个小灯。缺什么、要不要点「补齐组件」，进来一眼就知道。 */
@@ -13388,14 +13417,26 @@ async function vidStart() {
     return;
   }
   vidShowProg(5, '正在起任务');
+  vidPendingSet((vidPlan && vidPlan.title) || url);
+  vidProgSig = '';        // 上一支的进度指纹作废，新任务从「正在起任务」重新走
   whisper('已经开始，转完自动进书架');
   vidTools();
   drawState(true);
 }
 
 async function vidStop() {
+  if (vidStopping) return;
+  // 点击即停：先当场把按钮锁住、回一句「正在停」，不让界面干等后端那趟停任务请求
+  // （它以前要等进程退出或 10 秒超时才回话）。收尾完成后由轮询那条线翻面、走进 vidFinish。
+  vidStopping = true;
+  vidTools();
+  whisper('已请求停止，马上退，下好的音频会留着');
   const r = await videoPost({act: 'stop'});
-  whisper(r.msg || '已请求停止');
+  if (!r.ok) {
+    vidStopping = false;
+    vidTools();
+    whisper(r.msg || '没能停下来，再点一次试试');
+  }
 }
 
 /** 进度条：从日志里读最后一行 [阶段 45%] 说明。阶段拿不到就报「正在准备」。 */
@@ -13432,23 +13473,34 @@ function vidShowProg(pct, note, stage) {
 async function vidTick() {
   if (!VIDEO.prog || shownPane !== 'video') return;
   let lines = [];
-  try { lines = ((await (await fetch('/api/log?tail=60')).json()).lines) || []; }
+  try { lines = ((await (await fetch('/api/log?tail=80')).json()).lines) || []; }
   catch (e) { return; }
   let hit = null;
+  // /api/log 回的是 [{t, s}] 而不是裸字符串：以前这里直接拿对象去 exec，正则永远不中，
+  // 进度条于是停在「正在起任务 5%」再也不动（用户报的「进度条状态未更新」）。
   for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /^\[(\S+)\s+(\d*)%\]\s*(.*)$/.exec(lines[i]);
+    // 只认这一趟任务开工之后的进度行：环形缓冲里还留着上一支的收尾那一行，
+    // 不按时间截一刀，新任务会被读成「已经转完」。
+    if (runningAt && Number((lines[i] || {}).t || 0) < runningAt) continue;
+    const text = String((lines[i] || {}).s || '');
+    const m = /^\[(\S+)\s+(\d*)%\]\s*(.*)$/.exec(text);
     if (m) { hit = {stage: m[1], pct: m[2] === '' ? -1 : +m[2], note: m[3]}; break; }
   }
-  const sig = hit ? `${hit.stage}|${hit.pct}|${hit.note}` : '';
+  // 刷新后任务还在跑、但日志里一时还没有 [阶段 N%] 那一行：也把条子亮出来，别让这一块空着。
+  const live = !!(running && runningKind === 'video');
+  const sig = hit ? `${hit.stage}|${hit.pct}|${hit.note}` : (live ? 'pending' : '');
   if (sig === vidProgSig) return;
   vidProgSig = sig;
   if (hit) vidShowProg(hit.pct, hit.note, hit.stage);
+  else if (live) vidShowProg(-1, '正在准备，马上就有进度', 'plan');
 }
 
 /** 完成：进度条换成结果，能直接开读；书架那面网格也一起接手。 */
 function vidFinish(r) {
   const box = VIDEO.prog;
   if (!box) return;
+  vidPendingClear();      // 转完了（或失败 / 被停）：左栏那行「转写中」可以撤了
+  vidProgSig = '';
   box.classList.add('on');
   box.replaceChildren();
   const hd = document.createElement('div');
@@ -14134,26 +14186,33 @@ function renderVideoShelf() {
     const q = u.q.trim().toLowerCase();
     all = all.filter(b => ((b.title || '') + (b.uploader || '')).toLowerCase().includes(q));
   }
+  // 正在转的那一支：后端 running 就是唯一真源。刷新之后它也照旧摆在这一栏最上面，
+  // 标成「转写中」，而不是整条从书架里消失、让人以为白点了。
+  const live = !!(running && runningKind === 'video');
+  const pend = live ? vidPendingGet() : null;
   if (VIDEO.shelfHead) {
-    VIDEO.shelfHead.textContent = all.length
-      ? (all.length === VT.books.length ? '一共 ' + all.length + ' 本'
-        : '筛出 ' + all.length + ' / 共 ' + VT.books.length + ' 本')
-      : '转出来的书 · 还没有';
+    const bits = [];
+    if (all.length) bits.push(all.length === VT.books.length ? '一共 ' + all.length + ' 本'
+      : '筛出 ' + all.length + ' / 共 ' + VT.books.length + ' 本');
+    if (live) bits.push('1 支转写中');
+    VIDEO.shelfHead.textContent = bits.length ? bits.join(' · ') : '转出来的书 · 还没有';
   }
   // 指纹带上条数：一本没有时信号是空串，而初值也是空串 —— 不带上就永远铺不出空态那句说明
   // 导出那份也算进指纹：刚导完一份，「没导」那盏灯要立刻变「导 1」，不能等下一次轮询
-  const sig = u.folder + '|' + u.tag + '|' + u.q + '|' + all.length + '|'
+  // 「转写中」那行也算进去：任务一起一停、换了一支，左栏得立刻跟着改。
+  const sig = (live ? 'live:' + ((pend && pend.title) || '转写中') : '-') + '|'
+    + u.folder + '|' + u.tag + '|' + u.q + '|' + all.length + '|'
     + all.map(b => b.id + ':' + (b.updated_at || 0)
       + ':' + (b.segments || 0) + ':' + ((b.exports || []).length)
       + ':' + ((mine(b.id).tags || []).join('/'))).join(',') + '|'
     + (VT.book ? VT.book.id : '-') + '|' + vtEdits();
   if (sig === vidShelfSig) return;
   vidShelfSig = sig;
-  if (!all.length) {
+  if (!all.length && !live) {
     VIDEO.shelf.replaceChildren(modEmpty('video'));
     return;
   }
-  VIDEO.shelf.replaceChildren(...all.map(b => {
+  const rows = all.map(b => {
     const row = feEl('div', 'vtbook' + (VT.book && VT.book.id === b.id ? ' on' : ''));
     row.title = (b.title || b.id) + '　·　点开它的转写';
     row.onclick = () => vtOpenBook(b.id);
@@ -14185,7 +14244,20 @@ function renderVideoShelf() {
     row.append(mk);
     row.append(feBtn('读', () => openReader(b.id, b.title || b.id, 'video'), 'rd'));
     return row;
-  }));
+  });
+  if (live) {
+    const p = feEl('div', 'vtbook pending');
+    p.title = '这支视频正在转写，转完自动进左边书架；刷新也照样在这儿';
+    const mk = feEl('div', 'mk');
+    mk.append(feEl('span', 'nm', (pend && pend.title) || '视频转写'));
+    const ct = feEl('span', 'ct');
+    ct.append(feEl('i', 'spin'), document.createTextNode(' 转写中'
+      + (pend && pend.at ? ' · ' + when(pend.at / 1000) + ' 起' : '')));
+    mk.append(ct);
+    p.append(mk);
+    rows.unshift(p);
+  }
+  VIDEO.shelf.replaceChildren(...rows);
 }
 
 /** 起没起得来、能不能点，全看后端那一句 running。运行中按钮换成「停止」。
@@ -14194,9 +14266,14 @@ function renderVideoShelf() {
 function vidTools() {
   const busy = !!(running && runningKind === 'video');
   const other = !!(running && runningKind !== 'video');
+  if (!busy) vidStopping = false;   // 任务翻面了，重新给「停止」让路
   if (VIDEO.start) VIDEO.start.disabled = vidBusy || running;
   if (VIDEO.plan) VIDEO.plan.disabled = vidBusy || running;
-  if (VIDEO.stop) VIDEO.stop.hidden = !busy;
+  if (VIDEO.stop) {
+    VIDEO.stop.hidden = !busy;
+    VIDEO.stop.disabled = vidStopping;
+    VIDEO.stop.textContent = vidStopping ? '正在停…' : '停止';
+  }
   if (VIDEO.cnt) {
     const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
     VIDEO.cnt.textContent = other ? '有别的任务在跑，等它完了再转视频'
@@ -14380,6 +14457,7 @@ function renderVideoView() {
   }
   vidRenderPlan();
   vidReloadCap();
+  vidTick();      // 进来就先把当前进度摆上，别等下一拍轮询（切屏时进度块不该空着）
   vtBooks().then(() => { renderVideoShelf(); vtTools(); });
 }
 
