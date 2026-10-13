@@ -51,6 +51,7 @@ import person
 import readplan
 import sync as cloudsync
 import video_note
+import web_browse
 import web_parse
 import writer as writer_mod
 
@@ -4467,6 +4468,17 @@ class Handler(BaseHTTPRequestHandler):
             with open(fp, "rb") as f:
                 return self._send(200, mime, f.read(),
                                   {"Cache-Control": "public, max-age=86400"})
+
+        # 内置浏览器：外站页面由本机取回来、改一改再送进界面里那个 iframe。这不是 JSON
+        # 接口（iframe 要的就是一页 HTML），所以不走 _dispatch；失败也回 200 + 一页人话，
+        # 别让内核甩自己的错误页。地址校验、内网拦截、<base> 与点链接脚本都在 web_browse.py。
+        if path == "/api/browse":
+            r = web_browse.browse((q.get("url") or [""])[0])
+            if not r.get("ok"):
+                return self._send(200, "text/html; charset=utf-8",
+                                  web_browse.error_page(r.get("msg"), r.get("url")))
+            return self._send(200, r["ctype"], r["body"],
+                              {"X-Content-Type-Options": "nosniff"})
 
         if path == "/api/state":
             with _lock:
