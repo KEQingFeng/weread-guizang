@@ -4108,17 +4108,18 @@ def video_view(q):
             limit = _vnum(one("limit")) or VIDEO_SEG_PAGE
             limit = max(1, min(VIDEO_SEG_PAGE, limit))
             try:
-                t = video_note.load_transcript(d, keyword=one("q"), start=frm, end=to)
+                # 切片与「要不要拼全文」都交给读取层：长视频一屏只算一屏的账，
+                # 不再先把整本转写拼成 text 再扔掉（加载慢的那一笔就在这儿）。
+                t = video_note.load_transcript(d, keyword=one("q"), start=frm, end=to,
+                                               offset=offset, limit=limit,
+                                               with_text=False)
             except ValueError as e:
                 return {"ok": False, "msg": str(e)[:180]}
-            rows = t.pop("segments", [])
             # 全文（整本转写能到几十万字）和段落是同一份东西的两种写法，跟着筛出来的段落
             # 一起发会让人误解一次，还白占一大块带宽。界面上要全文的地方（重建、导出）
-            # 都在后端自己做，这里一条都不发 —— 不弹掉的话上面那句注释就只是愿望。
+            # 都在后端自己做，这里一条都不发 —— with_text=False 已经把它省在源头，
+            # 这一 pop 是给将来改回默认值兜底。
             t.pop("text", None)
-            page = rows[offset:offset + limit]
-            t.update({"segments": page, "offset": offset,
-                      "returned": len(page), "has_more": offset + len(page) < len(rows)})
             return {"ok": True, "transcript": t}
         # status 给「能不能跑」那一行用：available 说工具齐不齐，asr 说云转写的地址
         # 填没填 —— 后者只有一份配置视图（key 只回有没有、尾号），明文永不出后端。
