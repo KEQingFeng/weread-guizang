@@ -53,6 +53,11 @@
     /* iOS 那味道的缓动：末段回弹一点，不像 linear 那样硬停 */
     --spring:cubic-bezier(.32,.72,0,1);
     --pop:cubic-bezier(.34,1.56,.64,1);
+    /* 内容宽：全站只有这一个值。原先宽页（订阅 / 视频 / 便签 / 写作 / 搜索 / 阅读器 /
+       内置浏览器）把 main 放宽到 1440，书架/统计这些留在 1080 —— 侧边栏连同整页左右边
+       随页面来回横跳，正是用户说的「突然出现一个左右变动极大」。宽窄只留这一处，
+       切页就只剩淡入，不再有横移。 */
+    --main-w:min(1440px, 100%);
   }
   /* 主题：默认跟随系统；用户在界面上手动选了就以 html[data-theme] 为准 */
   @media (prefers-color-scheme:dark){
@@ -114,7 +119,10 @@
   }
 
   *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
+  /* 滚动条一直是「有 / 没有」两态：书架/统计这些整页滚的屏，滚动条在；订阅/阅读器/
+     浏览器这些「一屏刚好」的屏，滚动条不在。二者一换，整页会左右挪一条滚动条的宽
+     （Windows 上约 15px），看着就是「切过去页面横跳一下」。留一条常驻槽位，宽度就稳了。 */
+  html{-webkit-text-size-adjust:100%; scrollbar-gutter:stable}
   body{
     margin:0; min-height:100vh; color:var(--ink);
     background:#eef1f7;
@@ -366,7 +374,8 @@
   .abitem span{display:block; font-size:11px; line-height:1.5; color:var(--ink-3)}
 
   /* ── 主体 ───────────────────────────── */
-  main{position:relative; z-index:1; max-width:1080px; margin:0 auto; padding:22px 20px 80px}
+  /* 宽度走 --main-w：所有视图共用同一块舞台，侧边栏与左右留白在哪一屏都不动。 */
+  main{position:relative; z-index:1; max-width:var(--main-w); margin:0 auto; padding:22px 20px 80px}
 
   .split{display:grid; grid-template-columns:340px minmax(0,1fr); gap:16px; align-items:start}
   @media (max-width:880px){ .split{grid-template-columns:1fr} }
@@ -772,9 +781,11 @@
     display:flex; align-items:center; gap:9px; width:100%; height:34px; padding:0 11px;
     border:0; border-radius:9px; background:transparent; cursor:pointer; text-align:left;
     font:inherit; font-size:13px; color:var(--ink-2);
-    transition:background .16s ease, color .16s ease;
+    transition:background .16s ease, color .16s ease, transform .12s var(--spring);
   }
   .side nav button:hover{background:rgba(127,140,160,.13); color:var(--ink)}
+  /* 按下去要有一丝回弹：这一下是「点中了」的即时回话，跟卡片、图标钮一个口径。 */
+  .side nav button:active{transform:scale(.975)}
   .side nav button.on{background:var(--accent-soft); color:var(--accent); font-weight:550}
   .side nav button .badge{margin-left:auto; font-size:11px; color:var(--ink-3)}
   .side nav button.on .badge{color:var(--accent); opacity:.8}
@@ -1262,7 +1273,8 @@
     padding:15px 18px 40px;
   }
   /* 窄一点就把右栏当抽屉：开正文时正文铺满、清单退回两栏，中栏收起，
-     不然 1080 的舞台切三刀，每栏都只剩读两行就换行的宽度。 */
+     不然窄舞台切三刀，每栏都只剩读两行就换行的宽度。（舞台统一成 --main-w 之后，
+     这一档管的是「窗口本身不够宽」，不再是「这一页比别页窄」。） */
   @media (max-width:1120px){
     .fewrap{grid-template-columns:var(--fe-side) minmax(0,1fr)}
     .fewrap.feopen .felist{display:none}
@@ -1295,7 +1307,8 @@
   /* 搜索这一屏内部自己收口（.zsplit / .zscroll 各自滚），vbody 不必再滚一层。 */
   body.feedfit #view > .vpane[data-pane="search"] > .vbody{overflow:hidden}
   @media (min-width:841px){ body.feedfit main{padding-bottom:22px} }
-  body.feedfit main{max-width:min(1440px, 100%)}
+  /* 宽页不再单独放宽 main —— 舞台宽度统一在 --main-w（见 main 那条），否则从书架切到
+     订阅/视频时整页连侧边栏一起横移。这里只收底部留白，配合上面的「一屏刚好」。 */
   @media (max-width:840px){
     /* 窄窗不焊死高度：三栏本来就已经收成一二列，再定高就会把清单挤成一条缝，
        这时候让它回到「整页滚」更顺手。 */
@@ -1851,9 +1864,9 @@
   body.reading #view > .vpane[data-pane="read"]{height:calc(100vh - 106px); min-height:0}
   /* main 默认下留白 56px；阅读时不需要，收到 22px 才能贴底。 */
   @media (min-width:841px){ body.reading main{padding-bottom:22px} }
-  /* 阅读器是三栏（目录 / 正文 / 笔记），1080 的居中宽度切完只剩 270 出头的正文，
-     字还没看两行就换行了。读书时把舞台放宽，正文才配得上一本书。 */
-  body.reading main{max-width:min(1440px, 100%)}
+  /* 阅读器是三栏（目录 / 正文 / 笔记），窄舞台切完只剩 270 出头的正文，字还没看两行
+     就换行 —— 所以舞台统一取够宽的那一档（--main-w，见 main 那条）。这也正是「不能再
+     按页切宽度」的原因：一按页切，从书架点开一本书整页就左右挪一下。 */
   /* 专注模式是「只出现书籍的内容」：这时连左侧那条应用导航也让开，
      整屏都是书。退出还是那三下 —— F、再点一次「专注」、或返回。 */
   .shell, .side{transition:grid-template-columns .3s var(--spring), gap .3s var(--spring),
@@ -2831,8 +2844,10 @@
   .wcard .cv{border-radius:14px 14px 0 0}
 
   /* 留白：更接近参考图的呼吸感。底部原来留 96px 是给右下角那条任务抽屉让位，
-     1.0.6 抽屉撤了，收到 56px —— 够避开批量条，也不再让最后一行卡片悬在半空。 */
-  main{max-width:1120px; padding:26px 22px 56px}
+     1.0.6 抽屉撤了，收到 56px —— 够避开批量条，也不再让最后一行卡片悬在半空。
+     宽度不在这里再定：舞台只认上面那条 --main-w，这里只管内边距，免得这一处
+     又把书架带回 1120，跟宽页的 1440 撞出一次横跳。 */
+  main{padding:26px 22px 56px}
   .shell{grid-template-columns:196px minmax(0,1fr); gap:20px}
   .side{padding:16px 12px}
   /* 窄窗口（分屏、小窗）：侧边栏收到内容上方，导航横排——2.0 的 .shell 覆盖了旧断点，这里补回来 */
@@ -9431,16 +9446,23 @@ function prefersReduced() { return !!(reduceMq && reduceMq.matches); }
  *  pane 会被反复拽回半透明，整屏看着像「书没加载出来」。已经在跑的那条让它跑完，
  *  不再重开（重开才会闪）。 */
 const slideAnim = new WeakMap();
+const slideSeen = new Set();   // 这一屏是不是开过：第一次进来多给一点，回头客快一点
 function slideView(dir, name) {
   const p = PANES[name || v];
   if (!p || !p.animate || prefersReduced()) return;
   const prev = slideAnim.get(p);
   if (prev && prev.playState === 'running') return;   // 正在进场：续着跑，别重淡
-  const dy = dir === 'pd' ? 18 : -18;
+  // 第一次把这一屏建出来是该给足的交接；之后再来只是「换回熟悉的地方」，
+  // 位移和时长都收一档，连点侧边栏才会觉得是滑过去而不是慢吞吞淡一下。
+  const first = !slideSeen.has(name);
+  slideSeen.add(name);
+  const dy = (dir === 'pd' ? 1 : -1) * (first ? 16 : 11);
+  // 收尾那一小段用 easing 的末段回弹带过去（--spring 自己就带一点），
+  // 关键帧只留起止两帧 —— 中间不插帧，合成器不必逐帧重算。
   const a = p.animate(
-    [{opacity: 0, transform: `translate3d(0,${dy}px,0) scale(.992)`},
+    [{opacity: 0, transform: `translate3d(0,${dy}px,0) scale(${first ? .994 : .997})`},
      {opacity: 1, transform: 'none'}],
-    {duration: 420, easing: SPRING});
+    {duration: first ? 440 : 340, easing: SPRING});
   slideAnim.set(p, a);
   const done = () => { if (slideAnim.get(p) === a) slideAnim.delete(p); };
   a.finished.then(done, done);
