@@ -309,7 +309,7 @@ def incoming_listing(dirpath, limit=20):
                         "mtime": int(st.st_mtime), "ok": keepable(name)})
     except Exception:
         return []
-    out.sort(key=lambda r: r["mtime"], reverse=True)
+    out.sort(key=lambda r: (-r["mtime"], r["name"]))
     return out[:limit]
 
 

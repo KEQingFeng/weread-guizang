@@ -276,6 +276,9 @@ fresh_state()
 d1 = write_incoming("第一本.md", MD_BYTES)
 time.sleep(0.02)
 d2 = write_incoming("第二本.mobi", b"MOBIPACK" * 10)
+# 秒级文件系统下 sleep(0.02) 可能让两份 mtime 落在同一秒，排序便看不出先后；
+# 强制把第二份的 mtime 推后，保证「新→旧」这一条稳定可判。
+os.utime(d2, (os.stat(d1).st_mtime + 10,) * 2)
 os.makedirs(os.path.join(anna.incoming_dir(DD), "子目录"), exist_ok=True)
 rows = anna.incoming_listing(anna.incoming_dir(DD))
 chk("下载格按时间新→旧排", [r["name"] for r in rows] == ["第二本.mobi", "第一本.md"],
