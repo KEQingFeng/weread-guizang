@@ -158,6 +158,8 @@ JS = """() => {
   const st = (typeof SUM !== 'undefined') ? SUM : {};
   return {
     open: !!(l && l.classList.contains('open')),
+    rail: (() => { const n = document.querySelector('.rdnotes');
+                   return !!(n && n.classList.contains('aiopen')); })(),
     tag: (document.getElementById('aiSumTag') || {}).textContent || '',
     info: (document.getElementById('aiSumInfo') || {}).textContent || '',
     tip: (document.getElementById('aiSumTip') || {}).textContent || '',
@@ -225,10 +227,11 @@ def main():
                                   encoding="utf-8")
 
     srv, fake_url = start_fake()
-    cfg = post("/api/action", {"action": "agent.save", "url": fake_url, "key": "",
+    cfg = post("/api/action", {"action": "ai.save", "url": fake_url, "key": "",
                                "model": MODEL})
-    chk("把上游指到假服务（配置走的就是设置页那一个口）",
-        cfg.get("ok") is True and cfg.get("agent", {}).get("model") == MODEL, cfg)
+    chk("把阅读 AI 的上游指到假服务（独立配置走的就是设置页那一个口）",
+        cfg.get("ok") is True and cfg.get("ai", {}).get("model") == MODEL
+        and cfg.get("ai", {}).get("independent") is True, cfg)
 
     try:
         with sync_playwright() as pw:
@@ -255,7 +258,8 @@ def main():
             pg.click("#rdSum")
             pg.wait_for_timeout(120)
             mid = pg.evaluate(JS)
-            chk("点小结开的是这一层，不是跳走一个新视图", mid["open"], mid)
+            chk("点小结在右栏第三栏内联铺开（.rdnotes 挂 aiopen、小结层可见）",
+                mid["open"] and mid["rail"], mid)
             done, lens = wait_stream(pg)
             chk("流式是一段一段吐到屏上的（一屏一次到位就是假流）",
                 len(set(l for l in lens if 0 < l < len("".join(BRIEF_PIECES)))) >= 2, lens)
@@ -312,13 +316,16 @@ def main():
             # ── 4. 关掉重开：读缓存，不再问一次 ───────────────────────
             pg.keyboard.press("Escape")
             pg.wait_for_timeout(200)
-            chk("Esc 收掉这一层", pg.evaluate(JS)["open"] is False)
+            esc0 = pg.evaluate(JS)
+            chk("Esc 收掉这一层（aiopen 跟着去掉，右栏回到笔记列表）",
+                esc0["open"] is False and esc0["rail"] is False, esc0)
             STATE["hits"].clear()
             pg.click("#rdSum")
             pg.wait_for_timeout(500)
             back = pg.evaluate(JS)
             chk("重开直接把上次那份铺上，不再问模型（问一次就烧一次钱）",
-                STATE["hits"] == [] and back["open"] and back["sumText"].strip() == learn,
+                STATE["hits"] == [] and back["open"] and back["rail"]
+                and back["sumText"].strip() == learn,
                 {"hits": len(STATE["hits"]), "len": len(back["sumText"])})
             chk("重开时模式还记着学习理解（不静默退回默认）", back["style"] == "learn", back)
             pg.click('#aiSumStyle button[data-k="brief"]')
@@ -446,7 +453,10 @@ def main():
             pg.evaluate("() => document.getElementById('aiSumClose').click()")
             pg.wait_for_timeout(200)
             STATE["mode"] = "error"
-            pg.evaluate("() => document.getElementById('aiSumLayer').classList.add('open')")
+            pg.evaluate("""() => {
+              document.getElementById('aiSumLayer').classList.add('open');
+              document.querySelector('.rdnotes').classList.add('aiopen');
+            }""")
             pg.evaluate("""() => { SUM.text=''; SUM.book='%s'; SUM.chapter='';
                                     SUM.scope='whole'; SUM.module='clip';
                                     sumChips(); sumRun(); }""" % CLIP)
@@ -470,7 +480,7 @@ def main():
             chk("断的不覆盖上一次那份好的", f0.read_text(encoding="utf8") == keep,
                 f0.read_text(encoding="utf8")[:40])
 
-            # ── 10. 这层的卫生：溢出、emoji、点外关闭 ──────────────────
+            # ── 10. 这层的卫生：溢出、emoji、页签收栏 ──────────────────
             STATE["mode"] = "ok"
             lay = pg.evaluate("""() => {
               const l = document.getElementById('aiSumLayer');
@@ -481,32 +491,22 @@ def main():
             chk("界面上一个 emoji 都没有",
                 not EMOJI.search(pg.evaluate(
                     "() => document.getElementById('aiSumLayer').textContent")))
-            # 上一层还开着（第 9 步断流那份留在屏上），而它是 position:fixed 满屏的，
-            # 「小结」那颗钮在它底下 —— 直接点必然被拦。先用它自己的关闭钮收掉，
-            # 再从入口开一遍：这样下面验的才是「刚开的这一层」，也顺手证明入口没被锁死。
+            # 收栏与入口：先从不直接点「小结」（上一次断流那份还在），用收起钮收掉，
+            # 再从入口开一遍 —— 验的是「刚开的这一次」，也顺手证明入口没被自己锁死。
             pg.evaluate("() => document.getElementById('aiSumClose').click()")
             pg.wait_for_timeout(250)
             pg.click("#rdSum")
             pg.wait_for_timeout(400)
-            again = pg.evaluate(
-                "() => document.getElementById('aiSumLayer').classList.contains('open')")
+            again = pg.evaluate(JS)
             chk("收掉之后还能从「小结」这颗钮再开一遍（入口不许被这一层自己锁死）",
-                again is True, again)
-            # 点外关闭：这几层的判定写的是 e.target === 这一层自己（见 ui.html 的
-            # ntFloatsWire），也就是「点到那块暗纱上」才算。往全局的 .veil（设置弹窗的底）
-            # 上 dispatch 一个事件根本打不中它 —— 用真鼠标点到面板以外的角落才是用户那一下。
-            spot = pg.evaluate("""() => {
-              const l = document.getElementById('aiSumLayer');
-              const pr = l.querySelector('section').getBoundingClientRect();
-              return pr.left > 60 ? {x: 20, y: 20}
-                                  : {x: Math.round(pr.right + 12), y: 20};
-            }""")
-            pg.mouse.click(spot["x"], spot["y"])
-            pg.wait_for_timeout(320)
-            gone = pg.evaluate(
-                "() => document.getElementById('aiSumLayer').classList.contains('open')")
-            chk("点面板外面那圈底就把这层收掉（开着关不掉等于把阅读器锁死）",
-                gone is False, spot)
+                again["open"] and again["rail"], again)
+            # 内联页签的关闭方式：点回「划线」那一页就把小结收回去（新的收栏交互，
+            # 不再有一层满屏暗纱可点）。
+            pg.click('.nttabs button[data-tab="marks"]')
+            pg.wait_for_timeout(300)
+            gone = pg.evaluate(JS)
+            chk("点回「划线」页就把小结收回去（开着的栏收不掉等于把阅读器锁死）",
+                gone["open"] is False and gone["rail"] is False, gone)
             pg.keyboard.press("Escape")
             br.close()
             srv.shutdown()
@@ -515,7 +515,7 @@ def main():
     finally:
         # 把上游摘干净：别的套件不该看见一个连着的假服务
         try:
-            post("/api/action", {"action": "agent.save", "url": "", "key": "", "model": ""})
+            post("/api/action", {"action": "ai.save", "url": "", "key": "", "model": ""})
         except Exception:
             pass
         try:

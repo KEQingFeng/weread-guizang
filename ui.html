@@ -1961,6 +1961,21 @@
     text-overflow:ellipsis; font-variant-numeric:tabular-nums}
   .ntfoot.busy{color:var(--accent)}
   .ntfoot.bad{color:#b3352c}
+  /* 右栏第三个页签：AI 小结内联铺在笔记栏里（1.1.0 从全屏浮层搬下来，
+     不再弹窗、不遮正文）。开着时把划线 / 条目那两段收起来，让它独占这一栏。 */
+  .ntai{display:none; flex:1; min-height:0; flex-direction:column}
+  .rdnotes.aiopen .ntchips, .rdnotes.aiopen .ntbody, .rdnotes.aiopen .ntfoot{display:none}
+  .rdnotes.aiopen .ntai{display:flex}
+  .ntaihd{flex:none; display:flex; align-items:center; gap:8px; padding:8px 10px 4px}
+  .ntaibar{flex:none; display:flex; align-items:center; gap:8px; padding:0 10px 7px;
+    border-bottom:1px solid var(--line)}
+  .ntai .aisum{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain;
+    padding:8px 11px 12px}
+  .ntaifoot{flex:none; display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    padding:7px 10px; border-top:1px solid var(--line)}
+  .ntaifoot .deed{height:26px}
+  .ntaiinfo{flex:none; padding:0 11px 8px; font-size:10.5px; color:var(--ink-3);
+    min-height:15px; line-height:1.45; word-break:break-word}
   /* ── 条目编辑器 / 思维导图 / 模板 ─────────────────────
      这两样都比右栏宽得多：条目要写长文（标题、表格、引用别处），导图要看整棵树。
      所以各开一层浮窗，写完了再把结果落回这本书的文件夹里。 */
@@ -3894,34 +3909,9 @@
   </section>
 </div>
 
-<!-- AI 小结：读书 / 剪藏 / 视频转笔记 / 订阅条目共用这一层。
-     为什么只做一层、不做四个按钮：四种内容本来就落在同一个阅读页里，入口分散到四个视图
-     就等于要用户先想清楚「我这本算哪一种」—— 而哪一种该读多少，是内容自己决定的事
-     （后端 ai_sum.scope_for 那条规矩），用户只需要挑「细学一遍还是捡个骨架」。 -->
-<div class="ntlay narrow" id="aiSumLayer">
-  <section role="dialog" aria-modal="true" aria-label="AI 小结">
-    <div class="edhd">
-      <span class="edttl hard">AI 小结</span>
-      <span class="aisumtag" id="aiSumTag"></span>
-      <span class="grow"></span>
-      <button class="deed" id="aiSumClose" type="button" title="关闭（Esc）">关闭</button>
-    </div>
-    <div class="mapbar">
-      <div class="rdseg rdseg-fit" id="aiSumStyle"></div>
-      <span class="grow"></span>
-      <span class="mmtip" id="aiSumTip"></span>
-    </div>
-    <div class="aisum md" id="aiSumBody"></div>
-    <div class="bdfoot">
-      <button class="deed" id="aiSumRun" type="button" title="按上面这一排重问一次">重新生成</button>
-      <button class="deed" id="aiSumMap" type="button" title="画成一张还能自己改的思维导图，存进这本书的文件夹">
-        画一张导图</button>
-      <button class="deed" id="aiSumNote" type="button" title="填进这本书的笔记条目，改完再存">存为笔记</button>
-      <button class="deed" id="aiSumCopy" type="button" title="复制这段小结的原文">复制</button>
-      <span id="aiSumInfo"></span>
-    </div>
-  </section>
-</div>
+<!-- AI 小结从前是一层全屏浮层（.ntlay），1.1.0 起改成阅读器右栏的第三个页签内联显示：
+     点「小结」或任意章节后，结果就在右栏原地铺开，不再弹窗、也不遮住正文。
+     标记随阅读器骨架一起重建（见 readerSkeleton），接线走 wireReader 的委托。 -->
 
 <!-- 画板：一块板一张 fabric 画布，左边挑板、右边画。开在页面最上面（.ntlay）而不是右栏里 ——
      画的东西要看清笔触，332px 的栏里画不出「边看书边涂鸦」那种随手一勾。 -->
@@ -15602,6 +15592,7 @@ function readerSkeleton() {
       <div class="nttabs">
         <button data-tab="marks" class="on">划线<b id="ntCM">0</b></button>
         <button data-tab="entries">条目<b id="ntCE">0</b></button>
+        <button data-tab="ai" title="AI 按当前这一章生成小结，结果就地铺在右栏">小结</button>
         <span class="grow"></span>
         <button id="ntNew" title="写一篇长笔记，可以引用书里别处的话">写条目</button>
         <button id="ntMap" title="把这些笔记画成一张思维导图">导图</button>
@@ -15612,6 +15603,26 @@ function readerSkeleton() {
       <div class="ntchips" id="ntChips"></div>
       <div class="ntbody" id="ntList"><div class="ntempty">正在读取这本书的笔记…</div></div>
       <div class="ntfoot" id="ntStatus">笔记存在这本书的文件夹里</div>
+      <section class="ntai" id="aiSumLayer" role="dialog" aria-label="AI 小结">
+        <div class="ntaihd">
+          <span class="aisumtag" id="aiSumTag"></span>
+          <span class="grow"></span>
+          <button class="deed" id="aiSumClose" type="button" title="收起小结栏（Esc）">收起</button>
+        </div>
+        <div class="ntaibar">
+          <div class="rdseg rdseg-fit" id="aiSumStyle"></div>
+          <span class="grow"></span>
+          <span class="mmtip" id="aiSumTip"></span>
+        </div>
+        <div class="aisum md" id="aiSumBody"></div>
+        <div class="ntaifoot">
+          <button class="deed" id="aiSumRun" type="button" title="按上面这一排重问一次">重新生成</button>
+          <button class="deed" id="aiSumMap" type="button" title="画成一张还能自己改的思维导图，存进这本书的文件夹">画图</button>
+          <button class="deed" id="aiSumNote" type="button" title="填进这本书的笔记条目，改完再存">存为笔记</button>
+          <button class="deed" id="aiSumCopy" type="button" title="复制这段小结的原文">复制</button>
+        </div>
+        <div class="ntaiinfo" id="aiSumInfo"></div>
+      </section>
     </aside>
   </div>`;
 }
@@ -15640,6 +15651,9 @@ function wireReader(p) {
     if (t.id === 'rdPrev') { rdGo(RD.at - 1); return; }
     if (t.id === 'rdNext') { rdGo(RD.at + 1); return; }
     if (t.dataset.dl) { rdDownload(t.dataset.dl); return; }
+    // 小结栏那几颗钮（重问 / 画图 / 存笔记 / 复制 / 换模式）：这套标记随阅读器骨架重建，
+    // 所以走这里统一接，不在脚本顶层绑死。
+    if (aiSumAct(t)) return;
     if (t.id === 'rdAsk') { rdAsk(); return; }
     if (t.id === 'rdSum') { aiSumOpen(); return; }
     if (t.id === 'rdFocus') { rdSetFocus(!document.body.classList.contains('focus')); return; }
@@ -16279,7 +16293,19 @@ function ntStatus(msg, cls) {
   el.className = 'ntfoot' + (cls ? ' ' + cls : '');
 }
 
-function ntTab(k) { NT.tab = k === 'entries' ? 'entries' : 'marks'; ntPaint(); }
+function ntTab(k) {
+  if (k === 'ai') {
+    if (!RD.book) { whisper('先打开一本内容'); return; }
+    NT.tab = 'ai';                 // 先把页签定住，ntPaint 才不会把刚铺开的小结又藏回去
+    ntAiShow(true);
+    ntPaint();                     // 页签高亮 + 列表照常画在底下
+    aiSumOpen();                   // 小结走自己的加载：读盘上那份，没有才问
+    return;
+  }
+  NT.tab = k === 'entries' ? 'entries' : 'marks';
+  ntAiShow(false);
+  ntPaint();
+}
 
 function ntFilter(f, v) {
   if (f === 'tag') NT.tag = NT.tag === v ? '' : v;     // 再点一次就取消
@@ -16363,6 +16389,15 @@ function ntEntryRow(e) {
     + '</div></div>';
 }
 
+/** 小结页签的显示开关：一个只管右栏 CSS，一处集中，不散在几个函数里各改一次。 */
+function ntAiShow(on) {
+  const p = PANES.read;
+  const layer = document.getElementById('aiSumLayer');
+  const notes = p && p.querySelector('.rdnotes');
+  if (layer) layer.classList.toggle('open', !!on);
+  if (notes) notes.classList.toggle('aiopen', !!on);
+}
+
 /** 列表：只画当前页签 + 当前筛选那几条。一本书的笔记量（几十到几百）一次铺完就够，
  *  犯不上上虚拟滚动。 */
 function ntPaint() {
@@ -16371,6 +16406,7 @@ function ntPaint() {
   ntChips(p.querySelector('#ntChips'));
   p.querySelectorAll('.nttabs button[data-tab]').forEach(b =>
     b.classList.toggle('on', b.dataset.tab === NT.tab));
+  ntAiShow(NT.tab === 'ai');
   const doc = NT.doc;
   const marks = (doc && doc.marks) || [], entries = (doc && doc.entries) || [];
   const cm = p.querySelector('#ntCM'), ce = p.querySelector('#ntCE');
@@ -18372,8 +18408,9 @@ function ntFloatsWire() {
   const tpl = document.getElementById('ntTplLayer');
   const map = document.getElementById('ntMapLayer');
   const bd = document.getElementById('bdLayer');
-  const sum = document.getElementById('aiSumLayer');
-  [ed, tpl, map, bd, sum].forEach(l => {
+  // 小结栏现在内联在右栏，不再是一层暗纱浮层 —— 点它的空白不该把自己收起，
+  // 所以它不参与「点面外关闭」这一批。
+  [ed, tpl, map, bd].filter(Boolean).forEach(l => {
     l.addEventListener('mousedown', e => { if (e.target === l) ntLayerClose(l); });
   });
   document.getElementById('ntEdSave').onclick = () => ntEdSave(false);
@@ -18605,13 +18642,22 @@ async function sumReadCache() {
   return true;
 }
 
-async function sumLoad() {
+async function sumLoad(autoRun) {
   const my = ++SUM.seq;
   sumStop();
   sumTag();
   const has = await sumReadCache();
   if (my !== SUM.seq) return;             // 期间又换了章 / 换了模式，这一发作废
   if (has) { sumInfo('上次生成的那份 · 就在这本书的 _ai/ 里'); return; }
+  // 翻章自动跟随（autoRun 传 false）时不自动问模型 —— 用户的钱不该被他随手翻页花掉；
+  // 点「小结」进来（不传）才顺手生成，那是他明确要的那一下。
+  if (autoRun === false) {
+    sumBody('<div class="summsg">这一章还没生成过小结。点上面的「重新生成」现问一次，'
+      + '或换一种读法。</div>');
+    sumInfo('');
+    sumTools();
+    return;
+  }
   sumRun();
 }
 
@@ -18691,14 +18737,23 @@ async function aiSumOpen() {
   if (!RD.book) { whisper('先打开一本内容'); return; }
   SUM.book = RD.book;
   SUM.chapter = sumNow();
-  $sum('Layer').classList.add('open');
+  NT.tab = 'ai';
+  ntAiShow(true);                       // 右栏切到小结页签，就地铺开，不再弹窗
+  const p = PANES.read;
+  if (p) p.querySelectorAll('.nttabs button[data-tab]').forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === 'ai'));
   sumChips();
   await sumLoad();
+}
+/** 从右栏收起小结。不清内容（下次再开先读盘上那份，不再问一遍）。 */
+function aiSumHide() {
+  ntAiShow(false);
+  if (NT.tab === 'ai') { NT.tab = 'marks'; ntPaint(); }
 }
 function aiSumClose() {
   SUM.seq++;                    // 还在吐的那一发就此收手，关掉之后不必再动屏幕
   sumStop();
-  $sum('Layer').classList.remove('open');
+  aiSumHide();
 }
 
 /** 一键导图：画完直接落进这本书的 mindmap.json，界面开的是那张能接着手改的图。
@@ -18721,7 +18776,7 @@ async function aiSumShowMap() {
   // 导图层跟着这本书的笔记走（它按 NT.book 回盘上那张）。对不上就明说，
   // 免得把另一本书的图当成刚画的这张 —— 拿错了比画错了更难查。
   if (NT.book !== SUM.book) { whisper('这本书的笔记栏没跟着换过来，先回阅读页'); return; }
-  $sum('Layer').classList.remove('open');
+  aiSumHide();                  // 先把小结页签收回去，再把导图开在它上面
   document.getElementById('ntMapLayer').classList.add('open');
   MM.book = '';                 // 逼它回盘上重读：刚存进去的那张才是 AI 画的
   await mmLoad();
@@ -18733,9 +18788,9 @@ async function aiSumShowMap() {
 function aiSumNote() {
   const text = (SUM.text || '').trim();
   if (!text) { whisper('还没有小结内容'); return; }
-  // 先收掉小结层再开编辑器：两层都是 .ntlay、同一个 z-index，小结层写在后面就盖在上面，
-  // 编辑器的「保存」点下去只会被它接走（画导图那条路早就这么处理了）。
-  $sum('Layer').classList.remove('open');
+  // 先收掉小结页签再开编辑器；原先两层都是全屏浮层、同 z-index，小结写在后面就会
+  // 盖住编辑器。现在小结在右栏内联，先收起再开也一样干净。
+  aiSumHide();
   ntEdOpen(null);
   const t = document.getElementById('ntEdTitle');
   t.value = ((NT.meta && NT.meta.title) || SUM.book) + ' · ' + sumStyleName(SUM.style) + '小结';
@@ -18747,26 +18802,34 @@ function aiSumNote() {
   whisper('填好了，改完按 ⌘/Ctrl + S 存进这本书');
 }
 
-$sum('Close').onclick = aiSumClose;
-$sum('Run').onclick = () => {
-  if (SUM.busy) { sumRun(); return; }           // 那颗钮这时写着「停下」
-  SUM.text = '';
-  sumRun();
-};
-$sum('Map').onclick = aiSumMap;
-$sum('Note').onclick = aiSumNote;
-$sum('Copy').onclick = () => {
-  const text = (SUM.text || '').trim();
-  if (!text) { whisper('还没有小结内容'); return; }
-  selCopy(text);
-};
-$sum('Style').onclick = e => {
-  const b = e.target.closest && e.target.closest('button');
-  if (!b || !b.dataset.k || b.dataset.k === SUM.style) return;
-  SUM.style = b.dataset.k;
-  sumChips();
-  sumLoad();
-};
+/** 小结栏里那几颗钮的入口。标记随阅读器骨架每次重建，所以走 wireReader 的委托，
+ *  不再在脚本顶层 `$sum('Run').onclick = …` —— 那些元素现在不在页面初始 DOM 里。 */
+function aiSumAct(t) {
+  if (!t || !t.closest || !t.closest('#aiSumLayer')) return false;
+  if (t.id === 'aiSumClose') { aiSumClose(); return true; }
+  if (t.id === 'aiSumRun') {
+    if (SUM.busy) { sumRun(); return true; }     // 那颗钮这时写着「停下」
+    SUM.text = '';
+    sumRun();
+    return true;
+  }
+  if (t.id === 'aiSumMap') { aiSumMap(); return true; }
+  if (t.id === 'aiSumNote') { aiSumNote(); return true; }
+  if (t.id === 'aiSumCopy') {
+    const text = (SUM.text || '').trim();
+    if (!text) { whisper('还没有小结内容'); return true; }
+    selCopy(text);
+    return true;
+  }
+  if (t.dataset && t.dataset.k && t.closest('#aiSumStyle')) {
+    if (t.dataset.k === SUM.style) return true;
+    SUM.style = t.dataset.k;
+    sumChips();
+    sumLoad();
+    return true;
+  }
+  return false;
+}
 
 /* ── 左栏当前章 ──────────────────────────────── */
 /** 标记左栏当前章，并把它滚进可视区（别让选中项跑到列表外面）。 */
@@ -18790,6 +18853,12 @@ async function rdGo(i) {
   rdMark(i);
   rdCrumb(i);
   if (NT.here) ntPaint();          // 「只在本章」跟着这一章筛，翻章就得跟着换
+  // 小结页签开着时，翻到哪一章就把右栏那份跟到哪一章：先读盘上那份，没存过就等
+  // 用户点「重新生成」—— 翻页不该悄悄花他的模型钱（代价那一说法在 sumLoad 里）。
+  if (NT.tab === 'ai' && SUM.book === RD.book) {
+    SUM.chapter = sumNow();
+    sumLoad(false);
+  }
   try { localStorage.setItem(rdStoreKey(RD.book), String(i)); } catch (e) { /* 忽略 */ }
   const bookSeq = p.dataset.seq;
   const mySeq = (+p.dataset.chseq || 0) + 1;
@@ -19865,7 +19934,7 @@ function paintAi(cfg) {
   }
   const ku = $('#aikey');
   if (ku) ku.placeholder = aiCfg.key_set ? '已保存 ····' + (aiCfg.key_tail || '') : 'sk-…';
-  if (!aiFilled && (aiCfg.url || aiCfg.model)) {
+  if (!aiFilled && aiCfg.independent && (aiCfg.url || aiCfg.model)) {
     aiFilled = true;
     const uu = $('#aiurl'), mu = $('#aimodel');
     if (uu) uu.value = aiCfg.url || '';
