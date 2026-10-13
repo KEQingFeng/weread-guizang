@@ -1509,6 +1509,24 @@
      卡头，正文用页内那套 Markdown 渲染。和订阅、视频共用 body.feedfit 的高度算法，
      滚动只发生在 .fmscr 这一层 —— 工具条不会被滚走，翻页也不会把整页顶下去。 */
   .fmwrap{display:flex; flex-direction:column; height:100%; min-height:0}
+  /* 左右两栏：左边一支笔（灵感随记），右边那条时间线。形状照 Memos / flomo 来 ——
+     记东西和翻旧账是两件事，并排放着就不用「先切页面再写」，写完抬头就能看见它落在最上面。 */
+  .fmcols{display:flex; flex:1; min-height:0}
+  .fmleft{flex:none; width:clamp(238px, 26vw, 320px); display:flex; flex-direction:column;
+    min-height:0; border-right:1px solid var(--line); background:var(--paper)}
+  .fmcompose{display:flex; flex-direction:column; gap:9px; padding:14px 14px 12px; height:100%; min-height:0}
+  .fmcompose .ttl{font-size:12px; font-weight:600; color:var(--ink-2); letter-spacing:.02em}
+  .fmcompose textarea{
+    flex:1 1 auto; min-height:150px; resize:none; padding:11px 12px; border-radius:var(--r-sm);
+    border:1px solid var(--line-2); background:var(--surface); color:var(--ink);
+    font:inherit; font-size:12.5px; line-height:1.7; outline:none;
+    transition:border-color .16s ease, box-shadow .16s ease}
+  .fmcompose textarea:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .fmcompose .bar{display:flex; align-items:center; gap:8px}
+  .fmcompose .bar .grow{flex:1}
+  .fmcompose .bar .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .fmcompose .hint{font-size:11px; line-height:1.6; color:var(--ink-3)}
+  .fmright{flex:1; min-width:0; display:flex; flex-direction:column; min-height:0}
   .fmtools{flex:none; display:flex; align-items:center; gap:9px; flex-wrap:wrap;
     padding:10px 14px; border-bottom:1px solid var(--line); background:var(--paper)}
   .fmtools .cnt{font-size:11.5px; color:var(--ink-3)}
@@ -1584,6 +1602,12 @@
   .fmfoot{display:flex; align-items:center; gap:10px; padding:12px 16px; font-size:11.5px; color:var(--ink-3)}
   .fmnote{padding:14px 16px; font-size:12px; color:var(--ink-3); line-height:1.7}
   @media (max-width:840px){
+    /* 窄窗两栏改上下排：左栏挤成一条缝之后，写笔记比看时间线还难用。整页这时候是滚的
+       （见上面 feedfit 那条），所以左栏跟着一起滚，不做「窗里再开一扇窗」。 */
+    .fmcols{flex-direction:column}
+    .fmleft{width:auto; border-right:0; border-bottom:1px solid var(--line)}
+    .fmcompose{height:auto}
+    .fmcompose textarea{flex:none; min-height:118px}
     .fmcard{margin:0 6px 7px}
     .fmimg img{width:88px; height:88px}
   }
@@ -12600,7 +12624,7 @@ function renderFeedView() {
 let fmMemos = [], fmTotal = 0, fmTags = [], fmStats = {}, fmErr = '';
 let fmBusy = false;
 const fmFilter = {tag: '', q: ''};
-const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null};
+const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null, new: null, add: null, newCnt: null};
 /* 一次铺这么多条：几百条一把铺完要给每张卡算一次 Markdown，首屏就慢下来了。时间线的用法
    是「从上往下扫」，扫到底再要下一批完全够用。 */
 const FM_PAGE = 120;
@@ -12796,7 +12820,7 @@ function renderFlomoList() {
     const note = feEl('div', 'fmnote');
     note.innerHTML = fmErr
       ? `<b>没读出来</b>${esc(fmErr)}`
-      : '<b>这一格还是空的</b>flomo 网页版「设置 → 账号详情 → 导出」会把全部笔记打成一个 zip'
+      : '<b>这一格还是空的</b>左边那栏可以直接写一条灵感。要把 flomo 的旧账搬进来：flomo 网页版「设置 → 账号详情 → 导出」会把全部笔记打成一个 zip'
         + '（里面一页 HTML 加一个附件目录）。点上面那颗「导入 flomo 导出包」选它，'
         + '一条条笔记就落在这台机器上了 —— 只有本机能读到，flomo 那边一个字不动。'
         + '之后想深加工某一条，点它右下角的「收进书架」，它就成了书库里一本能划线、能问 AI、能导出的书。';
@@ -12859,6 +12883,32 @@ async function flomoLoad(offset) {
 function flomoReload() {
   if (FM.scr) FM.scr.scrollTop = 0;
   flomoLoad(0);
+}
+
+/** 左栏那支笔的字数：跟卡头同一个口径（去空白与记号），写的时候心里有个数。 */
+function fmNewCount() {
+  if (!FM.newCnt) return;
+  const s = FM.new ? (FM.new.value || '') : '';
+  FM.newCnt.textContent = s.trim() ? (s.replace(/\s+/g, '').length + ' 字') : '';
+}
+
+/** 左边那支笔记一条：字段与「导进来的一条」同一个口径（后端 add_memo 那一路），
+ *  所以标签统计、收进书架、记忆画像一样认它，右边时间线也会把它排在该在的位置。
+ *  记完只重取这一屏的第一页 —— 刚写下的一条一定在最新那批里，不必整页重铺。 */
+async function fmAdd() {
+  const box = FM.new;
+  if (!box) return;
+  const md = (box.value || '').trim();
+  if (!md) { whisper('还没写内容'); box.focus(); return; }
+  const btn = FM.add;
+  if (btn) { btn.disabled = true; btn.classList.add('busy'); }
+  const r = await flomoPost({act: 'add', md});
+  if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
+  if (!r || !r.ok) { whisper((r && r.msg) || '这条没记上'); return; }
+  box.value = '';
+  fmNewCount();
+  whisper(r.dupe ? '这条刚记过，没重复存' : `记下了 · 本机 ${r.total || 0} 条`);
+  drawState(true).then(() => flomoReload());
 }
 
 /** 导入：前端把文件读成 base64 再 POST —— 和「导入书籍」同一条统一入口，
@@ -12990,6 +13040,19 @@ function wireFlomo(p) {
   FM.cnt = p.querySelector('#fmCnt');
   FM.q = p.querySelector('#fmQ');
   FM.file = p.querySelector('#fmFile');
+  FM.new = p.querySelector('#fmNew');
+  FM.add = p.querySelector('#fmAdd');
+  FM.newCnt = p.querySelector('#fmNewCnt');
+
+  // 左栏那支笔：点「记下来」或 Ctrl / ⌘ + Enter 都记一条；打字时只更字数，不打后端。
+  if (FM.add) FM.add.onclick = () => fmAdd();
+  if (FM.new) {
+    FM.new.addEventListener('input', fmNewCount);
+    FM.new.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fmAdd(); }
+    });
+  }
+  fmNewCount();
 
   const imp = p.querySelector('#fmImport');
   if (imp) imp.onclick = () => FM.file.click();
@@ -13018,16 +13081,33 @@ function renderFlomoView() {
     `<button class="deed" id="fmImport" style="height:30px">导入 flomo 导出包</button>`, 'flomo'));
   if (fresh) {
     body.innerHTML = `<div class="fmwrap">
-        <div class="fmtools">
-          <input class="f" id="fmQ" placeholder="搜正文与标签" autocomplete="off" spellcheck="false">
-          <button class="deed" id="fmPic" style="height:28px">记忆画像</button>
-          <button class="ic" id="fmWipe" title="清掉本机导入的这些笔记">清空</button>
-          <span class="grow"></span>
-          <span class="cnt" id="fmCnt"></span>
+        <div class="fmcols">
+          <aside class="fmleft">
+            <div class="fmcompose">
+              <div class="ttl">记一条灵感</div>
+              <textarea id="fmNew" spellcheck="false"
+                placeholder="想到什么就写下来…&#10;支持 Markdown 与 #标签，Ctrl / ⌘ + Enter 记下"></textarea>
+              <div class="bar">
+                <span class="cnt" id="fmNewCnt"></span>
+                <span class="grow"></span>
+                <button class="deed" id="fmAdd" style="height:30px">记下来</button>
+              </div>
+              <div class="hint">只落在这台机器上，和导入的 flomo 笔记合成同一条时间线；之后能打标签、收进书架。</div>
+            </div>
+          </aside>
+          <section class="fmright">
+            <div class="fmtools">
+              <input class="f" id="fmQ" placeholder="搜正文与标签" autocomplete="off" spellcheck="false">
+              <button class="deed" id="fmPic" style="height:28px">记忆画像</button>
+              <button class="ic" id="fmWipe" title="清掉本机导入的这些笔记">清空</button>
+              <span class="grow"></span>
+              <span class="cnt" id="fmCnt"></span>
+            </div>
+            <div class="fmtags" id="fmTags"></div>
+            <div class="fmscr" id="fmScr"></div>
+            <div class="fmfoot" id="fmFoot"></div>
+          </section>
         </div>
-        <div class="fmtags" id="fmTags"></div>
-        <div class="fmscr" id="fmScr"></div>
-        <div class="fmfoot" id="fmFoot"></div>
         <input type="file" id="fmFile" accept=".zip,.html,.htm,text/html,application/zip" hidden>
       </div>`;
     wireFlomo(p);
