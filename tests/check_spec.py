@@ -146,6 +146,28 @@ chk("停止：后端发完信号立刻回，不再在请求里等满 10 秒",
     "for _ in range(40)" not in SERVER and "已请求停止" in SERVER
     and "threading.Thread(target=_finish_stop" in SERVER)
 
+# ── 六、剪藏：圆形手指按钮读剪贴板 + 环形进度 + 「解析已完成」弹框（1.2.0）──
+# 用户要的：顶部不要传统输入框，一颗带手指图标的圆钮；复制链接点一下自动读剪贴板并解析；
+# 解析时外圈环形进度慢慢走，完成正好转满一圈；完了弹「解析已完成」。
+chk("剪藏：顶部那颗手指按钮在位，老的粘贴框与「解析正文」都撤了",
+    'id="cPick"' in SRC and 'class="clipfinger"' in SRC
+    and 'id="cTa"' not in SRC and 'id="cParse"' not in SRC)
+chk("剪藏：手指图标是内联 SVG（界面零 emoji），环形进度是 SVG 圆",
+    'class="cf-ico"' in SRC and '<svg class="cf-ring"' in SRC
+    and 'id="cRing"' in SRC and re.search(r'<circle class="cf-bar" id="cRing"[^>]*r="33"', SRC))
+chk("剪藏：点手指去读剪贴板（clipPick → navigator.clipboard.readText）",
+    "async function clipPick(" in SRC and "navigator.clipboard.readText()" in SRC)
+chk("剪藏：读到链接就自动开始解析，调的是同一趟 preview 批量",
+    "clipAutoParse(" in SRC and "clipRunAll('preview', true)" in SRC)
+chk("剪藏：环形进度的圈长与 SVG 的 r=33 对齐，收尾补满一整圈",
+    "CLIP_RING_C = 2 * Math.PI * 33" in SRC
+    and re.search(r"function clipRingStart\(\).*?strokeDashoffset = CLIP_RING_C;", SRC, re.S)
+    and re.search(r"function clipRingDone\(\).*?strokeDashoffset = 0;", SRC, re.S))
+chk("剪藏：解析完弹「解析已完成」，并说明文章已在下方列表",
+    "title: '解析已完成'" in SRC and "文章已在下方列表里" in SRC)
+chk("剪藏：读不到剪贴板时有个弹层退路（不含屏顶常驻输入框）",
+    "function clipPasteFallback(" in SRC and "读不到剪贴板" in SRC)
+
 bad = [c for c in checks if not c[0]]
 print("\n规格体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
 for _, n, x in bad:
