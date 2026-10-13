@@ -3082,8 +3082,43 @@
      坞不开新层 —— 稿子在手上时，AI 给的东西必须贴着编辑器；跳出一层，思路就断了。
      正文用衬线：写长文的人盯的是句子节奏，等宽和无衬线都把注意力拽回字形本身。 */
   .wrapp{display:flex; gap:14px; height:100%; min-height:0; padding:0 18px 14px}
-  .wrdocs{width:214px; flex:none; display:flex; flex-direction:column; gap:8px; min-height:0}
-  .wrdoclist{flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:3px}
+  .wrdocs{width:226px; flex:none; display:flex; flex-direction:column; gap:9px; min-height:0}
+  /* 顶上两颗钮：建书是这条路上的正门，散稿是不进书的那一支，所以只有一颗吃主色。 */
+  .wrnewbook{display:flex; gap:6px; flex:none}
+  .wrnewbook .deed{flex:1; justify-content:center}
+  .wrtree{flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:2px;
+    padding-bottom:8px}
+  .wrtome{display:flex; flex-direction:column; gap:1px}
+  /* 册名那一行整行可点（点哪儿都比找一个箭头准），箭头只是状态的回声：翻开就转 90 度。 */
+  .wrtomeh{display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:9px;
+    cursor:pointer; transition:background .2s var(--spring)}
+  .wrtomeh:hover{background:var(--surface-2)}
+  .wrtomeh .ar{flex:none; font-size:9px; line-height:1; color:var(--ink-3);
+    transition:transform .22s var(--spring)}
+  .wrtome.open .wrtomeh .ar{transform:rotate(90deg)}
+  .wrtomeh .bt{flex:1; min-width:0; font-size:12.5px; font-weight:650; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .wrtomeh.cur .bt{color:var(--accent)}
+  /* 「几章几字」只在合着的时候报 —— 翻开就看得见一章一章列着，那串数字成了重复信息，
+     而同一行还要给「加一章」留地方。 */
+  .wrtomeh .bn{flex:none; font-size:10px; color:var(--ink-3); white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  .wrtome.open .wrtomeh .bn{display:none}
+  .wrtiny{flex:none; border:1px solid var(--line-2); border-radius:7px; background:transparent;
+    color:var(--ink-3); font:inherit; font-size:10px; line-height:1; padding:4px 6px; cursor:pointer;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .wrtiny:hover{background:var(--surface-2); color:var(--ink)}
+  .wrtiny:active{transform:scale(.94)}
+  .wrchaps{display:flex; flex-direction:column; gap:1px; padding:1px 0 5px 13px;
+    animation:wrUp .24s var(--spring) both}
+  .wrempty{font-size:11px; color:var(--ink-3); padding:2px 10px 5px}
+  /* 章那一行：章号用册账给的真顺序（前端数出来的会和「第 3 章」这种标题错开），
+     右边标题与字数照常两行，整颗钮仍是一颗 .wrdoc。 */
+  .wrdoc.chap{display:flex; align-items:flex-start; gap:8px; padding:6px 9px}
+  .wrdoc.chap .cn{flex:none; min-width:15px; text-align:right; font-size:10.5px; color:var(--ink-3);
+    line-height:1.55; font-variant-numeric:tabular-nums}
+  .wrdoc.chap.on .cn{color:var(--accent)}
+  .wrdoc.chap .wc{flex:1; min-width:0}
   .wrdoc{display:block; text-align:left; width:100%; border:1px solid transparent;
     background:transparent; border-radius:var(--r-sm); padding:8px 10px; cursor:pointer;
     transition:background .22s var(--spring), border-color .22s var(--spring), transform .16s var(--spring)}
@@ -3094,18 +3129,37 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .wrdoc .wm{display:block; font-size:10.5px; color:var(--ink-3); margin-top:3px}
   .wrmain{flex:1; min-width:0; display:flex; flex-direction:column; gap:9px; min-height:0}
+  /* 面包屑只管「这一章在哪一本」，册级动作收在书名那颗里。 */
+  .wrcrum{display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:none;
+    font-size:12px; color:var(--ink-3)}
+  /* 同上那条 display:flex 会盖掉 hidden：这一行没有稿子时必须真的没有。 */
+  .wrcrum[hidden]{display:none}
+  .wrcrum .cbk{flex:0 1 auto; min-width:0; max-width:46%; border:1px solid var(--line-2);
+    border-radius:8px; background:var(--glass-2); color:var(--ink); font:inherit; font-size:12px;
+    font-weight:600; padding:4px 9px; cursor:pointer; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; transition:background .14s ease, border-color .14s ease, transform .12s ease}
+  .wrcrum .cbk:hover{background:var(--surface-2); border-color:var(--accent)}
+  .wrcrum .cbk:active{transform:scale(.97)}
+  .wrcrum .cs{flex:none; color:var(--ink-3); font-size:13px; line-height:1}
+  .wrcrum .cnow{flex:0 1 auto; min-width:0; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; color:var(--ink-2)}
   .wrhead{display:flex; align-items:center; gap:10px}
   .wrtitle{flex:1; min-width:0; height:30px; border:0; background:transparent; outline:none;
     color:var(--ink); font-size:16.5px; font-weight:650; letter-spacing:.2px; padding:0 2px;
     font-family:inherit}
   .wrtitle::placeholder{color:var(--ink-3); font-weight:500}
   .wrmeta{font-size:11px; color:var(--ink-3); white-space:nowrap; display:flex; gap:9px; align-items:baseline}
+  /* 正文底板必须是不透明的纸：磨砂玻璃会把背后那些光斑透进字缝里，
+     写长文的人盯的是句子，不是自己的字在动。 --paper 在深色主题下自己变暗。 */
   .wred{flex:1; min-height:130px; display:flex; border:1px solid var(--line-2);
-    border-radius:var(--r); background:var(--glass-2); overflow:hidden;
+    border-radius:var(--r); background:var(--paper); overflow:hidden;
     transition:border-color .2s var(--spring), box-shadow .2s var(--spring)}
   .wred:focus-within{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
-  .wrtext{flex:1; width:100%; min-height:0; border:0; outline:none; resize:none; background:transparent;
-    padding:15px 19px 22px; color:var(--ink); font-size:15.5px; line-height:1.9; tab-size:2;
+  /* contenteditable：滚动落在正文这一块，标题行与工具条跟着屏一起定住。
+     块级排版（标题、表格、待办方框）在下面那一节，和导出的成品对齐。 */
+  .wrtext{flex:1; width:100%; min-height:0; border:0; outline:none; background:transparent;
+    overflow-y:auto; padding:16px 20px 26px; color:var(--ink); font-size:15.5px; line-height:1.9;
+    tab-size:2; caret-color:var(--accent); word-break:break-word;
     font-family:Georgia,"Songti SC","STSong","Noto Serif CJK SC",serif}
   .wrbar{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
   .wrbar .lab{font-size:10.5px; color:var(--ink-3); letter-spacing:.6px; flex:0 1 auto; min-width:0}
@@ -3138,7 +3192,7 @@
   /* 这行标签有时是短前缀（「写多少」），有时是一整句说明（稿子那屏的「还没有稿子…」）。
      短前缀不能长（所以 flex-grow:0），但整句必须能在窄栏里折行 —— 原来写 flex:none，
      等于既不长也不缩，句子的宽度就顶着 max-content 戳出容器：实测在写作屏左栏里
-     戳出 82px，越过 214px 的稿子列压进正文。改成「允许收缩 + min-width:0」，短前缀
+     戳出 82px，越过整栏压进正文。改成「允许收缩 + min-width:0」，短前缀
      照旧，整句该折行就折行。 */
   .wrline .lab{font-size:11px; color:var(--ink-3); letter-spacing:.4px; flex:0 1 auto; min-width:0}
   .wrline label{display:inline-flex; gap:6px; align-items:center; font-size:12px;
@@ -3163,6 +3217,67 @@
   .wrfm .d{color:var(--ink-3); flex:none; font-size:10.5px; margin-top:1px}
   .wrprev{border:1px solid var(--line-2); border-radius:var(--r-sm); overflow:hidden; background:#fff}
   .wrprev iframe{width:100%; height:300px; border:0; display:block; background:#fff}
+
+  /* ── 写作台的两件外壳：工具条与那张纸 ───────────────────
+     工具条的皮从笔记编辑器那颗 .edtools 借，但它在正文卡外面单独一条，
+     留着只朝下的 border-bottom 就像半截表格 —— 这里自己收一圈边、圆成一颗。 */
+  .wrmain .edtools{flex:0 1 auto; border:1px solid var(--line-2); border-radius:14px}
+  /* 占位语是 CSS 画的字，不进 DOM 也就不进稿子；整层不吃鼠标，点它等于点正文。
+     定位原点在那一块的 padding box 上，所以偏移就是正文那两边距，一字不差。 */
+  .wrtext.wrbare{position:relative}
+  .wrtext.wrbare::before{content:attr(data-ph); position:absolute; left:20px; top:16px;
+    max-width:calc(100% - 40px); color:var(--ink-3); font-size:13.5px; line-height:1.85;
+    white-space:pre-wrap; pointer-events:none}
+
+  /* ── 正文里的每一种块 ────────────────────────────────
+     尺寸照 book_export 那份 CSS 抄（连待办方框那颗蓝都连着 #0a6cff 一起搬）：
+     写的时候什么样，导出去就什么样。两边对不上时，人只会以为「导出把格式弄丢了」。 */
+  .wrtext h1,.wrtext h2,.wrtext h3,.wrtext h4,.wrtext h5,.wrtext h6{
+    margin:1.15em 0 .5em; line-height:1.42; font-weight:700; color:var(--ink); letter-spacing:.2px}
+  .wrtext h1{font-size:1.58em; margin-top:.15em}
+  .wrtext h2{font-size:1.3em}
+  .wrtext h3{font-size:1.12em}
+  .wrtext h4,.wrtext h5,.wrtext h6{font-size:1em; color:var(--ink-2)}
+  .wrtext p{margin:0 0 .72em}
+  .wrtext>*:first-child{margin-top:0}
+  .wrtext blockquote{margin:.8em 0; padding:.15em .15em .15em 14px; border-left:3px solid var(--accent);
+    color:var(--ink-2); background:var(--paper-inset); border-radius:0 10px 10px 0}
+  .wrtext blockquote p{margin:.35em 0}
+  .wrtext ul,.wrtext ol{margin:.5em 0 .8em; padding-left:1.7em}
+  .wrtext li{margin:.2em 0}
+  /* 方框画在字左边那一格里，但这一格要「长在 li 自己身上」：
+     padding-left 把字推开，margin-left 把 li 整块拉回原位 —— 一推一拉，字和框的绝对位置
+     跟没改之前一模一样。这么绕一下是因为伪元素不是事件目标：框画在 li 外侧时，点它拿到的是
+     外面那个 ul，最外层的点击委托找不到 li，那颗看起来能点的方框其实点不动。 */
+  .wrtext li.task{list-style:none; position:relative; padding-left:1.5em; margin-left:-1.5em}
+  .wrtext li.task::before{content:""; position:absolute; left:0; top:.42em; width:.85em;
+    height:.85em; border:1.5px solid #9a9aa0; border-radius:3px; cursor:pointer}
+  .wrtext li.task.done::before{border-color:#0a6cff; background:#0a6cff}
+  .wrtext table{border-collapse:collapse; margin:.9em 0; font-size:.93em}
+  .wrtext th,.wrtext td{border:1px solid var(--line-2); padding:.35em .6em;
+    vertical-align:top; text-align:left; min-width:38px}
+  .wrtext th{background:var(--paper-2); font-weight:650}
+  .wrtext hr{border:0; border-top:1px solid var(--line-2); margin:1.35em 0}
+  .wrtext pre{margin:.85em 0; padding:10px 12px; border-radius:10px; background:var(--paper-inset);
+    overflow-x:auto; font-size:12.5px; line-height:1.65;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .wrtext code{font-size:.9em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--paper-inset); border-radius:5px; padding:.12em .38em}
+  .wrtext pre code{background:transparent; padding:0; font-size:1em}
+  .wrtext img{max-width:100%; display:block; border-radius:10px; margin:.7em 0}
+  .wrtext a{color:var(--accent); text-decoration:underline}
+  .wrtext u{text-decoration:underline}
+  .wrtext s{text-decoration:line-through}
+
+  /* 色板在浮层里排成五列两行：十个横排会把浮层撑到 260px 宽，而「不涂」恰恰是最该
+     一眼看见的那一颗，不该挤到屏幕外面去。浮层里的那一排不靠 .edtools 的横排。 */
+  .edpop .dots{display:grid; grid-template-columns:repeat(5,26px); gap:4px}
+  .edpop .dots button.dot{width:26px; min-width:26px; height:24px}
+  .edpop .dots button.undo{grid-column:1 / -1; width:auto; min-width:0; height:23px; margin-top:2px;
+    border:1px solid var(--line-2); border-radius:7px; background:transparent; color:var(--ink-2);
+    justify-content:center; transition:background .14s ease, color .14s ease, transform .12s ease}
+  .edpop .dots button.undo:hover{background:var(--surface-2); color:var(--ink)}
+  .edpop .dots button.undo:active{transform:scale(.96)}
 </style>
 </head>
 <body>
@@ -4521,7 +4636,7 @@ let sideFootStamp = '';
    没重启。2026-10-07 用户报「左侧没有安娜的档案」就是它：导航那几格是后端 NAV_ITEMS
    给的，进程还是上一版，界面再怎么新也铺不出这一格，而两个版本号看着完全一样。
    后端因此多报一个 code_disk（磁盘上此刻的指纹），和它自己的 code 一比就露馅。 */
-const GUIZANG_PAGE = "1.0.8";
+const GUIZANG_PAGE = "1.0.9";
 const GZ = {back: "", code: "", disk: "", drift: false, stale: false,
             hid: false, swapping: false, why: "", prof: ""};
 
@@ -5499,23 +5614,1563 @@ const WR = {
   tpl: 'plain', brand: true, date: true, lead: true, scale: 2, note: '',
   mat: {book: '', flomo: [], typed: ''}, flomo: null, books: null, flomoMsg: '',
   versions: [],
+  /* 正文改成 contenteditable 之后多出来的几样：
+     · range —— 点色板、填链接地址都会把焦点从正文抢走，选区不存下来就「点了没反应」；
+     · comp —— 输入法正在拼的那串拼音不能被 normalize 打断，拼完再一次性结；
+     · tomes / book / open —— 左栏那棵树是「书 → 章」两层，册账要留着，
+       当前展开的是哪一本也要留着，否则每一趟轮询都得重问后端、树一抖一抖地重铺；
+     · whole —— 导出那一栏「整本书一起导」的开关，开着时导出读的是册账而不是这一章。 */
+  range: null, comp: false, tomes: [], book: '', open: {}, whole: false,
 };
 
 function $wr(id) { return document.getElementById('wr' + id); }
 
+/* ── 正文：所见即所得的那一块 ───────────────────────────
+   稿子在机器上仍然是一份 Markdown（draft.md 的格式没动，快照、导出、MCP 全照旧），
+   变的是人跟稿子打交道的方式：正文区是一块 contenteditable，上面一排工具条 ——
+   点「标题二」就得到标题二，不必为了加个标题去记井号。
+
+   代价是这一页多了一对「Markdown ⇄ 界面」的翻译，而它必须和 book_export.md_to_html
+   说同一种语言。那边是唯一的渲染出口（预览、HTML/图片/PDF、EPUB 三样成品都从它走），
+   两边对不齐的后果很具体：编辑时看着对，导出全变样。所以
+     · 语法集合就是工具条会写的那几种，不追求 CommonMark 全量；
+     · 下面每个模式都抄 book_export 里对应的那一条，改一边必须改另一边；
+     · 用户手打的井号、星号在稿子里存成反斜杠开头（那边也认这份转义），
+       「这个字」和「这个记号」从此分得开。
+   解析没接第三方库：要的是「和导出同一套语法」，而通用 Markdown 库的取舍（表格扩展、
+   原始 HTML 开不开、一个换行算不算分段）跟这里全不一样，接进来只是多一张会说不一致的嘴。 */
+
+const WRE = {
+  esc: /\\([\\`*_{}\[\]()#+\-.!>~|])/g,               // book_export._ESC_CHAR
+  code: /`([^`]+)`/g,                                  // ._INLINE_CODE
+  img: /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,   // ._IMG
+  link: /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,   // ._LINK
+  bold: /\*\*([^*]+)\*\*/g,                            // ._BOLD
+  strike: /~~([^~]+)~~/g,                              // ._STRIKE
+  // 斜体那一条那边写的是 (?<!\*)\*([^*]+)\*(?!\*)。这里不抄环视：本机这一页跑在系统
+  // 自带的浏览器内核上，老版本的 Safari 解析到「(?<!」会在整段脚本报语法错，
+  // 代价是全屏失效。同一个意思用替换回调里看左右邻居来做（wrInline 里那两行），
+  // 两边判据一致，不引新语法。
+  ital: /\*([^*]+)\*/g,                                // ._ITAL
+  head: /^(#{1,6})\s+(.*)$/,                           // md_to_html 里那条标题判据
+  hr: /^(-{3,}|\*{3,}|_{3,})$/,                        // ._HR（整行才算分隔线）
+  ul: /^[-*+]\s+/,                                     // ._UL
+  ol: /^\d+[.)]\s+/,                                   // ._OL
+  task: /^\[( |x|X)?\]\s*/,                            // ._TASK
+  trow: /^\|.*\|$/,                                    // ._TROW
+  tsep: /^\|(?:\s*:?-+:?\s*\|)+$/,                     // ._TSEP
+  span: /&lt;span style="(background-color|color):(#[0-9A-Fa-f]{3,8})"&gt;/g,
+  mark: /[\u0001](\d+)[\u0001]/g,                          // ._STASH_MARK
+  cm: /[\u0000](\d+)[\u0000]/g,                            // _inline 里行内码那一份 stash
+};
+
+/* ── 译写：Markdown ⇄ 界面 ───────────────────────────────
+   下面这几个函数是 book_export 里 _esc / _rich / _inline / _stash_line / _restore /
+   md_to_html 的对照译写，一个块判据都不许多。为什么非得再来一份，而不是让后端渲染
+   完喂给编辑器：编辑要在本地即时反馈（点一下就变标题），而每改一下就问一趟后端、
+   再把整块 HTML 换进去，光标必然丢。两份代码说的必须是同一种语言，不然用户看到的
+   是「编辑时明明是对的，导出全变样」——那是这一屏最坏的一种 bug。
+   两边不一致时以 book_export 为准（它是唯一的渲染出口，三样成品都从它走）。 */
+
+function wrEscH(s) {
+  // 只动 &<>，双引号原样留着 —— 那边用的是 html.escape(quote=False)，而白名单那几条
+  // 模式里带的正是双引号。这里多转一个引号，染的颜色就再也认不出来了。
+  // （和全局的 esc() 不是一回事：那个连引号一起转，是给属性里的用户文本用的。）
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function wrRich(t) {
+  // 白名单只放行三样：字色、底色、下划线。别的尖括号一律留在转义态，
+  // 所以稿子里凑巧写的 <script> 到了这里仍然是能看见的两个字，不是代码。
+  return t
+    .replace(WRE.span, (m, a, b) => '<span style="' + a + ":" + b + '">')
+    .split("&lt;/span&gt;").join("</span>")
+    .split("&lt;u&gt;").join("<u>")
+    .split("&lt;/u&gt;").join("</u>");
+}
+
+function wrInline(text) {
+  let t = wrEscH(text);
+  const stash = [];
+  // 顺序照抄 _inline：抽行内码 → 白名单 → 图 → 链接 → 粗 → 删除线 → 斜 → 还源码。
+  // 白名单必须在抽码之后：`<span style="color:#000">` 这种「把标记当例子写」的句子
+  // 该照原样出现在 code 里，不该真的染上颜色。
+  t = t.replace(WRE.code, (m, c) => {
+    stash.push(c); return "\u0000" + (stash.length - 1) + "\u0000";
+  });
+  t = wrRich(t);
+  t = t.replace(WRE.img, (m, alt, src) => '<img src="' + src + '" alt="' + alt + '"/>');
+  t = t.replace(WRE.link, (m, cap, href) => '<a href="' + href + '">' + cap + "</a>");
+  t = t.replace(WRE.bold, (m, c) => "<strong>" + c + "</strong>");
+  t = t.replace(WRE.strike, (m, c) => "<s>" + c + "</s>");
+  // 斜体那两个环视用「看左右邻居」替掉（理由写在 WRE.ital 那里）：星号紧贴着星号
+  // 就说明这一对属于别的东西（三个星号、或者没配对的粗体），不该拆成斜体。
+  t = t.replace(WRE.ital, (m, c, at, all) =>
+    (all.charAt(at - 1) === "*" || all.charAt(at + m.length) === "*")
+      ? m : "<em>" + c + "</em>");
+  return t.replace(WRE.cm, (m, d) => "<code>" + stash[+d] + "</code>");
+}
+
+function wrStashLine(line, keep) {
+  // 把这一行里的 \X 收进 keep，原地留一个占位。分块之前做，晚一步标题已经切好了。
+  // 反引号那一段是代码，里面的反斜杠原样留着：举例写的 \d+\. 被吃掉一个反斜杠，
+  // 导出的代码块就成了错的正则。
+  // split 带上捕获组 → 偶数下标是普通文字、奇数是反引号里的内容，和那边 finditer 同构。
+  const segs = String(line).split(WRE.code);
+  const out = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (i % 2) { out.push("`" + segs[i] + "`"); continue; }
+    out.push(segs[i].replace(WRE.esc, (m, c) => {
+      keep.push(c); return "\u0001" + (keep.length - 1) + "\u0001";
+    }));
+  }
+  return out.join("");
+}
+
+function wrUnstash(text, keep) {
+  // 占位换回真字。放在整篇拼完之后：那时转义早过了，得自己再补一遍（那边同样是 _esc）。
+  if (!keep.length) return text;
+  return text.replace(WRE.mark, (m, d) => wrEscH(keep[+d]));
+}
+
+function wrLi(text) {
+  const m = text.match(WRE.task);
+  if (!m) return "<li>" + wrInline(text) + "</li>";
+  // 方框由 CSS 画，不产出 input：导出的成品里没有一处该让人点。
+  const done = String(m[1] || "").toLowerCase() === "x";
+  return '<li class="task' + (done ? " done" : "") + '">'
+       + wrInline(text.slice(m[0].length)) + "</li>";
+}
+
+function wrTcells(line) {
+  const s = String(line).trim();
+  return s.slice(1, s.length - 1).split("|").map(c => c.trim());
+}
+
+function wrTalign(cell) {
+  const left = cell.charAt(0) === ":";
+  if (cell.slice(cell.length - 1) === ":") return left ? "center" : "right";
+  return "";
+}
+
+function wrTableAt(lines, i) {
+  // 「这一行像表格行，下一行就是分隔行」—— 只有这一条能把「句子带根竖线」和真表格分开。
+  return (i < lines.length && WRE.trow.test(String(lines[i] || "").trim())
+    && i + 1 < lines.length && WRE.tsep.test(String(lines[i + 1] || "").trim()));
+}
+
+function wrRenderTable(head, aligns, rows) {
+  const cols = head.length;
+  const cells = (tag, row) => {
+    let s = "";
+    for (let c = 0; c < cols; c++) {
+      const txt = c < row.length ? row[c] : "";
+      const al = c < aligns.length ? aligns[c] : "";
+      s += "<" + tag + (tag === "th" ? ' scope="col"' : "")
+         + (al ? ' style="text-align:' + al + '"' : "") + ">"
+         + wrInline(txt) + "</" + tag + ">";
+    }
+    return s;
+  };
+  return "<table><thead><tr>" + cells("th", head) + "</tr></thead><tbody>"
+    + rows.map(r => "<tr>" + cells("td", r) + "</tr>").join("")
+    + "</tbody></table>";
+}
+
+/** 整篇 Markdown → 编辑器里那一片 HTML。块判据、条数、顺序全按 md_to_html 抄。 */
+function wrParse(md) {
+  const raw = String(md || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const keep = [], lines = [];
+  let fenced = false;
+  for (let i = 0; i < raw.length; i++) {
+    const s = raw[i];
+    if (String(s).trim().slice(0, 3) === "```") { fenced = !fenced; lines.push(s); continue; }
+    lines.push(fenced ? s : wrStashLine(s, keep));
+  }
+  const out = [];
+  let i = 0;
+  const n = lines.length;
+  const trim = x => String(x === null || x === undefined ? "" : x).trim();
+  while (i < n) {
+    const s = trim(lines[i]);
+    if (!s) { i++; continue; }
+    if (s.slice(0, 3) === "```") {
+      const lang = s.slice(3).trim();
+      const buf = [];
+      i++;
+      while (i < n && trim(lines[i]).slice(0, 3) !== "```") { buf.push(lines[i]); i++; }
+      i++;
+      out.push("<pre><code" + (lang ? ' class="lang-' + wrEscH(lang) + '"' : "") + ">"
+        + wrEscH(buf.join("\n")) + "</code></pre>");
+      continue;
+    }
+    if (WRE.hr.test(s)) { out.push("<hr/>"); i++; continue; }
+    const h = s.match(WRE.head);
+    if (h) {
+      const lvl = h[1].length;
+      out.push("<h" + lvl + ">" + wrInline(h[2].trim()) + "</h" + lvl + ">");
+      i++;
+      continue;
+    }
+    if (s.charAt(0) === ">") {
+      const buf = [];
+      while (i < n && trim(lines[i]).charAt(0) === ">") {
+        buf.push(trim(lines[i]).slice(1).trim()); i++;
+      }
+      out.push("<blockquote><p>" + buf.map(x => wrInline(x)).join("<br/>")
+        + "</p></blockquote>");
+      continue;
+    }
+    if (wrTableAt(lines, i)) {
+      const head = wrTcells(s);
+      const aligns = wrTcells(lines[i + 1]).map(wrTalign);
+      i += 2;
+      const rows = [];
+      while (i < n && WRE.trow.test(trim(lines[i]))) { rows.push(wrTcells(lines[i])); i++; }
+      out.push(wrRenderTable(head, aligns, rows));
+      continue;
+    }
+    if (WRE.ul.test(s)) {
+      const buf = [];
+      while (i < n && WRE.ul.test(trim(lines[i]))) {
+        buf.push(trim(lines[i]).replace(WRE.ul, "")); i++;
+      }
+      out.push("<ul>" + buf.map(x => wrLi(x)).join("") + "</ul>");
+      continue;
+    }
+    if (WRE.ol.test(s)) {
+      const buf = [];
+      while (i < n && WRE.ol.test(trim(lines[i]))) {
+        buf.push(trim(lines[i]).replace(WRE.ol, "")); i++;
+      }
+      out.push("<ol>" + buf.map(x => wrLi(x)).join("") + "</ol>");
+      continue;
+    }
+    // 段落：一直吃到下一个块级起点。软换行（shift+enter 那个）就是这样存下来的 ——
+    // 一行一个 \n，拼回去是 <br/>，反过来也成立。
+    const buf = [s];
+    i++;
+    while (i < n) {
+      const nxt = trim(lines[i]);
+      if (!nxt || nxt.slice(0, 3) === "```" || nxt.charAt(0) === ">"
+        || WRE.hr.test(nxt) || /^#{1,6}\s+/.test(nxt)
+        || WRE.ul.test(nxt) || WRE.ol.test(nxt) || wrTableAt(lines, i)) break;
+      buf.push(nxt);
+      i++;
+    }
+    out.push("<p>" + buf.map(x => wrInline(x)).join("<br/>") + "</p>");
+  }
+  return wrUnstash(out.join("\n"), keep);
+}
+
+/* ── 反向：编辑器里那一片 HTML → Markdown ───────────────────
+   存的是 Markdown，所以下面每一种标记都得写成「再喂给 wrParse 还是它自己」。
+   浏览器在 contenteditable 里会自己造标记（粗体可能是 b 也可能是 strong、删除线可能是
+   s / strike / del），所以这里两种都认；工具条自己写的永远只有一种。
+   认不出的标签只取里面的字，不连带样式一起存 —— 粘进来的网页样式不该长进稿子里。 */
+
+/** 一个普通文字节点 → Markdown 片段。哪些字符要顶一个反斜杠，判据是「它在这一行里
+    会不会被当成记号」：星号、反引号、反斜杠、方括号、连着的两个波浪号一定会有；
+    下划线只在「整行都是它」时才是分隔线，所以不在正文里转义（满屏反斜杠没法看）。 */
+function wrEscTxt(s) {
+  return String(s)
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\*/g, "\\*")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/~~/g, "\\~\\~");
+}
+
+/** 一行开头那一个字另算：井号、减号、加号、大于号、竖线、以及「数字 + 点」
+    放在行首就是块级记号了，得按住。 */
+function wrHead(s) {
+  return String(s)
+    .replace(/^([#\-+>|])/, "\\$1")
+    .replace(/^(\d+)([.)])/, "$1\\$2");
+}
+
+/** 元素的孩子 → 行内 Markdown。返回的串里可能带 \n（那是 shift+enter 的那个换行），
+    由调用方按行拆开。intbl：这一格在表格里，竖线必须转义，否则一格断成两格。 */
+function wrIn(node, intbl) {
+  let s = "";
+  for (let i = 0; i < node.childNodes.length; i++) {
+    const k = node.childNodes[i];
+    if (k.nodeType === 3) { s += (intbl ? wrInEscCell(k.nodeValue) : wrEscTxt(k.nodeValue)); continue; }
+    if (k.nodeType !== 1) continue;                    // 注释之流：丢掉
+    const tag = String(k.tagName || "").toUpperCase();
+    if (tag === "BR") { s += "\n"; continue; }
+    const inner = wrIn(k, intbl);
+    if (tag === "STRONG" || tag === "B") { if (inner.trim()) s += "**" + inner + "**"; continue; }
+    if (tag === "EM" || tag === "I") { if (inner.trim()) s += "*" + inner + "*"; continue; }
+    if (tag === "U" || tag === "INS") { s += "<u>" + inner + "</u>"; continue; }
+    if (tag === "S" || tag === "STRIKE" || tag === "DEL") {
+      if (inner.trim()) s += "~~" + inner + "~~";
+      continue;
+    }
+    if (tag === "CODE") { s += "`" + wrCodePlain(k) + "`"; continue; }
+    if (tag === "A") {
+      const href = (k.getAttribute("href") || "").trim();
+      if (href) { s += "[" + inner + "](" + href + ")"; continue; }
+      s += inner; continue;
+    }
+    if (tag === "IMG") {
+      const src = (k.getAttribute("src") || "").trim();
+      if (src) s += "![" + (k.getAttribute("alt") || "") + "](" + src + ")";
+      continue;
+    }
+    if (tag === "SPAN") {
+      const pair = wrSpanStyle(k);
+      if (pair) { s += '<span style="' + pair[0] + ":" + pair[1] + '">' + inner + "</span>"; continue; }
+      s += inner; continue;                            // 没有放行的样式：只留字
+    }
+    s += inner;                                        // 别的一切：把字留下，样式不带进稿子
+  }
+  return s;
+}
+
+/** 格子里的字：行内那些转义之外，竖线也要顶住 —— 那一处转义在 wrParse 里会被换成
+    占位，所以不会把格子切歪（两边同一套约定）。 */
+function wrInEscCell(s) {
+  return wrEscTxt(s).replace(/\|/g, "\\|");
+}
+
+/** code 里只取字，不递归：行内码不能套行内码，那边 `[^`]+` 也认不下嵌套。 */
+function wrCodePlain(node) { return String(node.textContent || ""); }
+
+/** 这个 span 是不是白名单里那两种颜色。返回 [属性名, #hex] 或空。
+    浏览器会把 #fff 补成 rgb(255, 255, 255)，所以两边都收，落盘时一律写成 #hex ——
+    那边只放行 #hex，放个 rgb() 进稿子等于这一层颜色导出就没了。 */
+function wrSpanStyle(el) {
+  const st = el.getAttribute("style") || "";
+  const css = st.replace(/\s+/g, " ").toLowerCase();
+  const got = [];
+  css.split(";").forEach(rule => {
+    const at = rule.indexOf(":");
+    if (at < 0) return;
+    got.push([rule.slice(0, at).trim(), rule.slice(at + 1).trim()]);
+  });
+  for (let i = 0; i < got.length; i++) {
+    if (got[i][0] !== "color" && got[i][0] !== "background-color") continue;
+    const hex = wrHex(got[i][1]);
+    if (hex) return [got[i][0], hex];
+  }
+  return null;
+}
+
+function wrHex(v) {
+  let s = String(v || "").trim();
+  if (s.charAt(0) === "#") {
+    if (/^#[0-9a-f]{3}$/.test(s)) {
+      // 三位缩写补成六位再存：那边认 3~8 位，但界面显示与稿子留同一种写法省事。
+      return "#" + s.slice(1).split("").map(c => c + c).join("");
+    }
+    return /^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(s) ? s : "";
+  }
+  const m = s.match(/^rgba?\(([^)]+)\)$/i);
+  if (!m) return "";
+  const part = m[1].split(",").map(x => x.trim());
+  if (part.length < 3 || part.length > 4) return "";
+  const c = part.slice(0, 3).map(x => {
+    const v2 = Number(x);
+    return isNaN(v2) ? 0 : Math.max(0, Math.min(255, Math.round(v2)));
+  });
+  let out = "#" + c.map(x => ("0" + x.toString(16)).slice(-2)).join("");
+  if (part.length === 4 && Number(part[3]) < 1) return "";   // 带透明度的不放行：稿子里存不下
+  return out;
+}
+
+/** 一个块级元素 → 若干行 Markdown（不带块级记号之外的加工）。 */
+function wrBlock(el) {
+  const tag = String(el.tagName || "").toUpperCase();
+  const lines = [];
+  const push = txt => {
+    String(txt).split("\n").forEach(x => lines.push(x));
+  };
+  if (/^H[1-6]$/.test(tag)) {
+    const body = wrIn(el, false);
+    lines.push(Array(+tag.slice(1) + 1).join("#") + " " + wrHead(body));
+    return lines;
+  }
+  if (tag === "P" || tag === "DIV" || tag === "SECTION") {
+    const only = el.children.length === 1 ? String(el.children[0].tagName || "").toUpperCase() : "";
+    if (only && /^H[1-6]$/.test(only)) return wrBlock(el.children[0]);
+    const body = wrIn(el, false);
+    if (!body.replace(/[\s\n]/g, "")) return [];        // 空段落不落进稿子
+    String(body).split("\n").forEach((x, k) => lines.push(k ? x : wrHead(x)));
+    return lines;
+  }
+  if (tag === "UL" || tag === "OL") {
+    let no = 0;
+    for (let i = 0; i < el.children.length; i++) {
+      const li = el.children[i];
+      if (String(li.tagName || "").toUpperCase() !== "LI") continue;
+      no++;
+      const body = wrIn(li, false);
+      if (wrLiIsTask(li)) {
+        lines.push("- [" + (wrLiDone(li) ? "x" : " ") + "] " + wrHead(body.replace(/\n/g, " ")));
+      } else if (tag === "UL") {
+        lines.push("- " + wrHead(body.replace(/\n/g, " ")));
+      } else {
+        lines.push(no + ". " + wrHead(body.replace(/\n/g, " ")));
+      }
+    }
+    return lines;
+  }
+  if (tag === "BLOCKQUOTE") {
+    const body = wrIn(el, false);
+    String(body).split("\n").forEach(x => {
+      if (x.replace(/\s/g, "")) lines.push("> " + wrHead(x.trim()));
+    });
+    return lines;
+  }
+  if (tag === "PRE") {
+    const code = el.querySelector("code") || el;
+    let lang = "";
+    (String(code.className || "").split(/\s+/)).forEach(c => {
+      if (c.slice(0, 5) === "lang-") lang = c.slice(5);
+    });
+    const body = wrCodePlain(code).replace(/\n$/, "");
+    const out = ["```" + lang];
+    String(body).split("\n").forEach(x => out.push(x));
+    out.push("```");
+    return out;
+  }
+  if (tag === "HR") return ["---"];
+  if (tag === "TABLE") return wrTableOut(el);
+  // 认不出来的块：里面的块各自算一遍（浏览器粘贴常多裹一层 div）
+  if (el.children.length) {
+    for (let i = 0; i < el.children.length; i++) {
+      wrBlock(el.children[i]).forEach(x => lines.push(x));
+    }
+    return lines;
+  }
+  const body = wrIn(el, false);
+  if (body.replace(/[\s\n]/g, "")) {
+    String(body).split("\n").forEach((x, k) => lines.push(k ? x : wrHead(x)));
+  }
+  return lines;
+}
+
+function wrLiIsTask(li) { return /(^|\s)task(\s|$)/.test(String(li.className || "")); }
+function wrLiDone(li) { return /(^|\s)done(\s|$)/.test(String(li.className || "")); }
+
+function wrTableOut(el) {
+  const head = el.querySelectorAll("thead th");
+  const cols = [];
+  const body = el.querySelectorAll("tbody tr");
+  const hs = [];
+  for (let i = 0; i < head.length; i++) hs.push(wrIn(head[i], true).replace(/\n/g, " ").trim());
+  if (!hs.length) return [];
+  cols.push("| " + hs.join(" | ") + " |");
+  const sep = [];
+  for (let i = 0; i < hs.length; i++) {
+    const th = head[i];
+    const al = (th.getAttribute("style") || "").replace(/\s+/g, "").toLowerCase();
+    if (al.indexOf("text-align:center") >= 0) sep.push(":---:");
+    else if (al.indexOf("text-align:right") >= 0) sep.push("---:");
+    else sep.push("---");
+  }
+  cols.push("|" + sep.join("|") + "|");
+  for (let r = 0; r < body.length; r++) {
+    const tds = body[r].children, row = [];
+    for (let c = 0; c < hs.length; c++) {
+      row.push(c < tds.length ? wrIn(tds[c], true).replace(/\n/g, " ").trim() : "");
+    }
+    cols.push("| " + row.join(" | ") + " |");
+  }
+  return cols;
+}
+
+/** 根上「自成一块」的那几种标签 —— 和 wrBlock 认的那一批同一份口径。 */
+const WR_ROOT_BLOCK = {P: 1, DIV: 1, SECTION: 1, UL: 1, OL: 1, BLOCKQUOTE: 1,
+                       TABLE: 1, PRE: 1, HR: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1};
+
+/** 整块编辑器 → 稿子那份 Markdown。存盘、导出、AI 全都读这个返回值。
+    正文的根上偶尔挂着「没有家的字」：浏览器直接往 contenteditable 里塞的那一串，
+    没包成段落。它们不在 children（只收元素）里，按元素走一遍就等于没看见 ——
+    屏幕上有字、稿子里没有，那是最恶劣的一种丢稿。所以零散的行内内容先攒成一段再算。 */
+function wrGet() {
+  const ed = wrEd();
+  if (!ed) return WR.text || "";
+  const parts = [];
+  let loose = null;
+  const emit = one => { if (one.length) parts.push(one.join("\n")); };
+  const flush = () => { if (loose) { emit(wrBlock(loose)); loose = null; } };
+  for (let i = 0; i < ed.childNodes.length; i++) {
+    const n = ed.childNodes[i];
+    if (n.nodeType === 1 && WR_ROOT_BLOCK[String(n.tagName || "").toUpperCase()]) {
+      flush();
+      emit(wrBlock(n));
+      continue;
+    }
+    // 只抄不动：序列化不许改用户正在写的 DOM（动了光标和输入法正在拼的拼音都没了）。
+    // 夹在两块之间的空白文字节点也会攒进来，wrBlock 那句「空段落不落进稿子」把它滤掉。
+    if (n.nodeType === 3 || n.nodeType === 1) {
+      if (!loose) loose = document.createElement("p");
+      loose.appendChild(n.cloneNode(true));
+    }
+  }
+  flush();
+  return parts.join("\n\n") + (parts.length ? "\n" : "");
+}
+
+/* ── 正文那一块的把手 ────────────────────────────────────
+   contenteditable 上最难的是「坐标」：文本在一张张 DOM 树里，而 AI 给的是纯文本，
+   润色的差异块带的也是纯文本的下标。所以下面这一组只做一件事 —— 在「纯文本的第几个字」
+   和「哪个节点的哪个偏移」之间来回翻译，两边共用同一把尺子：只收文字节点，
+   <br> 与块边界都不补东西。不用 range.toString() 是因为各内核在块边界上会不会
+   塞一个换行并不一致，而这里要的正是「两头能对得上」。 */
+
+function wrEd() { return $wr("TextIn"); }
+
+/** {full: 整篇纯文本, spans: [[文字节点, 起点, 终点], …]}（按文档顺序） */
+function wrTextMap() {
+  const ed = wrEd();
+  const spans = [];
+  let full = "";
+  if (ed) {
+    const walk = n => {
+      for (let i = 0; i < n.childNodes.length; i++) {
+        const k = n.childNodes[i];
+        if (k.nodeType === 3) {
+          const s = String(k.nodeValue || "");
+          if (!s) continue;
+          spans.push([k, full.length, full.length + s.length]);
+          full += s;
+        } else if (k.nodeType === 1) walk(k);
+      }
+    };
+    walk(ed);
+  }
+  return {full, spans};
+}
+
+function wrPlain() { return wrTextMap().full; }
+
+/** 一个节点里有多少个字（只数文字节点，<br> 与块边界不算字）。 */
+function wrCountText(node) {
+  if (node.nodeType === 3) return String(node.nodeValue || "").length;
+  let s = 0;
+  for (let i = 0; i < node.childNodes.length; i++) s += wrCountText(node.childNodes[i]);
+  return s;
+}
+
+/** 纯文本下标 → DOM 位置（润色改字、光标落点都走这里）。取不到回 null。 */
+function wrPosTo(mp, at) {
+  const sp = mp.spans;
+  for (let i = 0; i < sp.length; i++) {
+    if (at >= sp[i][1] && at < sp[i][2]) return {node: sp[i][0], offset: at - sp[i][1]};
+  }
+  if (at === mp.full.length && sp.length) {
+    const last = sp[sp.length - 1];
+    return {node: last[0], offset: last[2] - last[1]};
+  }
+  return null;
+}
+
+/** DOM 位置 → 纯文本下标。目标落在 <br>、块边界这类「没有字」的地方时，回它左边
+    累计的字数，也就是右边第一个字的下标 —— 和 wrPosTo 是同一种切法，两头才对得上。 */
+function wrPosOf(mp, node, offset) {
+  if (!node) return null;
+  const ed = wrEd();
+  if (!ed) return null;
+  if (node.nodeType === 3) {
+    for (let i = 0; i < mp.spans.length; i++) {
+      if (mp.spans[i][0] === node) {
+        return mp.spans[i][1] + Math.min(offset | 0, String(node.nodeValue || "").length);
+      }
+    }
+    return null;
+  }
+  let sum = 0, cur = node;
+  const kids = cur.childNodes || [];
+  const upto = Math.min(offset | 0, kids.length);
+  for (let j = 0; j < upto; j++) sum += wrCountText(kids[j]);
+  while (cur !== ed && cur.parentNode) {
+    const pk = cur.parentNode.childNodes;
+    for (let k = 0; k < pk.length; k++) {
+      if (pk[k] === cur) break;
+      sum += wrCountText(pk[k]);
+    }
+    cur = cur.parentNode;
+  }
+  return cur === ed ? sum : null;      // 一路没走到正文，说明这一点不在这一格里
+}
+
+/** 光标放到「纯文本第 at 个字」前面。改完一段字要把人送回改动处，
+    不送回的话他得自己从头找那一句在哪儿 —— 最容易被骂的一种「改完了」。 */
+function wrCaretAt(at) {
+  const ed = wrEd();
+  if (!ed) return;
+  const p = wrPosTo(wrTextMap(), Math.max(0, at | 0));
+  ed.focus();
+  if (!p) { selSet(wrRange()); wrSaveRange(); return; }
+  const r = document.createRange();
+  r.setStart(p.node, p.offset);
+  r.collapse(true);
+  selSet(r);
+  wrSaveRange();
+}
+
+function selSet(range) {
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  try { sel.addRange(range); } catch (e) { /* 这一份节点已经被摘掉了：用现在的 */ }
+}
+
+/** 一小段 HTML（只含行内标签与 <br>）换成挂在树上的节点。 */
+function wrFrag(html) {
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  const kids = [];
+  for (let n = box.firstChild; n; n = n.nextSibling) kids.push(n);
+  const out = [];
+  for (let i = 0; i < kids.length; i++) out.push(box.removeChild(kids[i]));
+  return out;
+}
+
+/** 把纯文本区间 [from, to) 换成几个节点（坐标用 wrTextMap 那把尺子）。
+    自己切而不交给 Range.insertHTML：那两个端点经常落在同一个文字节点中间，
+    交给浏览器它就把整块重排了 —— 重排一次，用户正在拼的拼音和别的选区一起没。
+    区间里混着图片或表格时直接回 false：这里只保证文字换文字，硬摘会把图摘到
+    说不清的位置去，宁可让人重新选一次。 */
+function wrSplice(mp, from, to, nodes) {
+  const head = wrPosTo(mp, from), tail = wrPosTo(mp, to);
+  if (!head || !tail) return false;
+  const sp = mp.spans;
+  let hi = -1, ti = -1;
+  for (let i = 0; i < sp.length; i++) {
+    if (sp[i][0] === head.node) hi = i;
+    if (sp[i][0] === tail.node) ti = i;
+  }
+  if (hi < 0 || ti < 0 || ti < hi) return false;
+  const probe = document.createRange();
+  probe.setStart(head.node, head.offset);
+  probe.setEnd(tail.node, tail.offset);
+  const cage = document.createElement("div");
+  cage.appendChild(probe.cloneContents());
+  if (cage.querySelector("img,table")) return false;
+  let anchor;
+  if (hi === ti) {
+    const mid = head.node.splitText(head.offset);          // mid 从 from 开始
+    anchor = mid.splitText(Math.max(0, to - from));        // 这里到 to 为止
+    if (mid.nodeValue) mid.parentNode.removeChild(mid);
+    else anchor = mid;
+  } else {
+    const left = head.node.splitText(head.offset);
+    if (left.nodeValue) left.parentNode.removeChild(left);
+    anchor = tail.node.splitText(to - sp[ti][1]);          // 右半留在树上
+    if (tail.node.nodeValue) tail.node.parentNode.removeChild(tail.node);
+    for (let i = hi + 1; i < ti; i++) {
+      const n = sp[i][0];
+      if (n.parentNode) n.parentNode.removeChild(n);
+    }
+  }
+  const host = anchor && anchor.parentNode ? anchor.parentNode : wrEd();
+  for (let i = 0; i < nodes.length; i++) {
+    if (anchor && anchor.parentNode === host) host.insertBefore(nodes[i], anchor);
+    else host.appendChild(nodes[i]);
+  }
+  if (anchor && !anchor.nodeValue && anchor.parentNode) anchor.parentNode.removeChild(anchor);
+  return true;
+}
+/** 选区 → 纯文本下标区间；没选或选在正文外回 null。 */
+function wrSelRange() {
+  const ed = wrEd();
+  if (!ed) return null;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (r.commonAncestorContainer !== ed && !ed.contains(r.commonAncestorContainer)) return null;
+  const mp = wrTextMap();
+  const a = wrPosOf(mp, r.startContainer, r.startOffset);
+  const b = wrPosOf(mp, r.endContainer, r.endOffset);
+  if (a === null || b === null) return null;
+  return {from: Math.min(a, b), to: Math.max(a, b), full: mp.full};
+}
+
+/* ── 工具条：点一下就得到那个格式 ─────────────────────────
+   为什么还用 execCommand：contenteditable 的格式化到今天都没有替代标准（新接口只到
+   「放光标、取选区」），而这几条命令的边界情况（跨块加粗、列表里换行、空选区）浏览器
+   已经替我们踩了十年。手搓 DOM 要为每条命令重写一遍跨内核的边界处理，那是拿稿子的
+   安全换代码的洁癖。代价照单全收：命令返回 false 时把话说清，不放着按钮哑着。
+   只有颜色不走它 —— foreColor 在 WebKit 里写成 <font color>，而稿子里要存的是那边
+   白名单认的那一种 span，所以这一处自己包。 */
+
+/** 记下当前选区：色板那一栏是按钮与 input，点它必然把焦点从正文里抢走，
+    等它回话时原来的选区已经没了 —— 不存就是「点了色块，字没变色」。 */
+function wrSaveRange() {
+  const ed = wrEd();
+  if (!ed) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  if (r.commonAncestorContainer !== ed && !ed.contains(r.commonAncestorContainer)) return;
+  WR.range = r.cloneRange();
+}
+
+function wrFocusRange() {
+  const ed = wrEd();
+  if (!ed) return;
+  ed.focus();
+  if (!WR.range) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  try { sel.addRange(WR.range); } catch (e) { /* 这一份已经被改掉了：那就用现在的 */ }
+}
+
+/** 一个能用的选区：先恢复，再取当前的；都没有就落到正文最后一块末尾。
+    「什么都没有」不是一种可能 —— 正文里永远至少留着一块（空的也算），
+    否则第一下的光标没地方放，按钮按下去就没反应。 */
+function wrRange() {
+  const ed = wrEd();
+  if (!ed) return null;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    const cur = sel.getRangeAt(0);
+    if (cur.commonAncestorContainer === ed || ed.contains(cur.commonAncestorContainer)) return cur;
+  }
+  if (WR.range && ed.contains(WR.range.commonAncestorContainer)) return WR.range;
+  const r = document.createRange();
+  const host = ed.lastElementChild || ed;
+  r.selectNodeContents(host);
+  r.collapse(false);
+  return r;
+}
+
+/** 光标放进某个节点的最前面（表格插完要把人送到第一格里，不然得自己找） */
+function wrCaretIn(node, end) {
+  const ed = wrEd();
+  if (!ed || !node) return;
+  ed.focus();
+  const r = document.createRange();
+  r.selectNodeContents(node);
+  r.collapse(!end);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  WR.range = r.cloneRange();
+}
+
+/** 往上找到编辑器直属的那一块（工具条上「这是标题几」要看的就是它） */
+function wrBlockOf(node) {
+  const ed = wrEd();
+  if (!ed || !node) return null;
+  let n = node;
+  while (n && n.parentNode !== ed) n = n.parentNode;
+  return n && n.nodeType === 1 ? n : null;
+}
+
+function wrNear(node, tag) {
+  const want = String(tag).toUpperCase();
+  let n = node;
+  while (n) {
+    if (n.nodeType === 1 && String(n.tagName || "").toUpperCase() === want) return n;
+    n = n.parentNode;
+  }
+  return null;
+}
+
+function wrCurBlock() {
+  const sel = window.getSelection();
+  const ed = wrEd();
+  if (!ed) return null;
+  if (sel && sel.rangeCount) {
+    const b = wrBlockOf(sel.getRangeAt(0).commonAncestorContainer);
+    if (b) return b;
+  }
+  if (WR.range) {
+    const b = wrBlockOf(WR.range.commonAncestorContainer);
+    if (b) return b;
+  }
+  return ed.firstElementChild || null;
+}
+
+/** 一条格式化命令：先确保焦点在正文里（不在的话 execCommand 会打到别的框上，
+    或者什么也不做还回 true —— 那比报错更难查）。 */
+function wrExec(cmd, val) {
+  wrFocusRange();
+  const ed = wrEd();
+  if (!ed) return false;
+  if (document.activeElement !== ed) ed.focus();
+  let ok = false;
+  try { ok = document.execCommand(cmd, false, val === undefined ? null : val); }
+  catch (e) { ok = false; }
+  if (ok) wrAfterEdit();
+  return ok;
+}
+
+/** 正文改了一下之后要做的四件事：占位语、选区、字数、存盘排队。
+    顺序别换 —— paintWrMeta 读的是 wrPlain()，必须已经改完了。 */
+function wrAfterEdit() {
+  const ed = wrEd();
+  if (!ed) return;
+  ed.normalize();
+  wrPh();
+  wrSaveRange();
+  wrBarState();
+  WR.dirty = true;
+  paintWrMeta();
+  if (!WR.id) { wrStartDoc(); return; }     // 第一下就落盘：还没命名就打的字最容易蒸发
+  scheduleWrSave();
+}
+
+/** 空稿子给一句占位语（CSS 画的，不在 DOM 里，所以不会被当成正文存进稿子）。 */
+function wrPh() {
+  const ed = wrEd();
+  if (!ed) return;
+  const bare = !wrPlain().replace(/[\s\n]/g, "")
+    && !ed.querySelector("img,table,hr,pre,input");
+  ed.className = "wrtext" + (bare ? " wrbare" : "");
+}
+
+/** 稿子那份 Markdown 涂到正文上。整块重建只发生在「换一篇 / 回退一版」这种时刻 ——
+    打字过程中永远不重建，否则光标、选区和输入法正在拼的那串拼音全没。 */
+function wrSet(md) {
+  const ed = wrEd();
+  if (!ed) return;
+  const html = wrParse(md);
+  ed.innerHTML = html || "<p><br></p>";
+  if (!ed.children.length) ed.innerHTML = "<p><br></p>";
+  WR.range = null;
+  wrPh();
+}
+
+/** 这个包里已经整段是这一种颜色了（点第二下就该取消） */
+function wrWrapped(r, tag, styleText) {
+  let n = r.startContainer;
+  while (n) {
+    if (n.nodeType === 1 && String(n.tagName || "").toUpperCase() === tag
+      && (n.getAttribute("style") || "") === styleText) {
+      return n.contains(r.endContainer) ? n : null;
+    }
+    n = n.parentNode;
+  }
+  return null;
+}
+
+/** 这一排行内壳是「清格式」要摘的那几种。A 不在里面（链接是内容），
+    也不包含 SPAN —— 颜色那一层按 style 判，走下面 wrStrip 那条。 */
+const WR_INL = ["STRONG", "B", "EM", "I", "U", "INS", "S", "STRIKE", "DEL", "CODE", "FONT"];
+
+/** 把符合判断的行内壳拆掉，里面的字留着。
+    先攒一批再动手：边遍历边删会让 childNodes 的下标整体往前跳，漏掉紧跟的那一层。 */
+function wrPeel(root, hit) {
+  const out = [];
+  const walk = n => {
+    for (let i = 0; i < n.childNodes.length; i++) {
+      const k = n.childNodes[i];
+      if (k.nodeType !== 1) continue;
+      if (hit(k)) out.push(k);
+      else walk(k);
+    }
+  };
+  walk(root);
+  out.forEach(el => {
+    const host = el.parentNode;
+    if (!host) return;
+    while (el.firstChild) host.insertBefore(el.firstChild, el);
+    host.removeChild(el);
+  });
+  return out.length;
+}
+
+function wrUnwrap(frag, tag, styleText) {
+  wrPeel(frag, k => String(k.tagName || "").toUpperCase() === tag
+    && (k.getAttribute("style") || "") === styleText);
+}
+
+/** 行内码与颜色那两层的「是不是这一种」判据，wrBarState 与 wrColor 共用一份。 */
+function wrStyleIs(el, prop, hex) {
+  const rules = String(el.getAttribute("style") || "").split(";");
+  return rules.some(rule => {
+    const p = rule.split(":");
+    return String(p[0] || "").trim() === prop && String(p[1] || "").trim() === hex;
+  });
+}
+
+/** 把选中的字包进一个行内标记；整段已经是它了就把这层拆开。
+    code 也走这里：execCommand 没有「行内码」这一条命令。 */
+function wrWrap(tag, styleText, say) {
+  const ed = wrEd();
+  if (!ed) return;
+  wrFocusRange();
+  const r = wrRange();
+  if (!r || r.collapsed) { whisper("先" + (say || "选中要改的那几个字") + "再点这个"); return; }
+  const host = wrWrapped(r, tag, styleText);
+  const frag = r.extractContents();
+  const sel = window.getSelection();
+  if (host) {
+    wrUnwrap(frag, tag, styleText);
+    r.insertNode(frag);
+  } else {
+    const sp = document.createElement(tag.toLowerCase());
+    if (styleText) sp.setAttribute("style", styleText);
+    sp.appendChild(frag);
+    r.insertNode(sp);
+    const back = document.createRange();
+    back.selectNodeContents(sp);
+    sel.removeAllRanges();
+    sel.addRange(back);
+  }
+  wrAfterEdit();
+}
+
+/** 字色 / 底色。传 none 是「不要这个色了」，把这一层属性整片摘掉。 */
+function wrColor(prop, hex) {
+  if (hex === "none") {
+    const r = wrRange();
+    const ed = wrEd();
+    if (!ed || !r) return;
+    wrFocusRange();
+    const sel = window.getSelection();
+    let host = null;
+    if (r.collapsed) host = wrNear(ed.lastChild, "SPAN");
+    else host = wrNear(r.startContainer, "SPAN");
+    if (host && !host.contains(r.endContainer)) host = null;
+    if (host) {
+      const keep = host.getAttribute("style") || "";
+      const rest = keep.split(";").filter(rule =>
+        rule.trim().split(":")[0].trim() !== prop).join(";").trim();
+      if (rest) host.setAttribute("style", rest);
+      else host.removeAttribute("style");
+      wrAfterEdit();
+      return;
+    }
+    wrWrap("SPAN", prop + ":" + hex, "选中要改的颜色");   // 没这一层：包一个「无色」上去没有意义
+    return;
+  }
+  wrWrap("SPAN", prop + ":" + hex);
+  wrPopHide();
+}
+
+/* ── 按块改：标题 / 列表 / 待办 / 引用 / 分隔线 ───────────────
+   execCommand 也有一条 formatBlock，但它一次只认一块（选了一段只改头一块），
+   而且各家内核对 "<h2>" 这个参数的写法还不统一。按块自己搬字更可控，
+   「再点一下就换回正文」这条也共用同一套判断。 */
+
+function wrIs(tag, el) {
+  return String((el && el.tagName) || "").toLowerCase() === tag;
+}
+
+/** 选区碰到的「编辑器直属那几块」。只碰一块就是一块，整段选中就是一串 ——
+    标题、列表这种按块改的操作，选一片就该整片都变。 */
+function wrBlocks() {
+  const ed = wrEd();
+  if (!ed) return [];
+  const r = wrRange();
+  const out = [];
+  if (r) {
+    for (let n = ed.firstElementChild; n; n = n.nextElementSibling) {
+      let hit = true;
+      try { hit = r.intersectsNode(n); } catch (e) { hit = false; }
+      if (hit) out.push(n);
+    }
+  }
+  if (out.length) return out;
+  const one = wrCurBlock();
+  return one ? [one] : [];
+}
+
+/** 换标签，字全搬过去；搬空的块留一个 <br>，不然光标没有落点。 */
+function wrTurn(el, tag) {
+  const next = document.createElement(tag);
+  while (el.firstChild) next.appendChild(el.firstChild);
+  if (!next.firstChild) next.appendChild(document.createElement("br"));
+  const host = el.parentNode;
+  if (!host) return el;
+  host.replaceChild(next, el);
+  return next;
+}
+
+/** 一块套进另一种块级标签里（列表外面那层是 <ul>、里面是 <li>；引用是 <blockquote> 套 <p>）。
+   两层都留着，序列化和导出才认得出来这是一块列表 / 一段引。 */
+function wrNest(el, tag, inner) {
+  const host = el.parentNode;
+  if (!host) return el;
+  const box = document.createElement(tag);
+  const kid = document.createElement(inner);
+  while (el.firstChild) kid.appendChild(el.firstChild);
+  if (!kid.firstChild) kid.appendChild(document.createElement("br"));
+  box.appendChild(kid);
+  host.replaceChild(box, el);
+  return kid;
+}
+
+/** 这一块吃不吃「换标签」：表格、代码块、分隔线有自己的结构，一旦套进 <li> 或 <p>，
+    格线就散了 —— 序列化只能把几格的字挤成一行，用户看到的是刚搭好的表凭空变成一串字。
+    块级按钮（标题 / 列表 / 待办 / 引用）碰到这种块就不动它，只说一声。 */
+function wrTurnable(el) {
+  const tag = String(el.tagName || "").toUpperCase();
+  return tag !== "TABLE" && tag !== "PRE" && tag !== "HR" && tag !== "FIGURE";
+}
+
+/** 把选中的块筛一遍，结构不许动的那些留给调用方跳过；一个都不剩时说一句就走人。 */
+function wrTurnList(list) {
+  const ok = list.filter(wrTurnable);
+  if (ok.length !== list.length) whisper("这一块是表格或代码，改成那种样式会把它的结构弄散：光标挪到别的那一段再点。");
+  return ok;
+}
+
+function wrHeading(n) {
+  const all = wrBlocks();
+  if (!all.length) { whisper("光标没在正文里"); return; }
+  const list = wrTurnList(all);
+  if (!list.length) return;
+  const want = n ? "h" + n : "p";
+  const on = list.every(el => wrIs(want, el));
+  if (on && !n) return;                 // 本来就是正文，按下去不用动
+  let last = null;
+  list.forEach(el => { last = on ? wrTurn(el, "p") : wrTurn(el, want); });
+  if (last) wrCaretIn(last, true);
+  wrAfterEdit();
+}
+
+/** 无序 / 有序。再点一次同一颗就拆回段落；列表套列表这一屏不做 ——
+    导出的渲染器只认单层，套进去也会被拍平，界面上给按等于骗人。 */
+function wrList(kind) {
+  const all = wrBlocks();
+  if (!all.length) { whisper("光标没在正文里"); return; }
+  const list = wrTurnList(all);
+  if (!list.length) return;
+  const tag = kind === "ol" ? "ol" : "ul";
+  const same = list.every(el => wrIs(tag, el));
+  let last = null;
+  if (same) {
+    list.forEach(box => {
+      const host = box.parentNode;
+      if (!host) return;
+      let li = box.firstElementChild;
+      while (li) {
+        const nxt = li.nextElementSibling;
+        last = wrTurn(li, "p");
+        host.insertBefore(last, box);
+        li = nxt;
+      }
+      host.removeChild(box);
+    });
+  } else {
+    list.forEach(el => {
+      if (wrIs("ul", el) || wrIs("ol", el)) {   // 换一种列表：标签一翻，项不动
+        const next = document.createElement(tag);
+        while (el.firstChild) next.appendChild(el.firstChild);
+        el.parentNode.replaceChild(next, el);
+        last = next.firstElementChild || next;
+        return;
+      }
+      last = wrNest(el, tag, "li");
+    });
+  }
+  if (last) wrCaretIn(last, true);
+  wrAfterEdit();
+}
+
+/** 光标所在的那一项（不在列表里就是 null）。只认编辑器里的那一层 <li>。 */
+function wrCurLi() {
+  const ed = wrEd();
+  if (!ed) return null;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  let n = sel.getRangeAt(0).commonAncestorContainer;
+  if (n && n.nodeType !== 1) n = n.parentNode;
+  if (!n || !ed.contains(n)) return null;
+  const li = wrNear(n, "LI");
+  return li && ed.contains(li) ? li : null;
+}
+
+/** 待办：普通段落变成「□ 一项」；已经是待办项就退回普通项。
+    勾与不勾是点方框来的，不跟这颗按钮走 —— 用户勾完再点一次「待办」不该把勾冲掉。 */
+function wrTask() {
+  const li = wrCurLi();
+  if (li) {
+    li.className = wrLiIsTask(li) ? "" : "task";
+    wrAfterEdit();
+    return;
+  }
+  const all = wrBlocks();
+  if (!all.length) { whisper("光标没在正文里"); return; }
+  const list = wrTurnList(all);
+  if (!list.length) return;
+  let last = null;
+  list.forEach(el => {
+    if (wrIs("ul", el) || wrIs("ol", el)) {
+      for (let i = 0; i < el.children.length; i++) {
+        if (wrIs("li", el.children[i])) el.children[i].className = "task";
+      }
+      last = el.firstElementChild;
+      return;
+    }
+    last = wrNest(el, "ul", "li");
+    last.className = "task";
+  });
+  if (last) wrCaretIn(last, true);
+  wrAfterEdit();
+}
+
+function wrQuote() {
+  const all = wrBlocks();
+  if (!all.length) { whisper("光标没在正文里"); return; }
+  const list = wrTurnList(all);
+  if (!list.length) return;
+  const on = list.every(el => wrIs("blockquote", el));
+  let last = null;
+  list.forEach(el => {
+    if (on) {
+      const host = el.parentNode;
+      if (!host) return;
+      let k = el.firstElementChild;
+      while (k) {
+        const nxt = k.nextElementSibling;
+        last = k;
+        host.insertBefore(k, el);
+        k = nxt;
+      }
+      // 引里只剩文字（没有 p 可搬）时补一段，不然删掉 blockquote 就没落点了
+      const rest = String(el.textContent || "").replace(/\s/g, "");
+      if (!el.firstElementChild && rest) {
+        const p = document.createElement("p");
+        p.appendChild(document.createTextNode(String(el.textContent || "")));
+        host.insertBefore(p, el);
+        last = p;
+      } else if (!el.firstElementChild) {
+        const p = document.createElement("p");
+        p.appendChild(document.createElement("br"));
+        host.insertBefore(p, el);
+        last = p;
+      }
+      host.removeChild(el);
+      return;
+    }
+    last = wrNest(el, "blockquote", "p");
+  });
+  if (last) wrCaretIn(last, true);
+  wrAfterEdit();
+}
+
+/** 分隔线：在当前块后面插一条，再补一个空段落 —— 不然 <hr> 是空的，
+    光标插不进去，用户得自己用方向键摸过去。 */
+function wrRule() {
+  const ed = wrEd();
+  const b = wrCurBlock();
+  if (!ed || !b) { whisper("光标没在正文里"); return; }
+  const host = b.parentNode || ed;
+  const hr = document.createElement("hr");
+  const p = document.createElement("p");
+  p.appendChild(document.createElement("br"));
+  host.insertBefore(hr, b.nextSibling);
+  host.insertBefore(p, hr.nextSibling);
+  wrCaretIn(p, false);
+  wrAfterEdit();
+}
+
+/** 清格式只管行内：粗体斜体下划线删除线行内码颜色一律摘掉，字一个不动。
+    标题、列表、引用不跟着清 —— 那几样是按块算的，想撤就再点一次那一颗。
+    链接留着：那是内容不是格式，用户选一段文字清一下格式不该把地址弄丢。 */
+function wrClear() {
+  const ed = wrEd();
+  if (!ed) return;
+  wrFocusRange();
+  const r = wrRange();
+  if (!r || r.collapsed) { whisper("先选中要清掉格式的那几个字"); return; }
+  const frag = r.extractContents();
+  wrPeel(frag, k => WR_INL.indexOf(String(k.tagName || "").toUpperCase()) >= 0);
+  r.insertNode(frag);
+  wrAfterEdit();
+}
+
+/* ── 插入：表格 / 一段 Markdown ───────────────────────────
+   两者都先把要插的东西「按 Markdown 写一遍，再交给 wrParse」，而不是手搓 createElement：
+   wrParse 是导出那台渲染器的对照译写，从它走一趟，插进编辑器的结构和导出来的结构
+   就是同一份 —— 手搓的表格少写一个 thead，界面上好看，导出就散了。 */
+
+/** 把一段 Markdown 接在「当前这一块」后面（续写、粘结果都是往后接，
+    不在句子中间劈开 —— 劈开会改到用户正在打的那一句，那是最容易被骂的一种「帮忙」）。 */
+function wrInsertMd(md) {
+  const ed = wrEd();
+  if (!ed) return false;
+  const box = document.createElement("div");
+  box.innerHTML = wrParse(md);
+  const kids = [];
+  for (let n = box.firstElementChild; n; n = n.nextElementSibling) kids.push(n);
+  if (!kids.length) return false;
+  const b = wrCurBlock();
+  const host = (b && b.parentNode) || ed;
+  const ref = b ? b.nextSibling : null;
+  kids.forEach(k => host.insertBefore(k, ref));
+  wrCaretIn(kids[kids.length - 1], true);
+  wrAfterEdit();
+  return true;
+}
+
+function wrTableDo(rows, cols) {
+  const ed = wrEd();
+  if (!ed) return;
+  const r = Math.max(1, rows | 0), c = Math.max(1, cols | 0);
+  const line = cells => "|" + cells.join("|") + "|";
+  const md = [line(Array.from({length: c}, (_, i) => " 列" + (i + 1) + " ")),
+    line(Array.from({length: c}, () => " --- "))];
+  for (let k = 1; k < r; k++) md.push(line(Array.from({length: c}, () => "    ")));
+  const box = document.createElement("div");
+  box.innerHTML = wrParse(md.join("\n"));
+  const tb = box.querySelector("table");
+  if (!tb) { whisper("表格没插进去"); return; }
+  const b = wrCurBlock();
+  const host = (b && b.parentNode) || ed;
+  // 表尾必须补一个空段落：<table> 里没有光标能待的地方，插完不补，用户只能拿方向键摸出去。
+  const tail = document.createElement("p");
+  tail.appendChild(document.createElement("br"));
+  if (b) { host.insertBefore(tb, b.nextSibling); host.insertBefore(tail, tb.nextSibling); }
+  else { host.appendChild(tb); host.appendChild(tail); }
+  wrCaretIn(tb.querySelector("th") || tb.querySelector("td") || tail, false);
+  wrAfterEdit();
+  whisper("表格插好了：在格子里打字，出了表就用下面那一行");
+}
+
+/* ── 色板与表格矩阵：贴着工具条那一颗浮出来 ─────────────
+   浮层照笔记编辑器那一套（.edgrid 定住、.edpop 浮出、点格子不抢光标）。
+   两处共用同一支 CSS，写作台和笔记台的两颗「表格」看起来就是同一颗。 */
+
+const WR_INK = ["#d81e06", "#e8590c", "#f0a202", "#2f9e44", "#0ca678",
+                "#1971c2", "#4263eb", "#7048e8", "#c2255c", "#495057"];
+const WR_HI = ["#fff3a3", "#d0ebff", "#d3f9d8", "#ffe3e3",
+               "#e5dbff", "#ffe8cc", "#f1f3f5"];
+const WR_GRID_R = 6, WR_GRID_C = 8;
+
+function wrPopHide() {
+  const open = document.querySelector("#wrTools .edpop.open");
+  if (open) open.classList.remove("open");
+}
+
+/** kind: color（字色）/ back（底色）/ table（表格矩阵） */
+function wrPopToggle(kind, btn) {
+  const wrap = btn.parentNode;
+  const cur = wrap.querySelector(".edpop");
+  if (cur && cur.classList.contains("open") && cur.dataset.kind === kind) return wrPopHide();
+  wrPopHide();
+  const pop = cur && cur.dataset.kind === kind ? cur : wrPopBuild(kind, wrap, btn);
+  if (!pop) return;
+  pop.classList.add("open");
+}
+
+function wrPopBuild(kind, wrap, btn) {
+  const pop = document.createElement("div");
+  pop.className = "edpop";
+  pop.dataset.kind = kind;
+  if (kind === "table") {
+    pop.innerHTML = '<div class="gh">插入表格</div><div class="tb">'
+      + Array.from({length: WR_GRID_R * WR_GRID_C}, () => "<i></i>").join("")
+      + '</div><div class="cap"></div>';
+    btn.style.position = "static";
+    const holder = document.createElement("span");
+    holder.className = "edgrid";
+    wrap.insertBefore(holder, btn);
+    holder.appendChild(btn);
+    holder.appendChild(pop);
+    const cells = [].slice.call(pop.querySelectorAll(".tb i"));
+    const cap = pop.querySelector(".cap");
+    let at = {r: 1, c: 1};
+    const paint = n => {
+      const r = Math.floor((n - 1) / WR_GRID_C) + 1, c = (n - 1) % WR_GRID_C + 1;
+      cells.forEach((el, i) => el.classList.toggle("hit", i < n));
+      cap.textContent = r + " 行 × " + c + " 列（含 1 行表头）";
+      at = {r, c};
+    };
+    cells.forEach((el, i) => {
+      el.onmouseenter = () => paint(i + 1);
+      el.onclick = ev => { ev.stopPropagation(); wrPopHide(); wrTableDo(at.r, at.c); };
+    });
+    paint(1);
+  } else {
+    const list = kind === "back" ? WR_HI : WR_INK;
+    const prop = kind === "back" ? "background-color" : "color";
+    pop.innerHTML = '<div class="gh">' + (kind === "back" ? "底色" : "字色") + '</div>'
+      + '<div class="dots">' + list.map(hex => '<button type="button" class="dot" data-c="'
+        + hex + '" style="--mkc:' + hex + '" title="' + hex + '"></button>').join("")
+      + '<button type="button" class="undo" data-c="none">不涂</button></div>';
+    btn.style.position = "static";
+    const holder = document.createElement("span");
+    holder.className = "edgrid";
+    wrap.insertBefore(holder, btn);
+    holder.appendChild(btn);
+    holder.appendChild(pop);
+    [].slice.call(pop.querySelectorAll("button[data-c]")).forEach(el => {
+      el.onclick = ev => {
+        ev.stopPropagation();
+        wrPopHide();
+        wrColor(prop, el.dataset.c);
+      };
+    });
+  }
+  // 浮层上的按下一律不落到正文：不然选区会被这一下清掉，颜色就涂到光标那一个字上。
+  pop.onmousedown = ev => ev.preventDefault();
+  pop.onclick = ev => ev.stopPropagation();
+  return pop;
+}
+
+/* ── 工具条：一颗一颗照笔记编辑器那一套建（同一支钮、同一个 .on） ───── */
+const WR_TOOLS = [
+  {t: "p", label: "正文", tip: "这一段回到正文"},
+  {t: "h1", label: "标题一", tip: "章名、大标题"},
+  {t: "h2", label: "标题二", tip: "小节标题"},
+  {t: "h3", label: "标题三", tip: "再下一层"},
+  {sep: 1},
+  {t: "bold", html: "<b>粗</b>", tip: "加粗（⌘/Ctrl + B）"},
+  {t: "ital", html: "<i>斜</i>", tip: "斜体（⌘/Ctrl + I）"},
+  {t: "und", html: "<u>下</u>", tip: "下划线"},
+  {t: "strike", html: "<s>删</s>", tip: "删除线"},
+  {t: "code", label: "码", tip: "行内代码：这几个字照原样"},
+  {sep: 1},
+  {t: "color", label: "字色", tip: "选中几个字，再点一下挑的颜色"},
+  {t: "back", label: "底色", tip: "给这几个字铺一层底色"},
+  {t: "clear", label: "清格式", tip: "选中的那几个字变回不带格式，字一个不动"},
+  {sep: 1},
+  {t: "bull", label: "列表", tip: "无序列表"},
+  {t: "num", label: "编号", tip: "有序列表"},
+  {t: "task", label: "待办", tip: "能勾的一项：勾点在左边那个方框上"},
+  {t: "quote", label: "引用", tip: "这段是引来的话"},
+  {sep: 1},
+  {t: "table", label: "表格", tip: "点几乘几就插几乘几"},
+  {t: "link", label: "链接", tip: "给选中的字挂个地址"},
+  {t: "image", label: "图片", tip: "插一张图（网址或本机路径）"},
+  {t: "hr", label: "分隔", tip: "一条横线"},
+  {sp: 1},
+  {t: "md", label: "看 Markdown", tip: "稿子存的就是 Markdown：这一份能复制走"},
+];
+
+function wrBarWire() {
+  const box = $wr("Tools");
+  if (!box || box.dataset.wired === "1") return;
+  box.dataset.wired = "1";
+  WR_TOOLS.forEach(item => {
+    if (item.sp) {
+      const s = document.createElement("span");
+      s.className = "sp";
+      box.appendChild(s);
+      return;
+    }
+    if (item.sep) {
+      const s = document.createElement("span");
+      s.className = "sep";
+      box.appendChild(s);
+      return;
+    }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.t = item.t;
+    if (item.html) b.innerHTML = item.html; else b.textContent = item.label;
+    b.title = item.tip;
+    b.onclick = ev => { ev.preventDefault(); wrTool(item.t, b); };
+    box.appendChild(b);
+  });
+}
+
+function wrTool(t, btn) {
+  wrFocusRange();
+  if (t === "p") return wrHeading(0);
+  if (t === "h1") return wrHeading(1);
+  if (t === "h2") return wrHeading(2);
+  if (t === "h3") return wrHeading(3);
+  if (t === "bold") return wrExec("bold");
+  if (t === "ital") return wrExec("italic");
+  if (t === "und") return wrExec("underline");
+  if (t === "strike") return wrExec("strikeThrough");
+  if (t === "code") return wrWrap("CODE", "", "选中要照原样的那几个字");
+  if (t === "color") return wrPopToggle("color", btn);
+  if (t === "back") return wrPopToggle("back", btn);
+  if (t === "clear") return wrClear();
+  if (t === "bull") return wrList("ul");
+  if (t === "num") return wrList("ol");
+  if (t === "task") return wrTask();
+  if (t === "quote") return wrQuote();
+  if (t === "hr") return wrRule();
+  if (t === "table") return wrPopToggle("table", btn);
+  if (t === "link") return wrLinkAsk();
+  if (t === "image") return wrImageAsk();
+  if (t === "md") return wrShowMd();
+}
+
+/** 选中的那几个字 → 纯文本（润色问 AI 要的就是这一段，坐标也是这一段的）。 */
+function wrRangeText(r) {
+  if (!r || r.collapsed) return "";
+  const mp = wrTextMap();
+  const a = wrPosOf(mp, r.startContainer, r.startOffset);
+  const b = wrPosOf(mp, r.endContainer, r.endOffset);
+  if (a === null || b === null || b <= a) return "";
+  return mp.full.slice(a, b);
+}
+
+/** 工具条上哪几颗该亮着：按块的那几颗看当前块，行内那几颗看选区。
+    选中一段而里面格式不一致时，按「这段的第一个字」算 —— 全亮会骗人，全灭也骗人，
+    亮一半不如跟着光标走，改的是同一段时一眼就能看出来。 */
+function wrBarState() {
+  const box = $wr("Tools");
+  if (!box) return;
+  const b = wrCurBlock();
+  const tag = String((b && b.tagName) || "").toLowerCase();
+  const li = wrCurLi();
+  const st = {};
+  st.p = tag === "p" ? 1 : 0;
+  st.h1 = tag === "h1" ? 1 : 0;
+  st.h2 = tag === "h2" ? 1 : 0;
+  st.h3 = tag === "h3" ? 1 : 0;
+  st.bull = tag === "ul" ? 1 : 0;
+  st.num = tag === "ol" ? 1 : 0;
+  st.quote = tag === "blockquote" ? 1 : 0;
+  st.task = li && wrLiIsTask(li) ? 1 : 0;
+  const ed = wrEd();
+  const r = wrRange();
+  const anchor = r ? (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentNode) : null;
+  st.code = anchor && ed && ed.contains(anchor) && wrNear(anchor, "CODE") ? 1 : 0;
+  st.bold = wrCmdOn("bold");
+  st.ital = wrCmdOn("italic");
+  st.und = wrCmdOn("underline");
+  st.strike = wrCmdOn("strikeThrough");
+  st.color = 0;
+  st.back = 0;
+  const sp = anchor && ed && ed.contains(anchor) ? wrNear(anchor, "SPAN") : null;
+  if (sp) {
+    const s = String(sp.getAttribute("style") || "");
+    st.color = /(^|;)\s*color\s*:/.test(s) ? 1 : 0;
+    st.back = /(^|;)\s*background-color\s*:/.test(s) ? 1 : 0;
+  }
+  [].slice.call(box.querySelectorAll("button[data-t]")).forEach(el => {
+    const on = st[el.dataset.t] ? true : false;
+    el.classList.toggle("on", on);
+  });
+}
+
+function wrCmdOn(cmd) {
+  try { return document.queryCommandState(cmd) ? 1 : 0; }
+  catch (e) { return 0; }        // 焦点不在正文里时有的内核直接抛，那就当没亮
+}
+
+/** 链接：先弹层收地址（不在工具条上塞一个输入框，那条一撑就把整排钮挤到下一行去）。 */
+function wrLinkAsk() {
+  const ed = wrEd();
+  if (!ed) return;
+  const r = wrRange();
+  if (!r || r.collapsed) { whisper("先选中要挂链接的那几个字"); return; }
+  const mine = wrRangeText(r);
+  sheet({
+    title: "给这几个字挂个链接",
+    text: (mine ? "挂上去的是「" + mine.slice(0, 24) + "」这几个字。" : "")
+      + "地址以 http 或 https 开头；本机上的图片写成 file:/// 开头的路径。",
+    body: "https://", editable: true, one: true, ph: "https://…",
+    actions: [{label: "挂上", lead: true, run: () => {
+      const url = String(sBody.value || "").trim();
+      if (!/^(https?:\/\/|file:\/\/\/|\/)\S*$/.test(url)) { whisper("地址看着不像一个链接"); return; }
+      wrLinkDo(url);
+    }}, {label: "再说"}],
+  });
+}
+
+function wrLinkDo(url) {
+  const ed = wrEd();
+  if (!ed) return;
+  wrFocusRange();
+  const r = wrRange();
+  if (!r || r.collapsed) { whisper("先选中要挂链接的那几个字"); return; }
+  const a = wrNear(r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentNode, "A");
+  const frag = r.extractContents();
+  if (a) {
+    // 已经有链接：只换地址，字留着，别在 <a> 里再套一层 <a>。
+    wrPeel(frag, k => String(k.tagName || "").toUpperCase() === "A");
+    a.setAttribute("href", url);
+    while (frag.firstChild) a.appendChild(frag.firstChild);
+    const back = document.createRange();
+    back.selectNodeContents(a);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(back);
+  } else {
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.appendChild(frag);
+    r.insertNode(link);
+    const back = document.createRange();
+    back.selectNodeContents(link);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(back);
+  }
+  wrAfterEdit();
+}
+
+function wrImageAsk() {
+  sheet({
+    title: "插一张图",
+    text: "网址（https:// 开头）或本机上的图片路径都行。导出的图片、PDF、电子书会把这张图带上。",
+    body: "", editable: true, one: true, ph: "https://…/a.png",
+    actions: [{label: "插进去", lead: true, run: () => {
+      const src = String(sBody.value || "").trim();
+      if (!src || /\s/.test(src)) { whisper("地址里有空格，先去掉"); return; }
+      wrImageDo(src);
+    }}, {label: "再说"}],
+  });
+}
+
+function wrImageDo(src) {
+  const ed = wrEd();
+  if (!ed) return;
+  wrFocusRange();
+  const r = wrRange();
+  if (!r) return;
+  const img = document.createElement("img");
+  img.setAttribute("src", src);
+  img.setAttribute("alt", "");
+  // 图后面补一个零宽空格以外的办法是补一个 <br>：紧挨着的字会跟它挤在一行，
+  // 但稿子里多一个空行又会被当成分段。这里什么都不补 —— 序列化的时候图就是 ![…]()，
+  // 想要单独一行就把它放在空段落里。
+  r.deleteContents();
+  r.insertNode(img);
+  const p = wrBlockOf(img) || wrCurBlock();
+  if (p) wrCaretIn(p, true);
+  wrAfterEdit();
+}
+
+/** 看 Markdown：这一屏存的就是这份字，工具条只是不让人手写它。
+    只给看和复制，不给在这儿改 —— 两处能改，哪一处后改的就把另一处的话覆盖掉，
+    那是「丢稿」最经典的来路。 */
+function wrShowMd() {
+  const md = wrGet();
+  const cn = wrCount(md).total;
+  sheet({
+    title: "稿子里存的那份 Markdown",
+    text: cn + " 字。导出 Markdown、快照、MCP 读的都是这一份；复制走之后改的只是剪贴板那份，"
+      + "稿子不动。",
+    body: md,
+    actions: [{label: "复制这一份", lead: true, run: () => selCopy(md)}, {label: "关掉"}],
+  });
+}
+
+
+/** 一屏的骨架：左树、面包屑、标题行、工具条、正文、下面那条 AI 坞。
+    正文从 textarea 换成了 contenteditable —— 为的是「点一下就是标题」，而不是让人
+    自己去数几个 #。代价是屏上的字不再是字符串，进和出都要过 wrSet / wrGet 那道翻译，
+    口径由上面的 wrParse 与后端 book_export.md_to_html 共同钉住。
+    空板子里也先放一个段落待着：往没有块的 contenteditable 里打第一个字，浏览器会把字
+    直接挂在这一块的根上（不包段落），而工具条上「这是标题几」只认块 —— 光标落在那种
+    没家的字上，只会回一句「光标没在正文里」。 */
 function wrMarkup() {
   return `<div class="wrapp">
     <aside class="wrdocs">
-      <button class="deed sure" id="wrNew" style="width:100%">新建稿子</button>
-      <div class="wrdoclist" id="wrDocList"></div>
+      <div class="wrnewbook">
+        <button class="deed sure" id="wrNewBook">新建一本书</button>
+        <button class="deed" id="wrNew" title="不并进书里的单篇稿子">散稿</button>
+      </div>
+      <div class="wrtree" id="wrTree"></div>
     </aside>
     <section class="wrmain">
+      <div class="wrcrum" id="wrCrum" hidden></div>
       <div class="wrhead">
         <input class="wrtitle" id="wrTitleIn" placeholder="无题" spellcheck="false">
         <div class="wrmeta" id="wrMeta"></div>
       </div>
-      <div class="wred"><textarea class="wrtext" id="wrTextIn" spellcheck="false"
-        placeholder="从这里开始写。&#10;&#10;Markdown 直接写：# 是标题，- 是列表，&gt; 是引。&#10;写到一半没灵感，选中几句再点下面的「续写」。"></textarea></div>
+      <div class="edtools" id="wrTools"></div>
+      <div class="wred"><div class="wrtext" id="wrTextIn" contenteditable="true" spellcheck="false"
+        data-ph="从这里开始写。&#10;&#10;上面那一排就是工具：标题、加粗、颜色、列表、表格，点一下就行，&#10;不用自己写记号。写到一半没灵感，选中几句再点下面的「续写」。"><p><br></p></div></div>
       <div class="wrbar">
         <span class="lab">AI</span>
         <button class="deed" id="wrBtnCont">续写</button>
@@ -5535,8 +7190,8 @@ function wrMarkup() {
   </div>`;
 }
 
-/** 这一屏只造一次 DOM：稿列与坞的内容各自定点换，正文那一个 textarea 从头到尾
-    不重建 —— 重建一次，光标、选区和输入法正在拼的那串拼音就全没了。 */
+/** 这一屏只造一次 DOM：左栏那棵树与坞的内容各自定点换，正文那一块 contenteditable
+    从头到尾不重建 —— 重建一次，光标、选区和输入法正在拼的那串拼音就全没了。 */
 async function renderWriteView() {
   const {body, fresh} = viewPane('write', viewHeader('写作平台'));
   if (fresh) {
@@ -5544,39 +7199,100 @@ async function renderWriteView() {
     wireWrite();
   }
   await wrDocs();
-  if (!WR.id && WR.docs.length) await wrOpen(WR.docs[0].id);
+  if (!WR.id) {
+    const first = wrFirstDoc();
+    if (first) await wrOpen(first);
+  }
+  paintWrTree();
   paintWrMeta();
 }
 
+/** 进来先看有没有书：有书就落在第一本的第一章（「我建了一本书要写哪？」不该由人再点一次），
+    一本没有才落到最旧的那篇散稿上。 */
+function wrFirstDoc() {
+  const t = WR.tomes || [];
+  for (let i = 0; i < t.length; i++) {
+    const cs = t[i].chapters || [];
+    if (cs.length) return cs[0].id;
+  }
+  return WR.docs.length ? WR.docs[0].id : '';
+}
+
+/** 接线。正文换成 contenteditable 之后，「改了一下」不再只有一个 input 事件：
+    点工具条会把焦点从正文抢走（选区不先存下来，颜色就涂在看不见的位置上），
+    粘贴会把网页上的样式一起长进稿子里，输入法正在拼的那串拼音碰不得。
+    这三条各有一根线，少一根都是「按了没反应」那一类最难查的 bug。 */
 function wireWrite() {
   $wr('New').onclick = wrNewDoc;
+  $wr('NewBook').onclick = wrNewBook;
   $wr('ResClose').onclick = () => wrSetTab('');
   // 坞里那六颗动作钮的 id 是 wrBtnXxx（$wr 会自动补 wr 前缀），别按标签名去点。
   [['BtnCont', 'cont'], ['BtnSpark', 'spark'], ['BtnPolish', 'polish'],
    ['BtnMat', 'mat'], ['BtnExp', 'exp'], ['BtnVer', 'ver']].forEach(p => {
     $wr(p[0]).onclick = () => wrTabBtn(p[1]);
   });
+  // 树与面包屑上每一颗都走委托：改一次名、加一章都要重铺那一栏，
+  // 重铺时逐颗重新接线，迟早漏一根（坞那一片早就改成委托了）。
+  const tree = $wr('Tree');
+  if (tree) tree.addEventListener('click', wrTreeClick);
+  const crum = $wr('Crum');
+  if (crum) crum.addEventListener('click', wrCrumClick);
+
   const ed = $wr('TextIn'), ti = $wr('TitleIn');
-  ed.addEventListener('input', () => {
-    // 第一句落下时就建稿子：还没命名、没点「新建」的时候打的字最容易蒸发，
-    // 而这时候用户根本不该去想「这篇存在哪」。
-    if (!WR.id) { wrStartDoc(); return; }
-    WR.dirty = true;
-    paintWrMeta();
-    scheduleWrSave();
-  });
+  // 内命令默认吐 <span style="font-weight:bold">。关掉才有 <b>：
+  // wrGet 那份翻译读的是标签，稿子里那一份 Markdown 也因此只有一个来路。
+  try { document.execCommand('styleWithCSS', false, false); } catch (e) { /* 老内核没这条 */ }
+  wrBarWire();
+  // 打字和点工具条走同一支收尾函数（占位语 / 记选区 / 字数 / 排队存盘）：
+  // 分两处写，将来一定改一忘一。
+  ed.addEventListener('input', () => { if (!WR.comp) wrAfterEdit(); });
+  ed.addEventListener('compositionstart', () => { WR.comp = true; });
+  ed.addEventListener('compositionend', () => { WR.comp = false; wrAfterEdit(); });
   ti.addEventListener('input', () => {
     if (!WR.id) return;
     WR.dirty = true;
     scheduleWrSave();
   });
-  ed.addEventListener('blur', () => { if (WR.dirty) wrSave(); });
-  // Cmd / Ctrl + S：写东西的人一只手在键盘上，为存一下去摸鼠标很打断。
+  ed.addEventListener('blur', () => { wrSaveRange(); if (WR.dirty) wrSave(); });
+  // 选区每动一下抄一份：色板、链接框、表格矩阵都会把焦点抢走，
+  // 「点了色块字没变色」几乎全是这一份没存。
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement !== ed) return;
+    wrSaveRange();
+    wrBarState();
+  });
+  ed.addEventListener('paste', e => {
+    e.preventDefault();
+    const clip = e.clipboardData || window.clipboardData;
+    wrPasteText(clip ? String(clip.getData('text/plain') || '') : '');
+  });
   ed.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 's') {
-      e.preventDefault();
-      wrSave();
+    const mod = e.metaKey || e.ctrlKey;
+    const k = String(e.key || '').toLowerCase();
+    // Cmd / Ctrl + S：写东西的人一只手在键盘上，为存一下去摸鼠标很打断。
+    if (mod && k === 's') { e.preventDefault(); wrSave(); return; }
+    if (mod && !e.altKey && !e.shiftKey) {
+      if (k === 'b') { e.preventDefault(); wrTool('bold', null); return; }
+      if (k === 'i') { e.preventDefault(); wrTool('ital', null); return; }
+      if (k === 'u') { e.preventDefault(); wrTool('und', null); return; }
+      return;
     }
+    // Tab 不跳焦点：写东西的人拿它缩进，一按跳到浏览器地址栏是事故。
+    if (k === 'tab' && !e.shiftKey) { e.preventDefault(); wrExec('insertText', '  '); }
+  });
+  ed.addEventListener('click', e => {
+    wrPopHide();
+    const li = e.target.closest('li.task');
+    if (!li) return;
+    // 方框占 li 左边那 1.5em（见上面那条 CSS 的推与拉）：落在这一格算「点框」，
+    // 落到字那里算「点这一行」，不该顺手改勾选 —— 谁都会拿这行字选中过再点一下。
+    const box = li.getBoundingClientRect();
+    const em = parseFloat(window.getComputedStyle(li).fontSize) || 16;
+    if (e.clientX - box.left >= em * 1.5) return;
+    e.preventDefault();
+    li.className = wrLiDone(li) ? 'task' : 'task done';
+    wrSaveRange();
+    wrAfterEdit();
   });
   // 坞里所有动作走事件委托：每次换内容都重新接线，切一次 tab 就漏一根线。
   const box = $wr('ResBody');
@@ -5585,7 +7301,37 @@ function wireWrite() {
   box.addEventListener('input', wrResInput);
 }
 
-/* 清单：稿列 + 表头那两个数 + 三张表（模板 / 续写档位 / 润色改法）。 */
+/** 粘贴：只把字接过来，格式一律不带（网页上的字体、颜色、外链一旦长进稿子，
+    导出那份就得替它长期还债，而人并不知道它们是从哪儿冒出来的）。
+    洗成 Markdown 之后仍走 wrParse 上屏 —— 于是「粘一段带记号的字」和
+    「看 Markdown 那一版」是同一条路，不会多出第三种结果。 */
+function wrPasteText(text) {
+  const md = wrTextToMd(String(text || ''));
+  if (!md) return;
+  const ed = wrEd();
+  if (!ed) return;
+  // 空正文上只有一行占位段，先抽掉：不然粘完顶上凭空多一空行。
+  const only = wrPlain().replace(/\s+/g, '') === '' ? wrCurBlock() : null;
+  if (only && only.parentNode) only.parentNode.removeChild(only);
+  wrInsertMd(md);
+  whisper('贴上来了：只接了字，网页上的格式没带');
+}
+
+/** 一串剪贴板文本 → 稿子里那一份 Markdown。
+    带块级记号（# 、> 、- 、1. 、表格那根竖线、围栏）的按 Markdown 收 ——
+    从别的笔记软件粘过来时，人要的是结构；剩下那些按纯文本收，行首的记号逐个按住，
+    否则粘一段代码就凭空长出几个标题。 */
+function wrTextToMd(text) {
+  const t = String(text || '').replace(/\r\n?/g, '\n');
+  if (/^ {0,3}(#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|\|)/m.test(t)) return t.trim();
+  return t.split('\n').map(line => {
+    const gap = line.match(/^\s*/)[0];
+    const rest = line.slice(gap.length);
+    return rest ? gap + wrHead(wrEscTxt(rest)) : '';
+  }).join('\n').trim();
+}
+
+/* 清单：稿列 + 册账 + 表头那两个数 + 三张表（模板 / 续写档位 / 润色改法）。 */
 async function wrDocs() {
   let r = await preAwait('writer');
   if (!r) r = await gzApi('/api/writer', undefined, 15000);
@@ -5594,28 +7340,351 @@ async function wrDocs() {
     return;
   }
   WR.docs = r.drafts || [];
+  // 章本身还是 docs 里的那篇稿子，books 只多给一份「哪几章、按什么顺序」的册账。
+  // 两份一拼就知道哪些已归册、哪些还在「未归册」那一堆里，字数与 rev 也必然是同一份真相。
+  WR.tomes = r.books || [];
   WRA = {templates: r.templates || [], lengths: r.lengths || [], tones: r.tones || []};
   setNote('write', WR.docs.length + ' 篇 · ' + (r.words || 0) + ' 字');
   if (!WR.tpl && WRA.templates.length) WR.tpl = WRA.templates[0].id;
-  paintWrDocs();
+  paintWrTree();
 }
 
-function paintWrDocs() {
-  const box = $wr('DocList');
+/* ── 左栏：书 → 章 ───────────────────────────────────
+   整块重铺在这一栏划得来：它只有几十行，动的又是「册账」这种一次改完的事。
+   不能重铺的是正文那块 contenteditable，那是另一码事。
+   章那一行跟着册账走，不跟着这一屏缓存的稿列走：稿号在册账里却已被删掉的那种，
+   后端 book_detail 自己读盘剔掉了（它总比缓存新）；前端再拿一份慢半拍的稿列去筛，
+   得到的是「后端刚加好一章、界面上那行没长出来」——点「加一章」最容易撞上。 */
+
+/** 这篇稿子在哪一本里（后端不在稿子上写册号，所以拿册账倒查）。 */
+function wrBookOf(id) {
+  const t = WR.tomes || [];
+  if (!id) return null;
+  for (let i = 0; i < t.length; i++) {
+    const cs = t[i].chapters || [];
+    for (let k = 0; k < cs.length; k++) if (cs[k].id === id) return t[i];
+  }
+  return null;
+}
+
+function wrDocOf(id) {
+  const d = WR.docs || [];
+  for (let i = 0; i < d.length; i++) if (d[i].id === id) return d[i];
+  return null;
+}
+
+/** 没归进任何一本书的稿子。 */
+function wrLooseDocs() {
+  const used = {};
+  (WR.tomes || []).forEach(b => (b.chapters || []).forEach(c => { used[c.id] = 1; }));
+  return (WR.docs || []).filter(d => !used[d.id]);
+}
+
+const WR_LOOSE = '~loose';
+
+function paintWrTree() {
+  const box = $wr('Tree');
   if (!box) return;
-  if (!WR.docs.length) {
-    setHtml(box, '<div class="wrline"><span class="lab">还没有稿子。在右边直接开始写，第一句落下就会建一篇。</span></div>');
+  const tomes = WR.tomes || [];
+  const loose = wrLooseDocs();
+  if (!tomes.length && !loose.length) {
+    setHtml(box, '<div class="wrline"><span class="lab">还没有稿子。在右边直接开始写，'
+      + '第一句落下就会建一篇；想成书，点上面「新建一本书」。</span></div>');
     return;
   }
-  box.replaceChildren(...WR.docs.map(d => {
-    const b = document.createElement('button');
-    b.className = 'wrdoc' + (d.id === WR.id ? ' on' : '');
-    b.innerHTML = '<span class="wt">' + esc(d.title || '无题') + '</span>'
-      + '<span class="wm">' + (d.words || 0) + ' 字 · ' + wrDay(d.updated)
-      + (d.versions ? ' · ' + d.versions + ' 份快照' : '') + '</span>';
-    b.onclick = () => { if (d.id !== WR.id) wrOpen(d.id); };
-    return b;
+  let s = '';
+  tomes.forEach(bk => { s += wrBookHtml(bk); });
+  if (loose.length) s += wrLooseHtml(loose);
+  // 打字时每 1.4 秒存一次盘，这一栏跟着重铺一次：不记下滚动位置，
+  // 用户刚滚到第五章就又弹回顶上，写长书的人会以为是树坏了。
+  const keep = box.scrollTop;
+  box.innerHTML = s;
+  box.scrollTop = keep;
+}
+
+/** 展开状态：点过的以 WR.open 为准（折叠那一颗把当前状态写在 data-on 上，
+    所以「点一下取反」不用在这儿再猜一遍默认值）；没点过时摊开第一本和当前这本。 */
+function wrFoldOn(key, dflt) {
+  const v = WR.open[key];
+  return (v === true || v === false) ? v : !!dflt;
+}
+
+function wrBookHtml(bk) {
+  const key = String(bk.id);
+  const open = wrFoldOn(key, key === String(WR.book) || key === String((WR.tomes[0] || {}).id));
+  let s = '<div class="wrtome' + (open ? ' open' : '') + '" data-b="' + esc(bk.id) + '">';
+  s += '<div class="wrtomeh' + (key === String(WR.book) ? ' cur' : '') + '"'
+    + ' data-do="fold" data-key="' + esc(key) + '" data-on="' + (open ? '1' : '0') + '">'
+    + '<span class="ar">▸</span>'
+    + '<span class="bt">' + esc(bk.title || '未命名的一本书') + '</span>'
+    + '<span class="bn">' + (bk.count || 0) + ' 章 · ' + (bk.words || 0) + ' 字</span>';
+  if (open) {
+    s += '<button type="button" class="wrtiny" data-do="add" data-b="' + esc(bk.id)
+      + '">加一章</button>';
+  }
+  s += '</div>';
+  if (open) {
+    s += '<div class="wrchaps">';
+    const rows = bk.chapters || [];
+    if (!rows.length) s += '<div class="wrempty">还没有章。</div>';
+    rows.forEach(c => { s += wrChapterHtml(c); });
+    s += '</div>';
+  }
+  return s + '</div>';
+}
+
+function wrLooseHtml(list) {
+  const open = wrFoldOn(WR_LOOSE, true);
+  const words = list.reduce((a, d) => a + (d.words || 0), 0);
+  let s = '<div class="wrtome' + (open ? ' open' : '') + ' loose" data-b="">'
+    + '<div class="wrtomeh" data-do="fold" data-key="' + WR_LOOSE + '"'
+    + ' data-on="' + (open ? '1' : '0') + '"><span class="ar">▸</span>'
+    + '<span class="bt">未归册</span><span class="bn">' + list.length + ' 篇 · '
+    + words + ' 字</span></div>';
+  if (open) {
+    s += '<div class="wrchaps">';
+    list.forEach(d => {
+      s += '<button type="button" class="wrdoc' + (d.id === WR.id ? ' on' : '') + '"'
+        + ' data-do="open" data-id="' + esc(d.id) + '">'
+        + '<span class="wt">' + esc(d.title || '无题') + '</span>'
+        + '<span class="wm">' + (d.words || 0) + ' 字 · ' + esc(wrDay(d.updated))
+        + (d.versions ? ' · ' + d.versions + ' 份快照' : '') + '</span></button>';
+    });
+    s += '</div>';
+  }
+  return s + '</div>';
+}
+
+/** 章那一行：号在册账里给（前端数出来的顺序一旦和册账错开，「第 3 章」这种写在
+    标题里的字就对不上了）。 */
+function wrChapterHtml(c) {
+  const d = wrDocOf(c.id) || {};
+  const words = d.words != null ? (d.words || 0) : (c.words || 0);
+  const upd = d.updated || c.updated || 0;
+  return '<button type="button" class="wrdoc chap' + (c.id === WR.id ? ' on' : '') + '"'
+    + ' data-do="open" data-id="' + esc(c.id) + '">'
+    + '<span class="cn">' + (c.no || 0) + '</span>'
+    + '<span class="wc"><span class="wt">' + esc(d.title || c.title || '无题') + '</span>'
+    + '<span class="wm">' + words + ' 字 · ' + esc(wrDay(upd)) + '</span></span></button>';
+}
+
+async function wrTreeClick(e) {
+  const head = e.target.closest('.wrtomeh');
+  if (head) {
+    WR.open[String(head.dataset.key || '')] = head.dataset.on !== '1';
+    paintWrTree();
+    return;
+  }
+  const tiny = e.target.closest('button[data-do="add"]');
+  if (tiny) { wrAddChapter(tiny.dataset.b); return; }
+  const row = e.target.closest('[data-do="open"]');
+  if (row && row.dataset.id && row.dataset.id !== WR.id) wrOpen(row.dataset.id);
+}
+
+/* ── 面包屑：这一章在哪一本里 ─────────────────────────
+   册级动作（改名 / 整本导出 / 解散）收在书名那一颗里，章级动作（加一章 / 挪 / 出册）
+   摊在这一行上。一行只管「此刻这一章」和「它所属的那一本」，不必回左栏那棵树去跳。 */
+function paintWrCrum() {
+  const el = $wr('Crum');
+  if (!el) return;
+  const bk = wrBookOf(WR.id);
+  WR.book = bk ? String(bk.id) : '';
+  if (!WR.id) { el.hidden = true; return; }
+  el.hidden = false;
+  if (!bk) {
+    setHtml(el, '<span class="cnow">未归册的一篇</span><span class="grow"></span>'
+      + '<button type="button" class="deed" data-do="into">归进一本书</button>'
+      + '<button type="button" class="deed" data-do="newbook">新建一本</button>');
+    return;
+  }
+  let no = 0;
+  (bk.chapters || []).forEach(c => { if (c.id === WR.id) no = c.no || 0; });
+  const cur = wrDocOf(WR.id) || {};
+  setHtml(el, '<button type="button" class="cbk" data-do="book">'
+    + esc(bk.title || '未命名的一本书') + '</button>'
+    + '<span class="cs">›</span>'
+    + '<span class="cnow">第 ' + no + ' 章 · ' + esc(cur.title || '无题') + '</span>'
+    + '<span class="grow"></span>'
+    + '<button type="button" class="deed" data-do="add" data-b="' + esc(bk.id) + '">加一章</button>'
+    + '<button type="button" class="deed" data-do="up"' + (no <= 1 ? ' disabled' : '') + '>上移</button>'
+    + '<button type="button" class="deed" data-do="down"'
+    + (no >= (bk.count || 0) ? ' disabled' : '') + '>下移</button>'
+    + '<button type="button" class="deed" data-do="out">移出这本书</button>'
+    + '<button type="button" class="deed" data-do="whole">整本导出</button>');
+}
+
+async function wrCrumClick(e) {
+  const b = e.target.closest('button[data-do]');
+  if (!b || b.disabled) return;
+  const what = b.dataset.do;
+  if (what === 'book') return wrBookMenu();
+  if (what === 'add') return wrAddChapter(b.dataset.b);
+  if (what === 'up') return wrMoveChapter(-1);
+  if (what === 'down') return wrMoveChapter(1);
+  if (what === 'out') return wrOutChapter();
+  if (what === 'whole') return wrWholeExport();
+  if (what === 'into') return wrIntoBook();
+  if (what === 'newbook') return wrNewBook();
+}
+
+/** 册账换了就用带回的那一份顶上这一本，不重问后端，也不重铺整栏：
+    左栏一重铺，用户刚滚到第五章就又回到顶上。 */
+function wrTakeBook(r) {
+  if (!r || !r.ok || !r.book) return;
+  const t = WR.tomes || [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i].id === r.book.id) { t[i] = r.book; paintWrTree(); paintWrCrum(); return; }
+  }
+  t.unshift(r.book);
+  WR.tomes = t;
+  paintWrTree();
+  paintWrCrum();
+}
+
+/** 解散 / 出册这一类后端直接回整本摊平的册账（writer_book_rows），拿来就用。 */
+function wrTakeRows(r) {
+  if (!r || !r.ok) return;
+  if (r.books) WR.tomes = r.books;
+  paintWrTree();
+  paintWrCrum();
+}
+
+function wrNewBook() {
+  sheet({
+    title: '新建一本书',
+    text: '书是章的顺序，不是另一份稿子：每一章照旧是一篇独立的稿，'
+      + '随时能挪进别的书，也能从这本书里拿出来。',
+    body: '', editable: true, one: true, ph: '比如：语言与人工智能 · 备考笔记',
+    actions: [
+      {label: '建好', lead: true, run: async () => {
+        const name = String(sBody.value || '').trim();
+        const r = await gzApi('/api/writer', {do: 'book.create', title: name}, 20000);
+        if (!r || !r.ok || !r.book) { whisper((r && r.msg) || '这本书建不出来'); return; }
+        WR.open[String(r.book.id)] = true;
+        wrTakeBook(r);
+        await wrAddChapter(r.book.id);
+      }},
+      {label: '算了'},
+    ],
+  });
+}
+
+/** bid 省略时归到当前这本；chapter 省略时后端新起一篇（标题「新的一章」）。 */
+async function wrAddChapter(bid) {
+  const bk = bid || WR.book || (wrBookOf(WR.id) || {}).id || '';
+  if (!bk) { whisper('先建一本书，章才有地方放'); return; }
+  await wrFlush();
+  const r = await gzApi('/api/writer', {do: 'book.add', book: bk}, 20000);
+  if (!r || !r.ok || !r.id) { whisper((r && r.msg) || '这一章加不出来'); return; }
+  // 这一章的稿子是后端起的，稿列那份缓存里没有它 —— 不补一行，「未归册」的篇数、
+  // 面包屑上「第 N 章 · 标题」都要跟着慢半拍（照 wrNewDoc 的补法来）。
+  const made = ((r.book || {}).chapters || []).filter(c => c.id === r.id)[0] || {};
+  const now = Math.floor(Date.now() / 1000);
+  WR.docs.unshift({id: r.id, title: made.title || '新的一章', words: made.words || 0,
+                   rev: made.rev || 1, created: now, updated: made.updated || now,
+                   versions: 0});
+  WR.open[String(bk)] = true;
+  wrTakeBook(r);
+  await wrOpen(r.id);
+  whisper('新章开好了，直接写');
+}
+
+async function wrMoveChapter(delta) {
+  const bk = wrBookOf(WR.id);
+  if (!bk) return;
+  const r = await gzApi('/api/writer',
+    {do: 'book.order', book: bk.id, chapter: WR.id, delta}, 20000);
+  if (!r || !r.ok) { whisper((r && r.msg) || '这一章没挪动'); return; }
+  if (!r.moved) whisper(delta < 0 ? '它已经是第一章了' : '它已经是最后一章了');
+  wrTakeBook(r);
+}
+
+function wrOutChapter() {
+  const bk = wrBookOf(WR.id);
+  if (!bk) return;
+  sheet({
+    title: '把这一章移出这本书',
+    text: '稿子一个字都不动，只是不再排在这本书里；它会回到左栏「未归册」那一堆，'
+      + '随时能再归进去。',
+    actions: [
+      {label: '移出去', lead: true, run: async () => {
+        const r = await gzApi('/api/writer', {do: 'book.remove', chapter: WR.id}, 20000);
+        wrTakeRows(r);
+        paintWrCrum();
+        whisper(r && r.ok ? (r.msg || '已经出册，稿子还在未归册那一堆里')
+          : (r && r.msg) || '没移出去');
+      }},
+      {label: '算了'},
+    ],
+  });
+}
+
+/** 册级动作都收在书名那一颗里：改的、导的、散的，都只动「打包」这一层。 */
+function wrBookMenu() {
+  const bk = wrBookOf(WR.id);
+  if (!bk) return;
+  sheet({
+    title: '这本书',
+    text: (bk.title || '未命名的一本书') + ' · ' + (bk.count || 0) + ' 章 · '
+      + (bk.words || 0) + ' 字。书只是章的顺序：改名动的是这一层，'
+      + '解散也只是不再打包，章还是一篇一篇的稿子。',
+    actions: [
+      {label: '改书名', lead: true, keep: true, run: () => wrRenameBook(bk)},
+      {label: '整本导出', keep: true, run: () => wrWholeExport()},
+      {label: '解散这本书', run: async () => {
+        const r = await gzApi('/api/writer', {do: 'book.delete', book: bk.id}, 20000);
+        wrTakeRows(r);
+        whisper(r && r.ok ? (r.msg || '这本书散了，章都还在未归册里')
+          : (r && r.msg) || '没散开');
+      }},
+      {label: '关掉'},
+    ],
+  });
+}
+
+function wrRenameBook(bk) {
+  sheet({
+    title: '改书名',
+    text: '只改这一层的名字，章和稿子都不动。',
+    body: bk.title || '', editable: true, one: true, ph: '书名，最多 60 字',
+    actions: [
+      {label: '改好', lead: true, run: async () => {
+        const name = String(sBody.value || '').trim();
+        if (!name) { whisper('书名不能是空的'); return; }
+        const r = await gzApi('/api/writer', {do: 'book.rename', book: bk.id, title: name}, 20000);
+        if (!r || !r.ok) { whisper((r && r.msg) || '改名没做成'); return; }
+        wrTakeBook(r);
+        whisper('改好了');
+      }},
+      {label: '算了'},
+    ],
+  });
+}
+
+/** 把当前这篇归进某本书：册级选项不多时，一排按钮比一个下拉好点，
+    而且「归到哪一本」本来就是要人想清楚的一步。 */
+function wrIntoBook() {
+  const t = WR.tomes || [];
+  if (!t.length) { wrNewBook(); return; }
+  const acts = t.map((bk, i) => ({
+    label: (bk.title || '未命名的一本书') + '（' + (bk.count || 0) + ' 章）',
+    lead: i === 0,
+    run: async () => {
+      const r = await gzApi('/api/writer',
+        {do: 'book.add', book: bk.id, chapter: WR.id}, 20000);
+      if (!r || !r.ok) { whisper((r && r.msg) || '没归进去'); return; }
+      WR.open[String(bk.id)] = true;
+      wrTakeBook(r);
+      whisper('已经排进这本书了');
+    },
   }));
+  sheet({
+    title: '归进哪一本书',
+    text: '这一篇会接到那本书的章尾（顺序之后能挪）。稿子本身不动，'
+      + '所以归错了再拿出来就行，不会把字弄丢。',
+    actions: acts.concat([{label: '新建一本再归进去', run: () => wrNewBook()},
+      {label: '算了'}]),
+  });
 }
 
 async function wrOpen(id) {
@@ -5637,11 +7706,13 @@ async function wrOpen(id) {
   WR.chosen = [];
   WR.running = false;
   WR.creating = false;
-  const ed = $wr('TextIn');
-  if (ed && ed.value !== WR.text) ed.value = WR.text;
+  WR.polishSel = '';
+  // 换稿子是唯一一次整块重建：屏上的字已经是 DOM，只能由 wrSet 从 Markdown 重新涂一遍。
+  wrSet(WR.text);
   const ti = $wr('TitleIn');
   if (ti) ti.value = WR.title;
-  paintWrDocs();
+  paintWrTree();
+  paintWrCrum();
   paintWrMeta();
   // 换稿子时把坞收掉：上一稿的续写结果、勾选的润色块对新稿没有意义，留着最容易被按错。
   wrSetTab('');
@@ -5655,15 +7726,23 @@ async function wrNewDoc() {
   const now = Math.floor(Date.now() / 1000);
   WR.docs.unshift({id: r.id, title: '无题', words: 0, rev: 1, created: now, updated: now, versions: 0});
   await wrOpen(r.id);
-  $wr('TextIn').focus();
+  wrFocusEnd();
+}
+
+/** 光标放到正文末尾：新建一章、刚建出一篇散稿时要开始写，落点该在字尾而不是字头。 */
+function wrFocusEnd() {
+  const ed = wrEd();
+  if (!ed) return;
+  ed.focus();
+  const last = ed.lastElementChild;
+  if (last) wrCaretIn(last, true);
 }
 
 /** 光标停在正文里就开写：不等用户点「新建」，第一句落下就把它落成一篇稿子。 */
 async function wrStartDoc() {
   if (WR.creating) return;
-  const ed = $wr('TextIn');
-  const text = ed ? ed.value : '';
-  if (!text.trim()) return;
+  const text = wrGet();
+  if (!wrCount(text).total) return;          // 只敲了几个空格不算开始写
   WR.creating = true;
   const r = await gzApi('/api/writer', {do: 'create', title: '', text}, 20000);
   WR.creating = false;
@@ -5682,9 +7761,10 @@ async function wrStartDoc() {
                    created: WR.updated, updated: WR.updated, versions: 0});
   const ti = $wr('TitleIn');
   if (ti && !ti.value) ti.value = WR.title;
-  paintWrDocs();
+  paintWrTree();
+  paintWrCrum();
   paintWrMeta();
-  whisper('新稿已建好，存在本机书库');
+  whisper('新稿已建好，还没归进书：想成书点上面「归进一本书」');
 }
 
 function scheduleWrSave(ms) {
@@ -5697,8 +7777,7 @@ async function wrSave() {
   WR.timer = 0;
   if (!WR.id) return;
   if (WR.saving) { WR.pending = true; return; }      // 别和正在飞的那一趟抢同一份正文
-  const ed = $wr('TextIn');
-  const text = ed ? ed.value : WR.text;
+  const text = wrGet();
   const title = ($wr('TitleIn') || {}).value;
   if (!WR.dirty && text === WR.text && title === WR.title) return;
   WR.saving = true;
@@ -5712,8 +7791,11 @@ async function wrSave() {
     WR.title = title;
     WR.words = r.words;
     WR.updated = r.updated;
-    const row = WR.docs.filter(d => d.id === WR.id)[0];
+    const row = wrDocOf(WR.id);
     if (row) { row.words = r.words; row.updated = r.updated; row.title = title || row.title; }
+    // 左栏那一行的字数与时间跟着变了，面包屑上「第 N 章 · 标题」也是。
+    paintWrTree();
+    paintWrCrum();
     paintWrMeta();
     setNote('write', WR.docs.length + ' 篇 · ' + WR.docs.reduce((a, d) => a + (d.words || 0), 0) + ' 字');
     if (WR.pending) { WR.pending = false; await wrSave(); }
@@ -5746,7 +7828,7 @@ function wrConflict(c, mine) {
         const at = WR.id;
         WR.id = '';                 // 绕过「打不开就不动」的那句，重新走一遍读取
         await wrOpen(at);
-        whisper('已换成机器上那一份，你刚才那版还在输入框之外，先别急着写');
+        whisper('已换成机器上那一份，你刚才那版在历史里，随时能换回来');
       }},
       {label: '再说', keep: true},
     ],
@@ -5765,9 +7847,13 @@ async function wrFlush() {
 function wrWait(ms) { return new Promise(res => setTimeout(res, ms)); }
 
 /* 字数口径和后端那一份对齐（writer.words）：中文按字、英文按词、数字按组，
-   先剥掉 markdown 的行首记号 —— 否则「## 标题」那两个井号会被数进去。 */
+   先剥掉 markdown 的行首记号、再剥掉尖括号里那些标签 —— 顺序跟后端一致，
+   「## <span style="color:#c00">红字</span>」这种混着写的，两边才数出同一个数。
+   颜色标签是正文里点色板留下的，不剥的话六个十六进制字符会被当成一个数字。 */
 function wrCount(text) {
-  const body = String(text || '').replace(/^\s*(?:#{1,6}\s*|[-*+]\s+|\d+[.)]\s+|>\s*)/gm, '');
+  const body = String(text || '')
+    .replace(/^\s*(?:#{1,6}\s*|[-*+]\s+|\d+[.)]\s+|>\s*)/gm, '')
+    .replace(/<[^>]+>/g, '');
   const hanRe = /[㐀-䶿一-鿿豈-﫿]/g;
   const han = (body.match(hanRe) || []).length;
   const latin = (body.replace(/[㐀-䶿一-鿿豈-﫿]/g, ' ').match(/[A-Za-z][A-Za-z'-]*/g) || []).length;
@@ -5791,7 +7877,9 @@ function wrDay(ts) {
 function paintWrMeta() {
   const m = $wr('Meta');
   if (!m) return;
-  const text = ($wr('TextIn') || {}).value || '';
+  // 数的是「稿子那份 Markdown」的字，不是屏上的纯文本：带颜色的字在屏上少了那串
+  // 十六进制，在稿子里也一样（标签会被剥），两边对齐才不会一存盘数字就跳。
+  const text = wrGet();
   let st = '开始写就会自动存';
   if (WR.id && WR.saving) st = '存…';
   else if (WR.id && (WR.dirty || WR.pending)) st = '有改动没存';
@@ -5807,11 +7895,20 @@ function wrTabBtn(name) {
   wrSetTab(name);
 }
 
+/** 选中的那一段纯文本。先认屏上正在选的那一份；点坞里按钮时焦点已经离开正文、
+    选区也可能被浏览器收掉，那就退回 blur 时存下的那一份 —— 否则「选好了再点开始」
+    会变成「点了说我没选中」。 */
 function wrSel() {
-  const ed = $wr('TextIn');
-  if (!ed) return '';
-  const a = ed.selectionStart | 0, b = ed.selectionEnd | 0;
-  return b > a ? String(ed.value || '').slice(a, b) : '';
+  const live = wrSelRange();
+  if (live && live.to > live.from) return String(live.full).slice(live.from, live.to);
+  const ed = wrEd();
+  const kept = WR.range;
+  if (!ed || !kept || !ed.contains(kept.commonAncestorContainer)) return '';
+  const mp = wrTextMap();
+  const a = wrPosOf(mp, kept.startContainer, kept.startOffset);
+  const b = wrPosOf(mp, kept.endContainer, kept.endOffset);
+  if (a === null || b === null || b <= a) return '';
+  return mp.full.slice(a, b);
 }
 
 function wrSetTab(name) {
@@ -5866,11 +7963,13 @@ function wrContHtml() {
 
 async function wrContRun() {
   if (WR.running) { wrStopCont(); return; }
-  const ed = $wr('TextIn');
   const sel = wrSel();
   WR.sel = sel;
-  WR.caret = ed ? (ed.selectionEnd | 0) || String(ed.value || '').length : WR.text.length;
-  const feed = (sel.trim() ? sel : (ed ? ed.value : '')) || '';
+  /* 光标位置用「纯文本第几个字」记：DOM 节点会在润色、插表格时整块换掉，
+     攥着节点引用等它回来，早就不是屏上那一个了。 */
+  const r = wrSelRange();
+  WR.caret = r ? r.to : wrPlain().length;
+  const feed = (sel.trim() ? sel : wrGet()) || '';
   if (!feed.trim()) { whisper('先写几句，它才有得接'); return; }
   if (!WR.id) { whisper('这一稿还没落盘：先按 Cmd/Ctrl+S 存一下再续写'); return; }
   const my = ++WR.seq;
@@ -5938,24 +8037,16 @@ function wrStopCont() {
   wrPaintRes();
 }
 
-/** 接进正文：插在你停笔的那个光标处，前后各留一行空行（段落之间要靠空行分开）。 */
+/** 接进正文：接在你停笔的那一块后面。
+    不劈开中间插 —— 模型给的是整段，塞进一句说到一半的话里，读起来像被人抢答；
+    而「这一块后面」正是停笔处向下另起一段的位置，也顺带把段落之间的空行补齐了。 */
 function wrPasteCont() {
   const add = (WR.cont || '').trim();
-  const ed = $wr('TextIn');
-  if (!add || !ed) return;
-  const at = Math.min(Math.max(0, WR.caret | 0), ed.value.length);
-  let head = ed.value.slice(0, at);
-  let tail = ed.value.slice(at);
-  if (head && !/\n[ \t]*$/.test(head)) head += '\n\n';
-  if (tail && !/^[ \t]*\n/.test(tail)) tail = '\n\n' + tail;
-  ed.value = head + add + tail;
-  const pos = (head + add).length;
-  ed.focus();
-  ed.setSelectionRange(pos, pos);
+  if (!add || !wrEd()) return;
+  if (!wrInsertMd(add)) { whisper('这一栏没找到该接在哪一块，重来一次试试'); return; }
   WR.cont = '';
-  WR.caret = pos;
   WR.dirty = true;
-  scheduleWrSave(700);
+  wrSaveRange();
   paintWrMeta();
   wrPaintRes();
   whisper('已接进正文');
@@ -5978,7 +8069,7 @@ function wrSparkHtml() {
 
 async function wrSparkRun() {
   if (WR.running) return;
-  const feed = (($wr('TextIn') || {}).value || '') || WR.text;
+  const feed = wrGet() || WR.text;
   if (!feed.trim()) { whisper('先写几句，它才有得想'); return; }
   WR.running = true;
   wrPaintRes();
@@ -6035,36 +8126,45 @@ async function wrPolishRun() {
   if (!WR.blocks.length) whisper('那边给的还是这一段，没改动');
 }
 
+/* 润色回来的是一块一块的差异，坐标相对于「选中的那一段」。落到正文上分成两件事：
+   先把选中的那一段在纯文本里找回来（找不回说明用户中途又改过，宁可不改），
+   再按坐标从段尾往前逐处换 —— 从前往后换会把后面那些坐标顶偏，改到不该改的字上。
+   每处只替换模型真的改过的那几个字，选区里没被动的加粗、颜色都原样留着；
+   整段推平重写是把用户的格式一起抹掉，那种「帮忙」比不改更糟。 */
 function wrApplyBlocks() {
   const base = WR.polishSel || '';
-  const ed = $wr('TextIn');
-  if (!ed || !base) return;
+  if (!wrEd() || !base) return;
   const pick = [];
   WR.blocks.forEach((k, i) => { if (WR.chosen[i]) pick.push(k); });
   if (!pick.length) { whisper('一处都没勾上'); return; }
-  const at = ed.value.indexOf(base);
+  const mp = wrTextMap();
+  const at = mp.full.indexOf(base);
   if (at < 0) { whisper('选中的那一段已经被改过了，先别动它：重新选中再问一次'); return; }
-  let out = ed.value;
-  let delta = 0;
-  // 从后往前换：往前面的块会先把后面那些块的坐标顶偏，改到不该改的字上。
-  pick.slice().sort((a, b) => (b.at | 0) - (a.at | 0)).forEach(k => {
-    const left = at + (k.at | 0);
-    const right = at + ((k.end == null ? k.at : k.end) | 0);
-    out = out.slice(0, left) + String(k.new || '') + out.slice(right);
-    delta += String(k.new || '').length - (right - left);
+  pick.sort((a, b) => (b.at | 0) - (a.at | 0));
+  let run = base;
+  let done = 0, skip = 0;
+  pick.forEach(k => {
+    const from = at + (k.at | 0);
+    const to = at + ((k.end == null ? k.at : k.end) | 0);
+    const text = String(k.new || '');
+    // 换行留在段内（<br>）而不是劈成两段：这一段是用户圈定的范围，
+    // 擅自往正文里多塞一个段落，导出的结构就跟他看到的不是一回事了。
+    const html = text.split('\n').map(wrInline).join('<br>');
+    if (wrSplice(mp, Math.min(from, to), Math.max(from, to), wrFrag(html))) {
+      done++;
+      const l = Math.min(k.at | 0, run.length), r = Math.min(Math.max(to - at, l), run.length);
+      run = run.slice(0, l) + text + run.slice(r);
+    } else skip++;
   });
-  ed.value = out;
-  const caret = Math.min(out.length, at + base.length + delta);
   WR.blocks = [];
   WR.chosen = [];
   WR.polishSel = '';
-  WR.dirty = true;
-  scheduleWrSave(700);
-  paintWrMeta();
+  wrAfterEdit();
+  wrCaretAt(at + run.length);
   wrPaintRes();
-  ed.focus();
-  ed.setSelectionRange(caret, caret);
-  whisper('改好了 ' + pick.length + ' 处');
+  if (done && skip) whisper('改好了 ' + done + ' 处，' + skip + ' 处那一片混着图片或表格，换个只含文字的选区再试');
+  else if (done) whisper('改好了 ' + done + ' 处');
+  else whisper('一处都没换成：那一段大概已经被改动过，重新选中再问一次');
 }
 
 /* 素材：这一栏决定 AI 「看哪些笔记」。原文只在请求体里走一趟，界面不回显、日志不记。 */
@@ -6129,11 +8229,21 @@ async function wrLoadBooks() {
   if (WR.tab === 'mat') wrPaintRes();
 }
 
-/* 导出：四种排版 + 三样可关的标注，预览和成品走的是同一条拼装路径。 */
+/* 导出：四种排版 + 三样可关的标注，预览和成品走的是同一条拼装路径。
+   「整本书一起导」是同一个接口的另一种「要哪一份」：后端那条路 id 与 book 同位，
+   所以这里只换问的那一个号，排版、标注、四颗按钮一概不动。 */
 function wrExpHtml() {
   const seg = wrSeg(WRA.templates, WR.tpl, 'tpl')
     || '<span class="seg txt"><button class="on">黑白简约</button></span>';
-  let s = '<div class="wrline"><span class="lab">排版</span>' + seg + '</div>';
+  const whole = !!WR.book;
+  let s = '';
+  if (whole) {
+    s += '<div class="wrline"><label><input type="checkbox" data-act="whole"'
+      + (WR.whole ? ' checked' : '') + '>整本书一起导</label>'
+      + '<span class="lab">' + (WR.whole ? '导的是这一本的合稿：一章一段，电子书的目录就是章。'
+        : '勾上就导这一本，不勾只导现在开着的这一章。') + '</span></div>';
+  }
+  s += '<div class="wrline"><span class="lab">排版</span>' + seg + '</div>';
   s += '<div class="wrline"><span class="lab">标注</span>'
     + '<label><input type="checkbox" data-act="brand"' + (WR.brand ? ' checked' : '') + '>署名归藏</label>'
     + '<label><input type="checkbox" data-act="date"' + (WR.date ? ' checked' : '') + '>日期</label>'
@@ -6142,20 +8252,37 @@ function wrExpHtml() {
     + [1, 2, 3].map(n => '<option value="' + n + '"' + (n === WR.scale ? ' selected' : '') + '>'
       + n + ' 倍</option>').join('')
     + '</select><span class="grow"></span>'
-    + (WR.id ? '<button class="deed" data-act="prev">预览这一版</button>' : '') + '</div>';
+    + (wrExpReady() ? '<button class="deed" data-act="prev">预览这一版</button>' : '') + '</div>';
   s += '<div class="wrprev" id="wrPrevBox" hidden><iframe id="wrPrevFrame" title="导出预览" sandbox=""></iframe></div>';
   s += '<div class="wrline">'
-    + '<button class="deed" data-act="png"' + (WR.id ? '' : ' disabled') + '>导成图片</button>'
-    + '<button class="deed" data-act="pdf"' + (WR.id ? '' : ' disabled') + '>导成 PDF</button>'
-    + '<button class="deed" data-act="epub"' + (WR.id ? '' : ' disabled') + '>导成电子书</button>'
-    + '<button class="deed" data-act="md"' + (WR.id ? '' : ' disabled') + '>存一份 Markdown</button>'
+    + '<button class="deed" data-act="png"' + (wrExpReady() ? '' : ' disabled') + '>导成图片</button>'
+    + '<button class="deed" data-act="pdf"' + (wrExpReady() ? '' : ' disabled') + '>导成 PDF</button>'
+    + '<button class="deed" data-act="epub"' + (wrExpReady() ? '' : ' disabled') + '>导成电子书</button>'
+    + '<button class="deed" data-act="md"' + (wrExpReady() ? '' : ' disabled') + '>存一份 Markdown</button>'
     + '<button class="deed" data-act="openexp">打开所在文件夹</button></div>';
-  s += '<div class="wrline"><span class="lab" id="wrExpNote">' + esc(WR.note || '导出的文件落在本机导出文件夹，不进任何云端。') + '</span></div>';
+  s += '<div class="wrline"><span class="lab" id="wrExpNote">'
+    + esc(WR.note || (WR.whole ? '整本书的每一个字都在这一次里，落在本机导出文件夹，不进任何云端。'
+      : '导出的文件落在本机导出文件夹，不进任何云端。')) + '</span></div>';
   return s;
 }
 
+/** 这一栏现在有得导吗：开着一篇稿，或者勾了整本导出且这一章确实属于某一本。 */
+function wrExpReady() {
+  return !!(WR.id || (WR.whole && WR.book));
+}
+
+/** 面包屑与册账菜单里那颗「整本导出」：把开关打开、跳到导出那一栏。
+    不直接开导 —— 排版、标注、格式三样都得先让人挑，跳过去只是替他省两步点。 */
+function wrWholeExport() {
+  if (!WR.book) { whisper('这一篇还没归进任何一本书：先点「归进一本书」'); return; }
+  WR.whole = true;
+  wrSetTab('exp');
+}
+
 function wrExpQuery(extra) {
-  const q = ['id=' + encodeURIComponent(WR.id), 'tpl=' + encodeURIComponent(WR.tpl),
+  const q = [(WR.whole && WR.book ? 'book=' : 'id=')
+    + encodeURIComponent(WR.whole && WR.book ? WR.book : WR.id),
+    'tpl=' + encodeURIComponent(WR.tpl),
     'brand=' + (WR.brand ? '1' : '0'), 'date=' + (WR.date ? '1' : '0'),
     'lead=' + (WR.lead ? '1' : '0'), 'scale=' + WR.scale];
   return q.concat(extra || []).join('&');
@@ -6167,13 +8294,13 @@ async function wrPreview() {
   await wrFlush();
   const box = $wr('PrevBox'), fr = $wr('PrevFrame');
   if (!box || !fr) return;
-  if (!WR.id) { whisper('先存一下这一稿'); return; }
+  if (!wrExpReady()) { whisper('先存一下这一稿'); return; }
   box.hidden = false;
   fr.src = '/api/writer?mode=preview&' + wrExpQuery();
 }
 
 async function wrExportDo(kind) {
-  if (!WR.id) { whisper('先存一下这一稿'); return; }
+  if (!wrExpReady()) { whisper('先存一下这一稿'); return; }
   await wrFlush();
   wrExpNote('正在导出…');
   const r = await gzApi('/api/writer/export?kind=' + kind + '&' + wrExpQuery() + '&json=1',
@@ -6240,9 +8367,10 @@ function wrRestore(name) {
         WR.words = (one.count || {}).total || wrCount(WR.text).total;
         WR.updated = (one.meta || {}).updated || WR.updated;
         WR.dirty = false;
-        const ed = $wr('TextIn');
-        if (ed) ed.value = WR.text;
+        wrSet(WR.text);                       // 整块重铺：回退就是换一份稿子，光标不必留在原地
         await wrVersions();
+        paintWrTree();
+        paintWrCrum();
         paintWrMeta();
         wrPaintRes();
         whisper('已回退');
@@ -6292,15 +8420,18 @@ function wrResChange(e) {
   if (!el) return;
   const a = el.dataset.act;
   if (a === 'tone') WR.tone = el.value;
+  else if (a === 'whole') WR.whole = !!el.checked;
   else if (a === 'book') { WR.mat.book = el.value; wrMatNote(); }
   else if (a === 'scale') WR.scale = Number(el.value) || 2;
   else if (a === 'brand') WR.brand = !!el.checked;
   else if (a === 'date') WR.date = !!el.checked;
   else if (a === 'lead') WR.lead = !!el.checked;
   else return;
+  // 整本 / 单篇是「要哪一份」，换档要重问一次后端才看得到合稿
+  if (a === 'whole') { WR.note = ''; wrPaintRes(); return; }
   // 标注一改，预览那一版就该跟着变（导出读的就是这一份拼装结果）
   if (a === 'brand' || a === 'date' || a === 'lead' || a === 'scale') {
-    if (WR.id && !($wr('PrevBox') || {}).hidden) wrPreview();
+    if (wrExpReady() && !($wr('PrevBox') || {}).hidden) wrPreview();
   }
 }
 
@@ -13856,8 +15987,13 @@ const NT_TAGS_DEF = [
 const NT_KINDS = {highlight: '划线', bold: '加粗', underline: '下划线',
                   strike: '删除线', note: '批注'};
 
-function ntEmpty() { return {schema: 1, marks: [], entries: []}; }
-function ntDoc() { if (!NT.doc) NT.doc = ntEmpty(); if (!NT.doc.marks) NT.doc.marks = []; if (!NT.doc.entries) NT.doc.entries = []; return NT.doc; }
+/* 空的那份笔记数据。名字不能叫 ntEmpty —— 下面模板那一栏另有一个 ntEmpty(box, text)，
+   同名函数在同一个脚本里后者顶掉前者：这三处「要一份空文档」拿到的会是 undefined。
+   这一栏当场还画得出来（到处都在读 NT.doc && …），但往后任何一次 ntDoc() 都抛
+   —— 实测 NT.doc 为 undefined 时 ntDoc() 报 Cannot read properties of undefined（reading 'marks'），
+   而划句即记、存条目、画板并进笔记三条路全靠 ntDoc() 起头。 */
+function ntBlankDoc() { return {schema: 1, marks: [], entries: []}; }
+function ntDoc() { if (!NT.doc) NT.doc = ntBlankDoc(); if (!NT.doc.marks) NT.doc.marks = []; if (!NT.doc.entries) NT.doc.entries = []; return NT.doc; }
 function ntTags() { return (NT.tags && NT.tags.length) ? NT.tags : NT_TAGS_DEF; }
 function ntTagOf(k) { return ntTags().find(t => t.key === k) || null; }
 function ntMarkById(id) { return (NT.doc && NT.doc.marks || []).find(m => m.id === id) || null; }
@@ -13886,8 +16022,8 @@ async function ntLoad(book) {
   try { d = await (await fetch('/api/mynotes?book=' + encodeURIComponent(book))).json(); }
   catch (e) { if (NT.seq === my) ntStatus('笔记没读出来，稍后再试', 'bad'); return; }
   if (NT.seq !== my || NT.book !== book) return;      // 期间又换了书，这次结果作废
-  if (!d.ok) { NT.doc = ntEmpty(); ntStatus(d.msg || '这本书还不认笔记', 'bad'); ntPaint(); return; }
-  NT.doc = d.doc || ntEmpty();
+  if (!d.ok) { NT.doc = ntBlankDoc(); ntStatus(d.msg || '这本书还不认笔记', 'bad'); ntPaint(); return; }
+  NT.doc = d.doc || ntBlankDoc();
   NT.tags = (d.tags && d.tags.length) ? d.tags : NT_TAGS_DEF;
   NT.meta = {title: d.title || book, author: d.author || '',
              source: d.source || '', url: d.url || ''};

@@ -59,7 +59,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -1007,14 +1007,31 @@ def draft_dir(book_id):
 
 
 def writer_list():
-    """稿子清单 + 两个总数（写作平台表头那行「N 篇 · M 字」）。"""
+    """稿子清单 + 书册清单 + 两个总数（写作平台表头那行「N 篇 · M 字」）。
+
+    书这一层是这一轮加的（左栏从「一叠散稿」变成「书 → 第一章 / 第二章」），但
+    章本身仍然是下面 `drafts` 里的那篇稿子：`books` 只多给一份「哪几章、按什么顺序」
+    的册账。前端拿两份一拼就知道哪些稿子已归册、哪些还在「未归册」那一堆里 ——
+    省掉再开一个接口，也保证两栏看到的字数与 rev 是同一份真相。
+    """
     drafts = writer_mod.list_drafts(OUT_DIR)
+    books = [writer_mod.book_detail(OUT_DIR, b) for b in writer_mod.load_books(OUT_DIR)]
     return {"drafts": drafts, "count": len(drafts),
+            "books": books,
             "words": sum(int(d.get("words") or 0) for d in drafts),
             "templates": [{"id": k, "label": l} for k, l in writer_mod.TPL_LABELS
                           if k in writer_mod.TEMPLATES],
             "lengths": [{"id": k, "label": l} for k, l, _t, _s in writer_mod.LENGTHS],
             "tones": [{"id": k, "label": l} for k, l in writer_mod.POLISH_TONES]}
+
+
+def writer_book_rows():
+    """册账摊平给界面：每本书带上自己的章清单（不含正文）。
+
+    拆 / 合 / 挪完直接回这一份，页面就不必再打一次 /api/writer 去重铺整栏 ——
+    左栏一次重铺会连带把稿列的滚动位置抹掉，用户刚点到第五章就又回到顶上。
+    """
+    return [writer_mod.book_detail(OUT_DIR, b) for b in writer_mod.load_books(OUT_DIR)]
 
 
 def writer_read(book_id):
@@ -1078,7 +1095,9 @@ def writer_material(ids=(), book="", typed=""):
 
 
 def writer_do(body):
-    """POST /api/writer：建、存、改名、拍快照、回退，一个口五种动作。"""
+    """POST /api/writer：稿子那一层六种动作（建、存、改名、看快照、拍快照、回退），
+    书与章那一层七种（`book.create` / `rename` / `delete` / `add` / `remove` / `order` /
+    `merge`）。一个口分十三种，全靠 body 里的 `do` 认门。"""
     do = str((body or {}).get("do") or "")
     book = str((body or {}).get("id") or (body or {}).get("book") or "")
 
@@ -1136,7 +1155,56 @@ def writer_do(body):
             return {"ok": False, "msg": (out or {}).get("msg") or "回退没做成"}
         return {"ok": True, "draft": writer_read(book) or {}}
 
-    return {"ok": False, "msg": "没说要干什么：建、存、改名、快照还是回退"}
+    if do == "book.create":
+        made = writer_mod.create_book(OUT_DIR, str((body or {}).get("title") or "")[:60])
+        log("--- 建书：%s ---" % made["id"])          # 只书号，书名是用户自己起的
+        return {"ok": True, "book": writer_mod.book_detail(OUT_DIR, made)}
+
+    if do == "book.rename":
+        ok, out = writer_mod.rename_book(OUT_DIR, book, str((body or {}).get("title") or ""))
+        if not ok:
+            return {"ok": False, "msg": out.get("msg") or "改名没做成"}
+        return {"ok": True, "book": writer_mod.book_detail(OUT_DIR, out)}
+
+    if do == "book.delete":
+        # 这一颗只把「组」取消，一篇稿都不动。删稿子是另一件事：界面上那颗
+        # 「删掉这一章」打的是本来的 `book.delete` 动作（书号还是 write_…，那道
+        # 路径闸照旧管得住）。两个名字撞在这里是故意的 —— 用户看到的差别在话术上。
+        ok, out = writer_mod.delete_book(OUT_DIR, book)
+        return {"ok": ok, "msg": out.get("msg") or "", "books": writer_book_rows()}
+
+    if do == "book.add":
+        ok, out = writer_mod.add_chapter(OUT_DIR, book,
+                                         str((body or {}).get("chapter") or ""),
+                                         str((body or {}).get("title") or ""))
+        if not ok:
+            return {"ok": False, "msg": out.get("msg") or "这一章加不进来"}
+        return {"ok": True, "id": out["id"],
+                "book": writer_mod.book_detail(OUT_DIR, out["book"])}
+
+    if do == "book.remove":
+        ok, out = writer_mod.remove_chapter(OUT_DIR, str((body or {}).get("chapter") or ""))
+        return {"ok": ok, "msg": out.get("msg") or "", "books": writer_book_rows()}
+
+    if do == "book.order":
+        ok, out = writer_mod.order_chapter(OUT_DIR, book,
+                                           str((body or {}).get("chapter") or ""),
+                                           (body or {}).get("delta") or 0)
+        if not ok:
+            return {"ok": False, "msg": out.get("msg") or "这一章没挪"}
+        return {"ok": True, "moved": bool(out.get("moved")),
+                "book": writer_mod.book_detail(OUT_DIR, out["book"])}
+
+    if do == "book.merge":
+        # 合稿给界面用（预览整本、一次复制全文）。整本导出不走这里，走
+        # /api/writer/export?book=…，那条路上还有排版模板与渲染。
+        merged = writer_mod.merge_text(OUT_DIR, book)
+        if not merged:
+            return {"ok": False, "msg": "这本书不在了"}
+        return {"ok": True, "title": merged["title"], "text": merged["text"],
+                "count": writer_mod.words(merged["text"])}
+
+    return {"ok": False, "msg": "没说要干什么：建、存、改名、快照、回退，还是书与章"}
 
 
 WRITER_AI_MODES = ("cont", "spark", "polish")
@@ -1208,20 +1276,43 @@ def writer_ai_after(mode, raw, body):
     return {"ok": True, "blocks": blocks, "raw": raw}
 
 
-def writer_export_html(book_id, opts):
-    """按模板把那篇稿子拼成一份完整的 HTML（导出与预览共用这一份）。"""
-    d = writer_mod.read(OUT_DIR, book_id)
+def writer_source(book_id):
+    """这一份要预览 / 导出的内容：一篇稿，或者一整本书（书号 `bk_` 开头）。
+
+    整本导出与单篇导出**共用这一条取内容的路**：两条路分开写，就会出现「左栏点整本
+    导出、导出来的却是当前这一章」这种最难查的错（界面上没报错，文件也真生成了）。
+    书这条路拿的是 `writer.merge_text` 那份合稿 —— 每章前面补了它自己的标题，
+    所以导 EPUB 切得出目录，跟摊成 chapters/0001.md 那条路口径一致。
+    """
+    bid = str(book_id or "")
+    if writer_mod.book_id_ok(bid):
+        merged = writer_mod.merge_text(OUT_DIR, bid)
+        if not merged:
+            return None
+        one = writer_mod.find_book(writer_mod.load_books(OUT_DIR), bid) or {}
+        return {"title": merged["title"] or "未命名的一本书", "text": merged["text"],
+                "updated": int(one.get("updated") or 0), "is_book": True}
+    d = writer_mod.read(OUT_DIR, bid)
     if not d:
+        return None
+    return {"title": d.get("title") or "", "text": d["text"],
+            "updated": int(d.get("updated") or 0), "is_book": False}
+
+
+def writer_export_html(book_id, opts):
+    """按模板把那篇稿子（或那一本书）拼成一份完整的 HTML（导出与预览共用这一份）。"""
+    src = writer_source(book_id)
+    if src is None:
         return None
     tpl = str(opts.get("tpl") or "plain")
     date_str = time.strftime("%Y-%m-%d") if str(opts.get("date", "1")) != "0" else ""
     brand = "归藏" if str(opts.get("brand", "1")) != "0" else ""
     lead = ""
     if str(opts.get("lead", "1")) != "0":
-        n = int((d.get("count") or {}).get("total") or 0)
-        stamp = time.strftime("%Y年%m月%d日", time.localtime(int(d.get("updated") or 0)))
+        n = int((writer_mod.words(src["text"]) or {}).get("total") or 0)
+        stamp = time.strftime("%Y年%m月%d日", time.localtime(src["updated"])) if src["updated"] else ""
         lead = "%d 字 · %s" % (n, stamp) if n or stamp else ""
-    return writer_mod.export_html(d["text"], title=d.get("title") or "",
+    return writer_mod.export_html(src["text"], title=src["title"],
                                  tpl=tpl, brand=brand, date_str=date_str, lead=lead)
 
 
@@ -1242,12 +1333,15 @@ def writer_export(kind, book_id, opts):
     三种渲染格式共用同一份 HTML：先导出一次再各自渲染，比各写一套模板容易对齐 ——
     「屏幕上预览的」和「存下来的」必须是同一个东西，否则用户会以为导出丢了格式。
     md 不用渲染，落的是正文原文；也放同一个文件夹，四颗按钮的文件才在一处。
+
+    `book_id` 可以是稿号也可以是书号（`bk_` 开头）：书号导的是整本合稿，
+    EPUB 那一档摊成一章一个文件，电子书的目录就是章。
     """
     html = writer_export_html(book_id, opts)
     if html is None:
         raise RuntimeError("这篇稿子不在了")
-    d = writer_mod.read(OUT_DIR, book_id)
-    stem = file_stem((d or {}).get("title") or book_id)
+    src = writer_source(book_id) or {}
+    stem = file_stem(src.get("title") or book_id)
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     note = ""
     if kind == "png":
@@ -1265,11 +1359,14 @@ def writer_export(kind, book_id, opts):
         dest = os.path.join(DOWNLOAD_DIR, "%s.epub" % stem)
         tmp = tempfile.mkdtemp(prefix="guizang-write-")
         try:
-            one = writer_mod.as_book_dir(OUT_DIR, book_id, tmp)
-            if not one:
+            if src.get("is_book"):
+                spread = writer_mod.as_book_dir_merged(OUT_DIR, book_id, tmp)
+            else:
+                spread = writer_mod.as_book_dir(OUT_DIR, book_id, tmp)
+            if not spread:
                 raise RuntimeError("这篇稿子不在了")
-            book_export.build_epub(one, dest,
-                                   title=(d or {}).get("title") or "未命名稿",
+            book_export.build_epub(spread, dest,
+                                   title=src.get("title") or "未命名稿",
                                    author=profile_view()["name"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1278,7 +1375,7 @@ def writer_export(kind, book_id, opts):
         # 单独走浏览器下载的话，「打开所在文件夹」翻不到它。
         dest = os.path.join(DOWNLOAD_DIR, "%s.md" % stem)
         with open(dest, "w", encoding="utf-8") as f:
-            f.write(((d or {}).get("text") or ""))
+            f.write(src.get("text") or "")
     else:
         raise RuntimeError("没有这一种导出格式")
     return dest, note
@@ -1287,12 +1384,18 @@ def writer_export(kind, book_id, opts):
 def writer_view(q):
     """GET /api/writer 那几种问法的共同出口（回 JSON 的那些）。
 
-    不带 id 给清单，带 id 给整篇，mode=versions 只看快照列表。页面上「写作」
-    那一格进来先取清单，点开某一篇才取整篇 —— 正文可能几万字，全量轮询会把
-    这台机器的人等成看幻灯片。
+    不带 id 给清单，带 id 给整篇，带 book 给那一本书的章清单，mode=versions 只看
+    快照列表。页面上「写作」那一格进来先取清单，点开某一篇才取整篇 —— 正文可能
+    几万字，全量轮询会把这台机器的人等成看幻灯片。
     """
     did = str(q.get("id", [""])[0] or "")
+    bid = str(q.get("book", [""])[0] or "")
     mode = str(q.get("mode", [""])[0] or "")
+    if bid:
+        one = writer_mod.find_book(writer_mod.load_books(OUT_DIR), bid)
+        if not one:
+            return {"ok": False, "msg": "这本书不在了"}
+        return {"ok": True, "book": writer_mod.book_detail(OUT_DIR, one)}
     if not did:
         return writer_list()
     if mode == "versions":
@@ -1922,9 +2025,12 @@ def mcp_prompt():
         "  flomo_portrait（读「用户记忆画像」，只有数字与标签，不含原文）",
         "· 写作：writer_list（列稿）、writer_read（读全文，超 6000 字加 full: true）、writer_create（新建）、",
         "  writer_save（整篇存，存前自动留快照）、writer_versions / writer_snapshot / writer_restore（回退）、",
-        "  writer_export（导出图片 / PDF / 电子书 / Markdown）、writer_ai（续写 / 灵感方向 / 润色建议）",
+        "  writer_export（导出图片 / PDF / 电子书 / Markdown，给 book 就导整本）、writer_ai（续写 / 灵感方向 / 润色建议）",
+        "· 书写（书 → 第一章 / 第二章那一层）：writer_books（列册账，连未归册的散稿一起给）、",
+        "  writer_book_new（建一本书，chapters 可以一次把章排好）、writer_book_rename（只改书名）、",
+        "  writer_book_chapter（add 归进来 / remove 出册 / order 挪序）、writer_book_delete（散册，不删稿）",
         "",
-        "六点注意，都是这个工具的设计口径，请照着做：",
+        "七点注意，都是这个工具的设计口径，请照着做：",
         "1. 取书、转写、批量取书、刷新订阅都是分钟到小时级的长任务：调用会立即返回，",
         "   进度用 app_status / task_log 轮询，不要在调用里等它跑完。",
         "2. 改转写请只用 video_transcript_save 的 edits / drop / add —— 只说改了哪几段，",
@@ -1937,6 +2043,9 @@ def mcp_prompt():
         "   按哪个标签找、回复写多长。便签一律只读 —— 改笔记是用户自己的事，没有写口。",
         "6. writer_save 是整篇覆盖：改一篇稿子要先 writer_read 拿回全文，改完整篇存回去；",
         "   别只发一句「把第二段改一下」。writer_ai 的润色只给差异建议，要不要用由用户定。",
+        "7. 书与章那一层只有一本账：writer_book_new / writer_book_rename / writer_book_chapter /",
+        "   writer_book_delete 动的都是「哪几章、按什么顺序」，正文一个字都不碰；要写正文还是",
+        "   writer_save。writer_book_delete 只是散册（章退回未归册那一堆），所以要带 confirm=true。",
         "",
         "弄好后用 shelf_list 试一下，能读出书架就说明通了。",
     ])
@@ -2887,11 +2996,14 @@ def write_meta(book_id, title, author, done):
         json.dump(cur, f, ensure_ascii=False, indent=2)
 
 
-# 一次「没跑完」会留下什么：章节 md、raw 页缓存、图片、目录快照、进度快照，
-# 外加引擎在书库根上写的那份合并稿。EPUB/PDF/ZIP 成品落在下载目录和 cache 里，
-# 不在书目录，所以不在清理范围 —— 清残稿不该顺手把用户已经拿走的成品也带走。
+# 一次「没跑完」会留下什么：章节 md、raw 页缓存、图片、目录快照、进度快照、
+# 「哪几项跳不到」的续传记录，外加引擎在书库根上写的那份合并稿。EPUB/PDF/ZIP
+# 成品落在下载目录和 cache 里，不在书目录，所以不在清理范围 —— 清残稿不该顺手
+# 把用户已经拿走的成品也带走。
 RESIDUE_DIRS = ("chapters", "raw", "images")
-RESIDUE_FILES = ("_catalog.json", "_progress.json")
+# _stuck.json 必须跟着清：那是「这一项连着两轮钉不住」的记账，章节都删光重取之后
+# 它还留着，新一轮就会跳过几章自己根本没读过的 —— 恰好又是「每次都缺同几章」。
+RESIDUE_FILES = ("_catalog.json", "_progress.json", "_stuck.json")
 
 
 def drop_stray_md(book_id, title=""):
@@ -4424,10 +4536,11 @@ class Handler(BaseHTTPRequestHandler):
                                   {"Cache-Control": "private, max-age=86400"})
 
         if path == "/api/writer":
-            did = q.get("id", [""])[0]
+            # id 与 book 是同一条路上的两种「要哪一份」：稿号给一篇，书号给整本合稿。
+            # 预览与下载原始 md 都从这里出去，所以「对话框里看到的」和「存下来的」
+            # 必然一致，不必为整本导出再拼第二份 HTML。
+            did = q.get("id", [""])[0] or q.get("book", [""])[0]
             mode = q.get("mode", [""])[0]
-            # 这两种要法回的是字节不是 JSON：预览那份 HTML 就是导出用的同一条拼装
-            # 路径，所以「对话框里看到的」和「存下来的」必然一致。
             if mode == "preview" and did:
                 html = writer_export_html(did, {k: v[0] for k, v in q.items()})
                 if html is None:
@@ -4435,12 +4548,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, "text/html; charset=utf-8", html,
                                   {"Cache-Control": "no-store"})
             if mode == "md" and did:
-                one = writer_read(did)
-                if not one:
+                src = writer_source(did)
+                if not src:
                     return self._send(404, "text/plain; charset=utf-8", "这篇稿子不在了")
-                return self._send(200, "text/markdown; charset=utf-8", one["text"],
+                return self._send(200, "text/markdown; charset=utf-8", src["text"],
                                   {"Content-Disposition":
-                                   content_disp(file_stem(one["meta"].get("title") or did), "md")})
+                                   content_disp(file_stem(src.get("title") or did), "md")})
             return self._json(writer_view(q))
 
         if path == "/api/writer/export":
@@ -4452,7 +4565,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, "text/plain; charset=utf-8",
                                   "导出图片和 PDF 要用到内置的铬内核，它还没装好")
             try:
-                dest, note = writer_export(kind, q.get("id", [""])[0],
+                dest, note = writer_export(kind,
+                                           q.get("id", [""])[0] or q.get("book", [""])[0],
                                            {k: v[0] for k, v in q.items()})
             except Exception as e:
                 return self._send(500, "text/plain; charset=utf-8",

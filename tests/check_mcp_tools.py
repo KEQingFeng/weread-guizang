@@ -195,8 +195,8 @@ try:
     names = [t["name"] for t in tools]
     chk("握手：tools/list 数出来的工具与 TOOL_DEFS 一致",
         len(names) == len(declared) == len(handlers), (len(names), len(declared), len(handlers)))
-    chk("清单：至少 56 个工具（写作那九个加完的新下限；再往下就是工具被删了却没改这里）",
-        len(names) >= 56, len(names))
+    chk("清单：至少 61 个工具（书写那五颗加完的新下限；再往下就是工具被删了却没改这里）",
+        len(names) >= 61, len(names))
     chk("清单：名字唯一", len(names) == len(set(names)))
     missing = sorted(set(handlers) - set(names))
     chk("清单：agent 能看见全部实现", not missing, missing)
@@ -568,6 +568,12 @@ try:
     # agent 这边只有一串 JSON。要盯两件事：用户嘴上说的是「标题」，工具得能按标题
     # 找到稿子；以及「整篇覆盖」这条语义得在工具层守住（没给正文不许清成空白）。
     WRITE_DIR = BOOKS / "写作"
+    # 先把自己那一格清空。下面每一段都从「账是空的」开始讲起（writer_list 要说「还没有稿子」、
+    # writer_books 要说「还没成书」），而服务是长命的、这一格也在同一个沙盒里 —— 不清场的话，
+    # 同一台机器上跑第二遍就会被上一遍留下的稿子和册账带偏，报出来的是一堆看着像产品 bug 的
+    # 假失败。整个目录连账一起删，跑完再删一次。
+    shutil.rmtree(WRITE_DIR, ignore_errors=True)
+    atexit.register(lambda: shutil.rmtree(WRITE_DIR, ignore_errors=True))
 
     bad, txt = m.call("writer_list")
     chk("writer_list：账是空的时候不报错，说的是去哪建",
@@ -640,6 +646,139 @@ try:
     bad, txt = m.call("writer_ai", {"mode": "没这个动作", "text": "x"})
     chk("writer_ai：动作名写错时说清只有 cont / spark / polish 三种",
         bad and "cont" in txt and "polish" in txt, txt[:200])
+
+    # 再随手建一篇**不打算入册**的散稿。它有两个用处：一是下面 writer_books 那句
+    # 「未归册的稿子：」得有东西才印得出来（不建就得改断言去迁就输出，而界面上那一栏
+    # 本来就有「还没归册」这一堆，这是用户真实会看到的形状）；二是它给 book_new 的
+    # 「按标题从散稿里找」那条路当一个不会被误认的对照物。
+    bad, txt = m.call("writer_create", {"title": "散着的一稿", "text": "还没想好归哪本书。\n"})
+    loose = (re.search(r"\[id: (write_[0-9a-f]+)\]", txt) or [None, ""])[1]
+    chk("writer_create：第二篇也建出来了（后面拿它当「未归册」那一个）",
+        not bad and bool(loose), txt[:200])
+
+    # ── 9. 书写：册账只动「哪几章、按什么顺序」，正文一个字都不碰 ──────
+    # 「我建一本书，第一章、第二章」这一层刚长出来：界面上有左栏那棵树兜着，agent 这边
+    # 只有一串 JSON。这一层最容易做坏的两件事都不会当场报错 —— 把「建书」做成「建新稿」
+    # （归进来一章就把正文重写一遍，用户看见刚排好的书变成空白章），把「散册」做成「删稿」
+    # （章没了还能怪用户手滑，稿子没了才是真丢东西）。所以每条都回到磁盘上数。
+    BOOKS_LEDGER = WRITE_DIR / "_books.json"
+
+    def ledger():
+        if not BOOKS_LEDGER.is_file():
+            return []
+        try:
+            data = json.loads(BOOKS_LEDGER.read_text(encoding="utf-8"))
+        except ValueError:
+            return []
+        return data.get("books") or []
+
+    def led_of(bid):
+        return next((b for b in ledger() if b.get("id") == bid), {})
+
+    def title_of(draft_id):
+        meta = WRITE_DIR / draft_id / "meta.json"
+        if not meta.is_file():
+            return ""
+        try:
+            return str(json.loads(meta.read_text(encoding="utf-8")).get("title") or "")
+        except ValueError:
+            return ""
+
+    def forget(draft_id):
+        atexit.register(lambda d=draft_id: shutil.rmtree(WRITE_DIR / d, ignore_errors=True))
+
+    bad, txt = m.call("writer_books")
+    chk("writer_books：还没成书时不报错，说的是去哪建",
+        not bad and "writer_book_new" in txt, txt[:220])
+
+    bad, txt = m.call("writer_book_new",
+                      {"title": "工具链取证书", "chapters": [wid, "开头", "收尾"]})
+    bk = (re.search(r"\[书号: (bk_[0-9a-f]+)\]", txt) or [None, ""])[1]
+    chk("writer_book_new：一次建书带三章，回话分得清哪章是归进来的、哪章是新起的",
+        not bad and bool(bk) and "章数：3" in txt and "原来的稿子" in txt and "新建空白章" in txt,
+        txt[:320])
+    rows = led_of(bk).get("chapters") or []
+    news = [c for c in rows if c != wid]
+    for c in news:
+        forget(c)
+    chk("建书真的落盘：册账上这一本按给定的顺序记着三章",
+        len(rows) == 3 and rows[0] == wid, rows)
+    keep = WRITE_DIR / wid / "draft.md"
+    chk("归章不碰正文：原来那篇的 draft.md 还是刚才存进去的那一份",
+        keep.is_file() and "改过的第一段" in keep.read_text(encoding="utf-8"),
+        keep.read_text(encoding="utf-8")[:80] if keep.is_file() else "（文件不在）")
+
+    bad, txt = m.call("writer_books")
+    chk("writer_books：列得出这本书的章（带行号与章号），末尾另说哪些稿子还没归册",
+        not bad and "工具链取证书" in txt and "1. 工具链试笔" in txt and "未归册" in txt,
+        txt[:360])
+
+    moved = rows[2]
+    bad, txt = m.call("writer_book_chapter",
+                      {"book": "工具链取证书", "chapter": moved, "do": "order", "delta": -1})
+    after = led_of(bk).get("chapters") or []
+    chk("order：按书名认书、按章号认章，账上真的换了位置",
+        not bad and moved in after and after.index(moved) == 1 and after[0] == wid,
+        (txt[:200], after))
+    chk("order：回话报的是「现在排第几章」，不是只说改了",
+        "第 2 章" in txt and "共 3 章" in txt, txt[:200])
+
+    bad, txt = m.call("writer_book_chapter",
+                      {"book": "工具链取证书", "chapter": rows[1], "do": "nope"})
+    chk("writer_book_chapter：动作名写错时列清 add / remove / order 三种",
+        bad and "add" in txt and "order" in txt, txt[:200])
+
+    out_id = after[2]
+    bad, txt = m.call("writer_book_chapter", {"chapter": out_id, "do": "remove"})
+    still = led_of(bk).get("chapters") or []
+    chk("remove：这一章出册，稿子还在盘上（出册不等于删稿）",
+        not bad and out_id not in still and (WRITE_DIR / out_id).is_dir(), (txt[:200], still))
+
+    bad, txt = m.call("writer_book_chapter",
+                      {"book": "工具链取证书", "title": "补来的一章", "do": "add"})
+    added = (re.search(r"\[章号: (write_[0-9a-f]+)\]", txt) or [None, ""])[1]
+    if added:
+        forget(added)
+    chk("add：只给新章名就建一篇空白章归进来，回话给章号并说下一步用 writer_save",
+        not bad and bool(added) and "writer_save" in txt
+        and added in (led_of(bk).get("chapters") or []), txt[:260])
+
+    bad, txt = m.call("writer_book_rename", {"book": bk, "title": "改了名的取证书"})
+    chk("rename：只改书名，书号不变、章一篇不丢",
+        not bad and "改了名的取证书" in txt and bk in txt
+        and len(led_of(bk).get("chapters") or []) == 3, txt[:200])
+
+    # 名字对不上分两种，都得拒不瞎改、又各自指一条不同的路：账上还有别的册时是「先看有哪几本」，
+    # 账已经空了时再说「看有哪几本」就是把人往回绕，该说的是先建一本。
+    bad, txt = m.call("writer_book_rename", {"book": "压根没这本书", "title": "x"})
+    chk("书名对不上而册账上还有别本：不瞎改，指路 writer_books",
+        bad and "writer_books" in txt, txt[:200])
+
+    bad, txt = m.call("writer_export", {"book": "改了名的取证书", "kind": "md"})
+    p2 = next((ln.strip() for ln in txt.split("\n") if ln.strip().startswith("/")), "")
+    if p2:
+        atexit.register(lambda f=p2: pathlib.Path(f).unlink(missing_ok=True))
+    want_titles = [title_of(c) for c in (led_of(bk).get("chapters") or [])]
+    body2 = pathlib.Path(p2).read_text(encoding="utf-8") if p2 and pathlib.Path(p2).is_file() else ""
+    chk("writer_export 给 book 导的是整本：文件在，账上每一章的标题都在合稿里",
+        not bad and p2.endswith(".md") and bool(body2)
+        and all(t and t in body2 for t in want_titles), (txt[:200], want_titles))
+    chk("整本导出用的是册账的顺序，不是目录里谁新谁旧",
+        bool(body2) and body2.find(want_titles[0]) < body2.find(want_titles[1]),
+        want_titles)
+
+    bad, txt = m.call("writer_book_delete", {"book": "改了名的取证书"})
+    chk("散册不带 confirm 就拒绝，并把「一章稿子都不删」说在前面",
+        bad and "confirm" in txt and bool(led_of(bk).get("id")), txt[:220])
+    bad, txt = m.call("writer_book_delete", {"book": "改了名的取证书", "confirm": True})
+    missing_dirs = [c for c in ([wid] + news + ([added] if added else []))
+                    if not (WRITE_DIR / c).is_dir()]
+    chk("writer_book_delete 只把组取消：账上这本书没了，章一篇都没少",
+        not bad and not led_of(bk).get("id") and not missing_dirs, (txt[:200], missing_dirs))
+
+    bad, txt = m.call("writer_book_rename", {"book": "压根没这本书", "title": "x"})
+    chk("册账已经空了也不瞎改：说清先用 writer_book_new 建一本",
+        bad and "writer_book_new" in txt, txt[:200])
 finally:
     if FAIL:
         tail = "".join(m.err[-12:])

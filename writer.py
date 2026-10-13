@@ -24,6 +24,7 @@
 """
 
 import hashlib
+import json
 import os
 import re
 import time
@@ -83,6 +84,10 @@ _HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 _DIGIT_RUN = re.compile(r"\d+(?:[.,]\d+)*")
 _MD_NOISE = re.compile(r"^\s*(?:#{1,6}\s*|[-*+]\s+|\d+[.)]\s+|>\s*)", re.M)
+# 写作页工具条写的内联标记。属性里那些 color / background / span 会被当成英文词
+# 数进字数里 —— 染一次颜色多出三个「词」，界面上那个数字马上就骗人了。
+# 代价是代码块里举例写的 <div> 也一并剥掉：那本来也不该算进正文。
+_TAG_NOISE = re.compile(r"<[^>]+>")
 
 
 def words(text):
@@ -90,9 +95,9 @@ def words(text):
 
     给的是三个数：`total` 是界面上那个「字数」（中文字 + 英文词 + 数字组），
     `han` 与 `latin` 拆开留着，将来要按语种算字数（中译英、限 800 字）不用再改接口。
-    先剥掉 markdown 的行首记号，否则「## 标题」会被算进字数。
+    先剥掉 markdown 的行首记号和内联标记，否则「## 标题」和染色的那层 span 会被算进字数。
     """
-    body = _MD_NOISE.sub("", text or "")
+    body = _TAG_NOISE.sub("", _MD_NOISE.sub("", text or ""))
     han = len(_HAN.findall(body))
     latin = len(_LATIN_WORD.findall(_HAN.sub(" ", body)))
     digit = len(_DIGIT_RUN.findall(body))
@@ -371,6 +376,282 @@ def list_drafts(books_root):
     return out
 
 
+# ---------- 书与章节 ----------
+#
+# 「书」是写作那一格多出的一层：一本书 = 若干章按顺序排在一起。这一层只落在
+# `书库/写作/_books.json` 一份账上（书号 → 章的稿号列表），章节本身仍是原来那篇稿子 ——
+# 目录、rev、快照、AI 三件套、MCP 那些工具一个字都没改。
+#
+# 为什么不做成「一本书一个目录、章住在里面」：那样 `safe_book_dir` 那道路径闸、
+# `book_layout` 的模块前缀、清理白名单、按书号工作的一整批接口全要跟着改一遍，
+# 而用户要的只是「我建一本书，第一章、第二章、第三章这样排下来」。
+#
+# 两条规矩：
+#   · **一章最多属于一本书**。在 A 书里点「加进来」会自动从 B 书出去 ——
+#     界面上不该出现同一份稿子挂在两处、删一处另一处跟着没的场面。
+#   · **删书只删这个「组」，不动章**。稿子是用户写的字，组是随时能重排的东西，
+#     两件事的重量不一样，不能一起丢。真要丢稿子，界面另有一颗「删掉这一章」，
+#     走的是原有的 `book.delete`（书号还是那个书号，那道路径闸也照旧管得住）。
+
+BOOKS_NAME = "_books.json"
+BOOK_PREFIX = "bk_"
+
+
+def book_id_ok(bid):
+    return bool(re.match(r"^%s[0-9a-f]{12}\Z" % BOOK_PREFIX, str(bid or "")))
+
+
+def books_path(books_root):
+    return os.path.join(book_layout.book_dir(books_root, MODULE), BOOKS_NAME)
+
+
+def new_book_id():
+    return BOOK_PREFIX + uuid.uuid4().hex[:12]
+
+
+def blank_book(title):
+    now = int(time.time())
+    return {"id": new_book_id(), "title": str(title or "").strip()[:60],
+            "chapters": [], "created": now, "updated": now}
+
+
+def load_books(books_root):
+    """读那一份册账。文件不在 / 读坏了都给空表（写作屏还能照常开）。
+
+    顺手把已经不在盘上的章剔掉：删稿子走的是原有那条路（`book.delete`），
+    它不认识册账，所以账上会留下指向空气的章号。留着它，界面上就有一颗
+    点了打不开的「章节」。
+    """
+    try:
+        with open(books_path(books_root), encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    out = []
+    for b in (data.get("books") if isinstance(data, dict) else None) or []:
+        if not isinstance(b, dict) or not book_id_ok(b.get("id")):
+            continue
+        keep, seen = [], set()
+        for did in b.get("chapters") or []:
+            did = str(did or "")
+            # 同一本书里也不许重复列同一个章号：重复一次，界面上就是两行一模一样的。
+            if not ok_id(did) or did in seen:
+                continue
+            if not os.path.isdir(dir_of(books_root, did)):
+                continue
+            seen.add(did)
+            keep.append(did)
+        out.append({"id": str(b["id"]), "title": str(b.get("title") or ""),
+                    "chapters": keep,
+                    "created": int(b.get("created") or 0),
+                    "updated": int(b.get("updated") or 0)})
+    return out
+
+
+def save_books(books_root, books):
+    p = books_path(books_root)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"v": 1, "books": list(books or [])}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+    return True
+
+
+def find_book(books, book_id):
+    return next((b for b in books if b.get("id") == str(book_id or "")), None)
+
+
+def book_of(books, draft_id):
+    """这一章在哪本书里；没归册给空串。"""
+    for b in books:
+        if draft_id in (b.get("chapters") or []):
+            return b["id"]
+    return ""
+
+
+def touch_book(book):
+    book["updated"] = int(time.time())
+    return book
+
+
+def create_book(books_root, title=""):
+    books = load_books(books_root)
+    book = touch_book(blank_book(title or "未命名的一本书"))
+    books.insert(0, book)
+    save_books(books_root, books)
+    return book
+
+
+def rename_book(books_root, book_id, title):
+    books = load_books(books_root)
+    book = find_book(books, book_id)
+    if not book:
+        return False, {"msg": "这本书不在了"}
+    name = str(title or "").strip()[:60]
+    if not name:
+        return False, {"msg": "书名不能是空的"}
+    book["title"] = name
+    touch_book(book)
+    save_books(books_root, books)
+    return True, book
+
+
+def delete_book(books_root, book_id):
+    """只把这个「组」取消，章一篇都不动 —— 它们回到未归册那一堆里。"""
+    books = load_books(books_root)
+    left = [b for b in books if b["id"] != str(book_id)]
+    if len(left) == len(books):
+        return False, {"msg": "这本书不在了"}
+    save_books(books_root, left)
+    return True, {"msg": "已经不成书了，章节还在"}
+
+
+def add_chapter(books_root, book_id, draft_id="", title=""):
+    """往这本书里加一章：给稿号就归进来，不给就先建一篇空稿再归进来。
+
+    从别的书里过来时**先把旧的那处摘掉**（一章只能属于一本书），并且照旧
+    排在末尾 —— 顺序由 `order_chapter` 单独管，加章这件事不该顺手把人排好的序打乱。
+    """
+    books = load_books(books_root)
+    book = find_book(books, book_id)
+    if not book:
+        return False, {"msg": "这本书不在了"}
+    did = str(draft_id or "")
+    if did and not ok_id(did):
+        return False, {"msg": "这不是写作那一格的稿号"}
+    if not did:
+        made = create(books_root, title or "新的一章", "")
+        if not made:
+            return False, {"msg": "这一章建不出来"}
+        did = made[0]
+    elif not os.path.isdir(dir_of(books_root, did)):
+        return False, {"msg": "这一章的稿子不在了"}
+    for other in books:
+        if did in (other.get("chapters") or []):
+            other["chapters"] = [x for x in other["chapters"] if x != did]
+            touch_book(other)
+    if did not in (book.get("chapters") or []):
+        book["chapters"] = list(book["chapters"] or []) + [did]
+    touch_book(book)
+    save_books(books_root, books)
+    return True, {"book": book, "id": did}
+
+
+def remove_chapter(books_root, draft_id):
+    """把这一章从书里拿出来（稿子留着）。"""
+    books = load_books(books_root)
+    hit = False
+    for b in books:
+        if draft_id in (b.get("chapters") or []):
+            b["chapters"] = [x for x in b["chapters"] if x != draft_id]
+            touch_book(b)
+            hit = True
+    if not hit:
+        return False, {"msg": "这一章没有归在任何一本书里"}
+    save_books(books_root, books)
+    return True, {"msg": "已经出册，稿子还在未归册那一堆里"}
+
+
+def order_chapter(books_root, book_id, draft_id, delta):
+    """章在书里挪一格：delta 是 ±1（上移 / 下移）。到顶到底就原样返回。"""
+    books = load_books(books_root)
+    book = find_book(books, book_id)
+    if not book:
+        return False, {"msg": "这本书不在了"}
+    ids = list(book.get("chapters") or [])
+    if draft_id not in ids:
+        return False, {"msg": "这一章不在这本书里"}
+    at = ids.index(draft_id)
+    to = max(0, min(len(ids) - 1, at + int(delta or 0)))
+    if to == at:
+        return True, {"book": book, "moved": False}
+    ids.pop(at)
+    ids.insert(to, draft_id)
+    book["chapters"] = ids
+    touch_book(book)
+    save_books(books_root, books)
+    return True, {"book": book, "moved": True}
+
+
+def book_detail(books_root, book, with_text=False):
+    """一本书摊开：章的清单（标题 / 字数 / 更新时间）+ 合并稿的字数。
+
+    界面上那一列「第 X 章」的行号在这里给，不在前端数 —— 前端数出来的是它看到的那份
+    清单的顺序，一旦和册账不一致（有章被删过、有章刚挪过程），行号会和「第 3 章」这种
+    写在标题里的字对不上，用户会以为章乱了。
+    """
+    ids = list(book.get("chapters") or [])
+    rows = []
+    total = 0
+    for i, did in enumerate(ids):
+        one = read(books_root, did) if with_text else None
+        b = brief(dir_of(books_root, did))
+        if not b and not one:
+            continue
+        b = b or {}
+        total += int(b.get("words") or 0)
+        rows.append({"no": i + 1, "id": did, "title": b.get("title") or "",
+                     "words": int(b.get("words") or 0),
+                     "updated": int(b.get("updated") or 0),
+                     "rev": int(b.get("rev") or 0),
+                     "text": (one or {}).get("text") or ""} if with_text else
+                      {"no": i + 1, "id": did, "title": b.get("title") or "",
+                       "words": int(b.get("words") or 0),
+                       "updated": int(b.get("updated") or 0),
+                       "rev": int(b.get("rev") or 0)})
+    return {"id": book.get("id"), "title": book.get("title") or "",
+            "created": int(book.get("created") or 0),
+            "updated": int(book.get("updated") or 0),
+            "count": len(rows), "words": total, "chapters": rows}
+
+
+def merge_text(books_root, book_id, sep="\n\n---\n\n"):
+    """整本合稿：按册账里的顺序把章接起来，每章前面补一行它自己的标题。
+
+    章标题为什么由这里补：章文件的正文里没有「第 X 章」那一行（那是稿子的标题，
+    存在 meta 里），不补的话合出来是一串没有分节的长文，导 EPUB 也切不出目录。
+    已经有 `#` 开头的正文不重复补 —— 用户自己在章里写了大标题时，尊重他写的。
+    """
+    books = load_books(books_root)
+    book = find_book(books, book_id)
+    if not book:
+        return None
+    det = book_detail(books_root, book, with_text=True)
+    parts = []
+    for row in det["chapters"]:
+        body = (row.get("text") or "").strip()
+        head = str(row.get("title") or "").strip()
+        if head and not re.match(r"^\s*#{1,6}\s", body):
+            parts.append("## %s\n\n%s" % (head, body) if body else "## %s" % head)
+        else:
+            parts.append(body)
+    return {"title": book.get("title") or "", "parts": parts,
+            "text": sep.join([p for p in parts if p.strip()])}
+
+
+def as_book_dir_merged(books_root, book_id, tmp_root):
+    """把一本书摊成「一本书」的目录（chapters/0001.md、0002.md …）。
+
+    一章一个文件而不是合成一篇：`book_export.build_epub` 是按 chapters 切章的，
+    一章一个正好就是 EPUB 的目录，导出来的电子书能按章跳。
+    """
+    books = load_books(books_root)
+    book = find_book(books, book_id)
+    if not book:
+        return None
+    det = book_detail(books_root, book, with_text=True)
+    dest = os.path.join(tmp_root, book_id)
+    os.makedirs(os.path.join(dest, "chapters"), exist_ok=True)
+    for row in det["chapters"]:
+        with open(os.path.join(dest, "chapters", "%04d.md" % row["no"]),
+                  "w", encoding="utf-8") as f:
+            f.write((row.get("text") or "").strip() + "\n")
+    with open(os.path.join(dest, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump({"title": book.get("title") or "未命名的一本书", "author": "",
+                   "source": MODULE, "done": True}, f, ensure_ascii=False)
+    return dest
+
+
 # ---------- 导出：排版模板 ----------
 #
 # 模板只是「一套 CSS 变量 + 页眉页脚」，正文一律走 book_export.md_to_html 那条已经
@@ -411,6 +692,21 @@ h1.title { font-size: 34px; line-height: 1.25; margin: 0 0 6px; letter-spacing: 
 .body pre code { background: none; padding: 0; }
 .body img { max-width: 100%%; height: auto; }
 .body hr { border: 0; border-top: 1px solid var(--rule); margin: 26px 0; }
+/* 工具条能插表格、下划线、删除线和待办勾，这几样在导出页上必须有自己的样子 ——
+   正文由 book_export.md_to_html 渲染，它只管产出结构，长什么样归模板。 */
+.body table { width: 100%%; border-collapse: collapse; margin: 0 0 16px;
+  font-size: 16px; }
+.body th, .body td { border: 1px solid var(--rule); padding: 8px 11px;
+  text-align: left; vertical-align: top; }
+.body th { font-family: var(--sans); font-weight: 600; background: rgba(0,0,0,.035); }
+.body u { text-decoration: underline; }
+.body s { text-decoration: line-through; color: var(--faint); }
+.body li.task { list-style: none; position: relative; }
+.body li.task::before { content: ""; position: absolute; left: -19px; top: .55em;
+  width: 13px; height: 13px; border: 1.5px solid var(--rule); border-radius: 4px;
+  background: var(--bg); }
+.body li.task.done::before { border-color: var(--accent); background: var(--accent); }
+.body li.task.done { color: var(--faint); }
 .foot { margin-top: 34px; padding-top: 12px; border-top: 1px solid var(--rule);
   display: flex; justify-content: space-between; font-family: var(--sans);
   font-size: 12px; letter-spacing: .6px; color: var(--faint); }

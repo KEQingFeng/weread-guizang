@@ -8,7 +8,7 @@
 
 - 官方 Gateway 提供的数据，做成本地网页界面：书架、书城搜索、书籍详情、阅读统计、推荐、全部划线与想法。
 - Gateway 不提供的功能——正文导出、图片下载、把书加入书架——复用登录态直接调用网页端接口。
-- 面向 Agent，除界面外另提供一套零依赖的 MCP 适配器（56 个工具）。
+- 面向 Agent，除界面外另提供一套零依赖的 MCP 适配器（61 个工具）。
 
 三项能力都在本机完成，服务只监听 `127.0.0.1`，不经第三方服务器。
 
@@ -133,6 +133,8 @@
 **写作平台**
 
 - 定位是**「AI 只搭手，不代笔」**：字是你自己敲的，卡住了才叫它。一篇稿子就是书库里的一本书（住在第七格 `书库/写作/write_*`），于是目录、标签、封面、清理、MCP 那一整批能力，稿子一行接口都没改就全跟着走。
+- **不用手写 Markdown**：正文上面那一排就是全部——正文 / 标题一二三、粗 / 斜 / 下划线 / 删除线、行内代码、字色与底色、清格式、列表 / 编号 / 待办 / 引用、表格（点几乘几就插几乘几）、链接、图片、分隔线；最右留一颗「看 Markdown」，稿子本来存的就是 Markdown，想复制原稿随时拿走。颜色与底色能活着走出导出：预览、图片、PDF、电子书里都在，不是只有屏幕上好看。
+- **稿子能成书**：左栏从「一叠散稿」变成**书 → 第一章 / 第二章**——建一本书，把已有的稿子归进来或者当场新起一章，上下挪顺序；书名能改，整本一起导出（还是那四样格式，合稿按册上的顺序拼）；「解散」只是把组取消，一章稿子都不会少。
 - **续写**：按你点的那一档接着写——**一句 / 一段 / 三个要点 / 写完这一节**。写多长你说了算，不让模型自己拿主意；素材可以从你的划线、便签里挑，也可以现打一段丢给它。
 - **灵感**：卡壳时让它给**三个**方向，只给方向、不给成稿；不满意点刷新就换一批，已经给过的角度它记着，不会翻来覆去说同一句。
 - **润色改写**：先选中那一段再动手，语气几档可选；回来的是**按差异切好的一块一块**，你逐块接受或退回——这条路上没有任何一步会直接盖掉你的正文。
@@ -149,7 +151,7 @@
 
 **侧边栏与导航**
 
-- 十二个入口：七个空间（我的书架、本地书架、剪藏文章、订阅、视频转笔记、便签、写作）+ 五个工具（划线笔记、随机漫步、阅读统计、为我推荐、搜索书籍）。
+- 十三个入口：七个空间（我的书架、本地书架、剪藏文章、订阅、视频转笔记、便签、写作）+ 六个工具（划线笔记、随机漫步、阅读统计、为我推荐、搜索书籍、安娜的档案）。这份名册只存在后端一处（`NAV_ITEMS`），界面照着它渲染，页面里不抄一份。
 - 侧边栏默认**常驻摊开**；想清静可以在设置里切成**靠左缘滑出**——鼠标往左边缘一靠，它带着一套果冻式的弹出动效滑出来，头像也像一直长在那儿一样跟着浮起，指针移回内容区就自己收回去。
 - **点一下才切换**：点哪一格就切到哪一屏；指针划过不会自己跳页（早年试过「悬停即切」，窗口一重排就容易被误触，已改回点击）。
 - 入口能**长按拖拽**重排，顺序跨重启留着；不想要的在设置里取消勾选即可（不许全关，至少留一个）。
@@ -170,7 +172,7 @@
 
 **给 AI Agent 用**
 
-- 零依赖的 MCP 适配器，56 个工具（取书、批量取书、视频转笔记都是长任务、不阻塞调用；服务没起时适配器自己把它拉起来）。
+- 零依赖的 MCP 适配器，61 个工具（取书、批量取书、视频转笔记都是长任务、不阻塞调用；服务没起时适配器自己把它拉起来）。
 - 仓库内 [`skills/`](skills/) 可直接安装；界面里「一键建立 MCP」把接入提示词复制给你的 Agent。
 
 ## 它在细节上在意什么
@@ -219,7 +221,7 @@ bash tests/run_all.sh --fast   # 只跑静态那几项，秒级
 
 ### 装（macOS，三步）
 
-**1 · 下载**　[归藏-1.0.8.dmg](安装包/归藏-1.0.8.dmg)　（约 3 MB · macOS 13+ · Intel 与 Apple 芯片）
+**1 · 下载**　[归藏-1.0.9.dmg](安装包/归藏-1.0.9.dmg)　（约 2 MB · macOS 13+ · Intel 与 Apple 芯片）
 
 **2 · 拖进「应用程序」，双击打开**
 
@@ -239,7 +241,7 @@ xattr -dr com.apple.quarantine /Applications/归藏.app
 
 ### 装（Windows，两步）
 
-**1 · 下载**　[归藏-Windows-1.0.8.zip](安装包/归藏-Windows-1.0.8.zip)　（约 0.9 MB · 解压即用 · Windows 10+）
+**1 · 下载**　[归藏-Windows-1.0.9.zip](安装包/归藏-Windows-1.0.9.zip)　（约 0.9 MB · 解压即用 · Windows 10+）
 
 **2 · 解压后双击「安装归藏.bat」**
 
@@ -337,7 +339,7 @@ Qoder CN 写在设置文件的 `mcpServers`；ZCode 写在 `config.json` 的 `mc
 
 适配器按以下顺序查找项目目录：环境变量 `GUIZANG_REPO` → 依据「本文件位于项目 `mcp/` 下」推断 → 常见路径回退。解释器按平台选择（Windows 用 `.venv\Scripts\python.exe`，macOS / Linux 用 `.venv/bin/python`），均不存在时回退至系统 `python`。服务未启动时自行拉起。
 
-共 **56 个工具**，分为十一类：
+共 **61 个工具**，分为十二类：
 
 | 分类 | 工具 |
 | --- | --- |
@@ -352,12 +354,14 @@ Qoder CN 写在设置文件的 `mcpServers`；ZCode 写在 `config.json` 的 `mc
 | 画板 | `board_list`、`board_show`、`board_new`、`board_save`、`board_delete` |
 | 便签（flomo） | `flomo_notes`、`flomo_portrait` |
 | 写作 | `writer_list`、`writer_read`、`writer_create`、`writer_save`、`writer_versions`、`writer_snapshot`、`writer_restore`、`writer_export`、`writer_ai` |
+| 书写（书 → 章节） | `writer_books`、`writer_book_new`、`writer_book_rename`、`writer_book_chapter`、`writer_book_delete` |
 
-六条约束写入适配器的工具说明，Agent 可读取：
+七条约束写入适配器的工具说明，Agent 可读取：
 
 - 取书、批量取书、视频转笔记、刷新订阅都是分钟到小时级的长任务，调用会立即返回，进度通过 `app_status` / `task_log` 轮询。不要等待其执行完毕，否则必然超时。
 - 后端的三个写口都是**整本 / 整块覆盖**：改转写只用 `video_transcript_save` 的 `edits` / `drop` / `add`（只说改了哪几段，适配器自己读回整本再写盘），`map_save` 不带 `nodes` 就只改标题 / 形态，`board_save` 不带 `canvas` 就不动画面。把整本抄一遍发上去，或者顺手清空用户手画的东西，都是这一层要挡住的事故。
 - `writer_save` 也是**整篇覆盖**：要改哪一段，先用 `writer_read` 把最新正文取回来、改完整篇存回；带上 `rev` 时版本对不上会被拒，防的就是拿着旧稿盖新稿。后端存前自动留快照，退错了用 `writer_restore` 退回来。`writer_ai` 的 `polish` 只回差异建议、不动原文。
+- 书与章那一层只有一本账：`writer_books`、`writer_book_new`、`writer_book_rename`、`writer_book_chapter`、`writer_book_delete` 改的都是「哪几章、按什么顺序」，正文一个字不碰——要写正文仍然走 `writer_save`。`writer_book_delete` 只是把书散开、章一篇都不删（删掉的册回到未归册那一堆），所以它也要带 `confirm=true`。`writer_export` 给 `book` 时导的是整本合稿，按册账的顺序拼。
 - `shelf_add` 是唯一会改动**真实微信读书书架**的写操作；`cache_delete` 默认只列出，需带 `confirm=true` 才真正删除；`board_delete` 不可恢复。`feed_add` / `feed_remove` / `feed_refresh` / `feed_to_shelf` 只动本机的订阅与本地书架。
 - 视频这条路要先具备工具链：`video_capability` 报现在还缺什么（yt-dlp / ffmpeg / 云端转写接口填没填），缺了就先补齐再发起，不要盲发。
 - 谈这位用户的笔记之前先读 `flomo_portrait`：那份记忆画像只有骨架数字与分类习惯，读它比翻一百条原文便宜，也不会把原文一次性搬进上下文；要原话再用 `flomo_notes` 按标签 / 关键字 / id 取，一条一条来。
@@ -420,7 +424,7 @@ flowchart TB
   FL[flomo]
   AAS[安娜的档案站点<br/>你自己在那个窗口里浏览下载]
   PC[platform_compat.py<br/>解释器 / 建组 / 中止 / 结束进程树]
-  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 56 工具]
+  M[mcp/guizang-mcp.mjs<br/>stdio JSON-RPC · 61 工具]
   AG[AI Agent]
 
   UI <-->|JSON| S
@@ -491,7 +495,7 @@ docs/       四份文档：部署说明、架构与模块地图、开发规范�
 shell/      原生壳与打包脚本：macOS 是 Swift 外壳 → dist/归藏.app → 安装包/*.dmg
             （shell/windows/ 下是 Windows 的入口：安装归藏.bat、启动归藏.bat
               的图标与必读 → 安装包/归藏-Windows-*.zip）
-mcp/        MCP stdio 适配器：把本地接口包成 56 个工具给 Agent 用
+mcp/        MCP stdio 适配器：把本地接口包成 61 个工具给 Agent 用
 skills/     给 Agent 看的说明书（不含可执行逻辑）
 vendor/     随包的三方前端库（markdown-it、fabric.js）及其 LICENSE，界面不连 CDN
 安装包/     只保留最新那一份：macOS 的 dmg + Windows 的 zip

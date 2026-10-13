@@ -524,6 +524,23 @@ function chips(items) {
   return (items || []).map(x => `${x.label}（${x.id}）`).join("、") || "无";
 }
 
+/** 书号或书名 → 一本书。册账的号是 book_xxxxxxxxxxxx 这种，用户和 agent 说的都是书名，
+ *  所以和 resolveDraft 一样两种都收。这里现取现比，不缓存：建书、加章都在改这一份账。 */
+async function resolveBook(key) {
+  const k = String(key || "").trim();
+  if (!k) throw new Error("请给出这本书的书号或书名");
+  const d = await api("/api/writer");
+  const list = d.books || [];
+  const hit = list.find(x => String(x.id) === k)
+    || list.find(x => (x.title || "").toLowerCase() === k.toLowerCase())
+    || list.find(x => (x.title || "").includes(k));
+  if (!hit) {
+    if (!list.length) throw new Error("本机还没有建过书，用 writer_book_new 建一本。");
+    throw new Error(`没有匹配「${k}」的书，先用 writer_books 看看有哪几本`);
+  }
+  return hit;
+}
+
 const tools = {
   async shelf_list() {
     const s = await getState();
@@ -1574,13 +1591,24 @@ const tools = {
       + "回退前的正文也留了一份快照，改错了还能再退回来。";
   },
 
-  async writer_export({ draft, kind = "md", tpl, brand, date, lead, scale }) {
-    const b = await resolveDraft(draft);
+  async writer_export({ draft, book, kind = "md", tpl, brand, date, lead, scale }) {
     const k = String(kind || "md").toLowerCase();
     if (!["png", "pdf", "epub", "md"].includes(k)) {
       throw new Error("导出格式只有 png / pdf / epub / md 这四种");
     }
-    const q = new URLSearchParams({ kind: k, id: b.id, json: "1" });
+    // 整本和单篇共用后端那一条取内容的路（writer_source 认 bk_ 开头的书号）：这里只决定
+    // 查询串填 id 还是 book。分成两条路写，就会出现「说要导整本、导出来是最新一章」。
+    let title;
+    let q;
+    if (book && !draft) {
+      const b = await resolveBook(book);
+      title = `整本《${b.title || "未命名的一本书"}》（${b.count} 章）`;
+      q = new URLSearchParams({ kind: k, book: b.id, json: "1" });
+    } else {
+      const b = await resolveDraft(draft);
+      title = `《${b.title || "未题名"}》`;
+      q = new URLSearchParams({ kind: k, id: b.id, json: "1" });
+    }
     if (tpl) q.set("tpl", tpl);
     // 三个「标不标」是开关：给 false / 0 就关掉，其余一律按开（与界面默认一致）。
     for (const [key, val] of [["brand", brand], ["date", date], ["lead", lead]]) {
@@ -1590,7 +1618,7 @@ const tools = {
     const r = await api(`/api/writer/export?${q.toString()}`, { ms: 180000 });
     if (!r.ok) throw new Error(r.msg || "导出没做成");
     const mb = (r.size || 0) / 1048576;
-    return [`已导出《${b.title || "未题名"}》的 ${k.toUpperCase()}：`,
+    return [`已导出${title}的 ${k.toUpperCase()}：`,
             `  ${r.path}`,
             `  ${mb >= 0.1 ? mb.toFixed(1) + " MB" : Math.round((r.size || 0) / 1024) + " KB"}`
             + (r.note ? `  ${r.note}` : "")].join("\n");
@@ -1633,6 +1661,140 @@ const tools = {
     }
     out.push("", "这些都是「建议」，要不要用由作者定；要落笔就把改完的整段交给 writer_save。");
     return out.join("\n");
+  },
+
+  // ── 书与章（左栏那一册账）─────────────────────────────────
+  // 册账只记「哪几章、按什么顺序」，章本身仍然是上面那些稿子：所以这四颗工具动的
+  // 全是分组，不碰正文。唯一能顺手造出稿子的是 writer_book_chapter 的 add（不给
+  // 现成的章就新建一篇空白章），其余动作只在账上挪。
+  async writer_books() {
+    const d = await api("/api/writer");
+    const books = d.books || [];
+    const drafted = new Set();
+    for (const b of books) for (const c of (b.chapters || [])) drafted.add(c.id);
+    const loose = (d.drafts || []).filter(x => !drafted.has(x.id));
+    if (!books.length && !loose.length) {
+      return "写作平台里还没有稿子。先 writer_create 写一篇，再用 writer_book_new 把它归进一本书。";
+    }
+    const out = [books.length
+      ? `${books.length} 本书，另有 ${loose.length} 篇还没归册`
+      : `还没有成书，${loose.length} 篇散稿等着归册 —— writer_book_new 建一本，`
+        + `chapters 里把章号（或新章名）按想要的顺序给它就行。`];
+    for (const b of books) {
+      out.push("", `《${b.title || "未命名的一本书"}》  [书号: ${b.id}]`,
+               `  ${b.count} 章 · ${fmtChars(b.words)} · 改于 ${fmtWhen(b.updated)}`);
+      for (const c of (b.chapters || [])) {
+        out.push(`    ${c.no}. ${c.title || "（未题名）"}  [章号: ${c.id}] · ${fmtChars(c.words)}`);
+      }
+    }
+    if (loose.length) {
+      out.push("", "未归册的稿子：");
+      for (const x of loose) {
+        out.push(`- ${x.title || "（未题名）"}  [章号: ${x.id}] · ${fmtChars(x.words)}`);
+      }
+    }
+    return out.join("\n");
+  },
+
+  async writer_book_new({ title = "", chapters = [] }) {
+    const made = await api("/api/writer", { method: "POST", body: { do: "book.create", title } });
+    if (!made.ok) throw new Error(made.msg || "这本书建不出来");
+    const bk = made.book || {};
+    const out = [`已建书：《${bk.title || title || "未命名的一本书"}》  [书号: ${bk.id}]`];
+    const want = (Array.isArray(chapters) ? chapters : [chapters])
+      .map(x => String(x || "").trim()).filter(Boolean).slice(0, 60);
+    if (!want.length) {
+      out.push("空书一本。接着用 writer_book_chapter（do=add）往里加章，"+
+               "或直接 writer_create 写一篇再归进来。");
+      return out.join("\n");
+    }
+    // 先在已有的稿子里认（按稿号或标题），认不出就当新书章建一篇空白稿：
+    // 这样「把这几篇排成一本书」和「这本书要有五章」两种说法都能一次做完。
+    const d0 = await api("/api/writer");
+    const pool = d0.drafts || [];
+    const hitOf = s => pool.find(x => String(x.id) === s)
+      || pool.find(x => (x.title || "").toLowerCase() === s.toLowerCase())
+      || pool.find(x => (x.title || "").includes(s));
+    let book = bk;
+    const put = [];
+    for (const s of want) {
+      const hit = hitOf(s);
+      const body = hit ? { do: "book.add", id: bk.id, chapter: hit.id }
+                       : { do: "book.add", id: bk.id, title: s };
+      const r = await api("/api/writer", { method: "POST", body });
+      if (!r.ok) { put.push(`  · ${s}：${r.msg || "没加进来"}`); continue; }
+      book = r.book || book;
+      const row = (book.chapters || []).find(c => c.id === r.id) || {};
+      put.push(`  ${row.no || "?"}. ${hit ? hit.title || "（未题名）" : s}` +
+               `  [章号: ${r.id}]${hit ? "（原来的稿子）" : "（新建空白章）"}`);
+    }
+    out.push(`章数：${book.count || 0} · ${fmtChars(book.words)}`, ...put);
+    out.push("", "想调顺序就 writer_book_chapter（do=order，delta 给 ±1）。");
+    return out.join("\n");
+  },
+
+  async writer_book_rename({ book, title }) {
+    const b = await resolveBook(book);
+    if (!String(title || "").trim()) throw new Error("要改名就得给新的书名");
+    const r = await api("/api/writer", { method: "POST",
+      body: { do: "book.rename", id: b.id, title: String(title).trim() } });
+    if (!r.ok) throw new Error(r.msg || "改名没做成");
+    return `这本书现在叫《${(r.book || {}).title || title}》（书号没变：${b.id}）。`;
+  },
+
+  async writer_book_chapter({ book, chapter, do: act = "add", title = "", delta = 1 }) {
+    const acts = ["add", "remove", "order"];
+    if (!acts.includes(act)) {
+      throw new Error("章这一步只有三种动作：add（归进来）/ remove（出册）/ order（挪序）");
+    }
+    if (act === "remove") {
+      const b = await resolveDraft(chapter);
+      const r = await api("/api/writer", { method: "POST",
+        body: { do: "book.remove", chapter: b.id } });
+      if (!r.ok) throw new Error(r.msg || "这一章没出册");
+      return `《${b.title || "未题名"}》已经出册，稿子还在（writer_save 那些路照常能用）。`;
+    }
+    const b = await resolveBook(book);
+    if (act === "order") {
+      const c = await resolveDraft(chapter);
+      const step = Math.max(-30, Math.min(30, Number(delta) || 0));
+      if (!step) throw new Error("delta 要给 ±1（往上就 -1）");
+      const r = await api("/api/writer", { method: "POST",
+        body: { do: "book.order", id: b.id, chapter: c.id, delta: step } });
+      if (!r.ok) throw new Error(r.msg || "这一章没挪");
+      const rows = (r.book || {}).chapters || [];
+      const at = rows.findIndex(x => x.id === c.id);
+      return r.moved
+        ? `《${c.title || "未题名"}》现在排在第 ${at + 1} 章（《${b.title}》共 ${rows.length} 章）。`
+        : `《${c.title || "未题名"}》已经在${step < 0 ? "最前面" : "最后面"}了，没挪。`;
+    }
+    // add：给了现成的稿子就归进来，认不出就当新书章建一篇空白稿
+    const key = String(chapter || title || "").trim();
+    const pool = (await api("/api/writer")).drafts || [];
+    const hit = key && (pool.find(x => String(x.id) === key)
+      || pool.find(x => (x.title || "").toLowerCase() === key.toLowerCase())
+      || pool.find(x => (x.title || "").includes(key)));
+    const body = { do: "book.add", id: b.id };
+    if (hit) body.chapter = hit.id; else if (key) body.title = key;
+    const r = await api("/api/writer", { method: "POST", body });
+    if (!r.ok) throw new Error(r.msg || "这一章加不进来");
+    const row = ((r.book || {}).chapters || []).find(x => x.id === r.id) || {};
+    return [`《${b.title}》加了第 ${row.no || "?"} 章：` +
+            `${(hit && hit.title) || key || "新的一章"}  [章号: ${r.id}]`,
+            hit ? "这是原来那篇稿子归进来的，正文一个字都没动。"
+                : "这是一篇空白章，接着用 writer_save（draft 给这个章号）写正文。",
+            `这本书现在 ${((r.book || {}).chapters || []).length} 章。`].join("\n");
+  },
+
+  async writer_book_delete({ book, confirm = false }) {
+    const b = await resolveBook(book);
+    if (confirm !== true && confirm !== "true") {
+      throw new Error(`这一步只是把《${b.title || "未命名的一本书"}》散掉，` +
+        `${b.count} 章稿子一篇都不删（它们回到未归册那一堆）。确认要散就带 confirm=true。`);
+    }
+    const r = await api("/api/writer", { method: "POST", body: { do: "book.delete", id: b.id } });
+    if (!r.ok) throw new Error(r.msg || "没散成");
+    return `《${b.title || "未命名的一本书"}》已经不成书了：${r.msg || "章节还在"}。`;
   },
 };
 
@@ -2258,11 +2420,12 @@ const TOOL_DEFS = [
   },
   {
     name: "writer_export",
-    description: "把一篇稿子导成图片（PNG）/ PDF / 电子书（EPUB）/ Markdown，存到本机下载目录。图片可换排版模板并叠加工具名与日期。",
+    description: "把一篇稿子（或整本书）导成图片（PNG）/ PDF / 电子书（EPUB）/ Markdown，存到本机下载目录。给 book（书号或书名）就是导整本：按册账顺序把章接起来，EPUB 一章一节，电子书目录就是章。图片可换排版模板并叠加工具名与日期。",
     inputSchema: {
       type: "object",
       properties: {
-        draft: { type: "string", description: "稿子的 id 或标题" },
+        draft: { type: "string", description: "稿子的 id 或标题；导整本时留空，改给 book" },
+        book: { type: "string", description: "书号或书名（导整本，writer_books 里有）；和 draft 二选一" },
         kind: { type: "string", description: "png / pdf / epub / md，默认 md" },
         tpl: { type: "string", description: "排版模板：plain（黑白简约）/ business（商务蓝）/ verdant（青翠）/ letter（米白书简）" },
         brand: { type: "boolean", description: "图片上是否标注工具名「归藏」，默认标注；给 false 去掉" },
@@ -2270,7 +2433,6 @@ const TOOL_DEFS = [
         lead: { type: "boolean", description: "图片上是否标注字数与日期那行抬头，默认标注；给 false 去掉" },
         scale: { type: "number", description: "图片清晰度倍数 1-3，默认 2" },
       },
-      required: ["draft"],
       additionalProperties: false,
     },
   },
@@ -2289,6 +2451,65 @@ const TOOL_DEFS = [
         hint: { type: "string", description: "这次续写的意图，一句话，可留空" },
       },
       required: ["mode"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_books",
+    description: "列出写作平台里的「书 → 章节」册账：每本书带它的章清单（第几章、章号、字数），末尾另列还没归册的散稿。界面上左栏那一列就是这个东西。动书之前先用它拿到书号。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "writer_book_new",
+    description: "建一本书。chapters 可以给一个数组，每项既可以是已有的稿子（稿号或标题，认得出就归进来、正文不动），也可以是新章名（认不出就顺手建一篇空白章再归进来）。顺序就是数组的顺序。用户说「把这些排成一本书」或「我要开一本书，分五章」都用它。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "书名，最长 60 字，留空就是「未命名的一本书」" },
+        chapters: { type: "array", items: { type: "string" },
+                    description: "章的顺序：已有稿子的 id 或标题，或新章的名字" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_book_rename",
+    description: "改一本书的书名。只动册账上的名字，章和正文一个字都不碰，书号也不变。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书号或书名（writer_books 里有）" },
+        title: { type: "string", description: "新的书名，最长 60 字" },
+      },
+      required: ["book", "title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_book_chapter",
+    description: "在书与章之间做一件事，三种动作：add（把一篇稿子归进这本书；认不出就当新章建一篇空白稿，再按顺序排到末尾）/ remove（这一章出册，稿子留着）/ order（书内挪序，delta 给 ±1）。全部只改册账，不覆盖任何正文 —— 写正文仍然用 writer_save。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书号或书名（remove 时可以不填）" },
+        chapter: { type: "string", description: "章号或稿子标题；add 时可以只给新章名" },
+        do: { type: "string", description: "add（默认）/ remove / order" },
+        title: { type: "string", description: "add 时给新章的名字（chapter 留空就用它）" },
+        delta: { type: "number", description: "order 用：-1 往上挪一格，1 往下挪一格" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "writer_book_delete",
+    description: "散掉一本书：只把这个「组」取消，它的章节全部退回未归册那一堆，一篇稿子都不删（删稿子是另一件事）。因为名字容易读成删稿，必须带 confirm=true 才真做。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        book: { type: "string", description: "书号或书名" },
+        confirm: { type: "boolean", description: "确认只是散册、不删稿子" },
+      },
+      required: ["book"],
       additionalProperties: false,
     },
   },
