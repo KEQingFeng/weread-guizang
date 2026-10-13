@@ -317,6 +317,18 @@ chk("接线：视频任务结束时按 meta.json 补一次封面（_reader 里�
 chk("接线：后台补齐封面时，非微信读书的书走 meta 里那个地址（不再拿书号去问微信读书）",
     'if cache_meta_cover(b["id"])' in SRC, "warm_covers 里没走 meta")
 
+# 微信书架那一屏的封面走的是另一条路：官方 /shelf/sync 每条带一条 cover URL，可个别书
+# 官方就是不给（老书、文章合辑）。前端得肯退到本地这一口 `/api/cover?book=<书城短 id>`
+# —— 有 Key 时它会现取一次并缓存，没封面也只是一次 404。这条改的是 ui.html，静态钉住。
+UI = read_repo("ui.html")
+chk("接线：微信书架卡缺官方封面时退到 /api/cover（不再空着）",
+    "|| (storeId ? '/api/cover?book='" in UI and "coverAlt:" in UI,
+    "cardBits 里没有「官方不给封面就退本地这一口」那段")
+chk("接线：官方封面 URL 打不开时换 /api/cover 再试一次，两条都空才用生成式封面",
+    "let alt = t.coverAlt || ''" in UI
+    and "if (alt) { const u = alt; alt = ''; img.src = u; return; }" in UI,
+    "shelfCard 的 onerror 没有换一次本地封面")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print()
 print("封面规则取证：" + ("全部通过" if not FAIL else "%d 项未过：%s" % (len(FAIL), FAIL)))
