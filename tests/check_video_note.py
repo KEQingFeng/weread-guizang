@@ -432,6 +432,64 @@ chk("筛选：只给起点也筛得动（30 秒往后是最后一段）",
     by_open["matched"] == 1 and by_open["segments"][0]["start"] == 30.0, by_open["matched"])
 
 
+# ── 10b. 长视频加载：分页在读取层做，不要全文就不拼 ──────────────────
+# 起因：长视频一本转写能到几万段，工作台一屏只铺 240 段。原来读取层先把整本拼成
+# text、再把全量段落发给前端去切片，于是每翻一屏都付一次全量代价 —— 加载慢在这儿。
+PAGED = vn.load_transcript(book_dir, offset=1, limit=1)
+chk("长视频：offset/limit 在读取层就切好（total/matched 仍是全量口径）",
+    len(PAGED["segments"]) == 1 and PAGED["offset"] == 1 and PAGED["returned"] == 1
+    and PAGED["matched"] == len(FAKE_SEGMENTS)
+    and PAGED["total"] == len(FAKE_SEGMENTS)
+    and [s["id"] for s in PAGED["segments"]] == ["s00001"],
+    (PAGED["offset"], PAGED["returned"], [s["id"] for s in PAGED["segments"]]))
+chk("长视频：has_more 与最后一页都算对（翻到底必须报 False）",
+    PAGED["has_more"] is True
+    and vn.load_transcript(book_dir, offset=len(FAKE_SEGMENTS) - 1,
+                           limit=5)["has_more"] is False, PAGED["has_more"])
+chk("长视频：越过末尾回空页，不抛也不把 total 抹成 0",
+    vn.load_transcript(book_dir, offset=99)["returned"] == 0
+    and vn.load_transcript(book_dir, offset=99)["total"] == len(FAKE_SEGMENTS), None)
+chk("长视频：不要全文时 text 是空串（不替这一屏白拼几十万字）",
+    vn.load_transcript(book_dir, limit=1, with_text=False)["text"] == ""
+    and "第一段转写文字" in vn.load_transcript(book_dir, limit=1)["text"], None)
+chk("长视频：默认仍旧全量 + 全文（编辑器保存 / 重建那条老路没被改窄）",
+    len(vn.load_transcript(book_dir)["segments"]) == len(FAKE_SEGMENTS)
+    and "第一段转写文字" in vn.load_transcript(book_dir)["text"], None)
+
+# 解析缓存：同一份 transcript.json 连着读不该重复 json.load；改完盘必须立刻看见。
+CACHE_BOOK = os.path.join(SANDBOX, "cache-book")
+os.makedirs(CACHE_BOOK)
+vn.save_transcript(CACHE_BOOK, [{"id": "s00000", "text": "缓存旧内容"}], engine="fake")
+_reads = []
+_orig_json_load = vn.json.load
+
+
+def _counting_load(fp, *a, **k):
+    _reads.append(getattr(fp, "name", ""))
+    return _orig_json_load(fp, *a, **k)
+
+
+def _trans_reads():
+    return sum(1 for n in _reads if str(n).endswith(vn.TRANS_FILE))
+
+
+vn.json.load = _counting_load
+try:
+    before = _trans_reads()
+    vn.load_transcript(CACHE_BOOK)
+    mid = _trans_reads()
+    vn.load_transcript(CACHE_BOOK)
+    after = _trans_reads()
+finally:
+    vn.json.load = _orig_json_load
+chk("长视频：同一份 transcript.json 连着读两遍只 parse 一次（翻页省的就是这一笔）",
+    mid - before == 1 and after - mid == 0, (before, mid, after))
+vn.save_transcript(CACHE_BOOK, [{"id": "s00000", "text": "缓存新内容"}], engine="fake")
+chk("长视频：盘上一改，读出来的就是新的（缓存不会拿上一版转写糊弄）",
+    vn.load_transcript(CACHE_BOOK)["segments"][0]["text"] == "缓存新内容",
+    vn.load_transcript(CACHE_BOOK)["segments"][0]["text"])
+
+
 # ── 11. 老书兜底：升级前转的那本只有 transcript.txt ─────────────────
 LEGACY = os.path.join(SANDBOX, "legacy", "只有txt的老书")
 os.makedirs(LEGACY)
