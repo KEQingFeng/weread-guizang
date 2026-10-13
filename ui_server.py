@@ -3289,6 +3289,8 @@ def _finish_stop(proc, grace=60):
         # POSIX 杀进程组；Windows 用 taskkill /T，把浏览器子进程一起收掉
         pc.hard_kill(proc)
         log("--- 收尾超时，已强制结束（之前落盘的章节都在）---")
+    else:
+        log("--- 已停止（之前落盘的内容都在）---")
 
 
 def stop_task():
@@ -3302,14 +3304,12 @@ def stop_task():
     # SIGKILL，浏览器被一起打死，几万字在手的章节直接蒸发 —— 用户看到的「中止=白抓」。
     # Windows 没有可捕获的 SIGTERM，改发 CTRL_BREAK；发不出去才会退化为硬杀。
     pc.send_stop(proc)
-    for _ in range(40):
-        if proc.poll() is not None:
-            log("--- 已停止（已抓到的章节都在盘上）---")
-            return True, "已停止"
-        time.sleep(0.25)
+    # 点击即停：这趟请求不再干等进程退出（以前最多等 10 秒才回话，界面上就是
+    # 「点了停止没反应」）。信号发出去就立刻回，收尾交给后台那条线盯着 —— 任务一翻面，
+    # 轮询那条线自然会把「已停下」报到界面上。
     threading.Thread(target=_finish_stop, args=(proc,), daemon=True).start()
-    log("--- 已请求停止，正在把在手的内容落盘 ---")
-    return True, "正在收尾（把手上这一章落盘就退），已导出的内容不会丢"
+    log("--- 已请求停止，正在收尾（手上这一段做完就退）---")
+    return True, "已请求停止，正在收尾"
 
 
 # ---------- 剪藏与本地笔记 ----------

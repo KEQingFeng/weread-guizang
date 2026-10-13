@@ -14,7 +14,9 @@ import pathlib
 import re
 import sys
 
-SRC = (pathlib.Path(__file__).resolve().parent.parent / "ui.html").read_text(encoding="utf-8")
+SRC_PATH = pathlib.Path(__file__).resolve().parent.parent
+SRC = (SRC_PATH / "ui.html").read_text(encoding="utf-8")
+SERVER = (SRC_PATH / "ui_server.py").read_text(encoding="utf-8")
 
 checks = []
 
@@ -105,6 +107,44 @@ mwrap = re.search(r"\.mmwrap\{([^}]*)\}", SRC)
 chk("导图：mmwrap 关了浏览器的双指页面缩放（touch-action:pan-x pan-y）",
     bool(mwrap) and re.search(r"touch-action:\s*pan-x\s+pan-y", mwrap.group(1)),
     mwrap.group(1) if mwrap else None)
+
+# ── 五、视频转笔记：进度条实时渲染 / 刷新后保留「转写中」/ 停止点击即停（1.2.0）──
+# 用户报的两条：「进度条状态未更新」「刷新后条目直接从内容框架移除，要标成转写中」，
+# 外加「停止按钮响应延迟」。三条都有能在源码里一眼钉死的落点，真机那条另见
+# check_video_workbench.py 与 check_media_views.py，这里先守住最容易被改回去的地方。
+vt = re.search(r"async function vidTick\(\)\s*\{(.*?)\n\}", SRC, re.S)
+vt_body = vt.group(1) if vt else ""
+chk("进度条：vidTick 读日志对象的 .s 字段（{t,s} 不能直接喂给正则）",
+    bool(vt) and ".s" in vt_body and not re.search(r"exec\(lines\[i\]\)", vt_body),
+    vt_body[:220])
+chk("进度条：任务在跑但还没有 [阶段 N%] 时也先亮出「正在准备」的条子",
+    "runningKind === 'video'" in vt_body and "vidShowProg(-1" in vt_body, vt_body[:220])
+chk("进度条：只认这一趟任务开工后的进度行，不吃上一支留在缓冲里的收尾行",
+    "runningAt" in vt_body and "runningAt = running" in SRC, vt_body[:220])
+chk("进度条：切进视频这屏立刻拉一次进度，不等下一拍轮询",
+    re.search(r"vidReloadCap\(\);\s*\n\s*vidTick\(\);", SRC))
+
+chk("左栏：转写中的那一条挂在本机记忆上，刷新后能摆回来",
+    "VID_PENDING_KEY" in SRC and "vidPendingSet(" in SRC and "vidPendingClear()" in SRC)
+chk("左栏：转写中的条目标成「转写中」且不是一本已完成的书",
+    "转写中" in SRC and "vtbook pending" in SRC)
+vs = re.search(r"async function vidStart\(\)\s*\{(.*?)\n\}", SRC, re.S)
+vf = re.search(r"function vidFinish\(r\)\s*\{(.*?)\n\}", SRC, re.S)
+chk("左栏：起任务时记下这一支，任务收尾时把「转写中」撤掉",
+    bool(vs) and "vidPendingSet(" in vs.group(1)
+    and bool(vf) and "vidPendingClear()" in vf.group(1))
+
+st = re.search(r"async function vidStop\(\)\s*\{(.*?)\n\}", SRC, re.S)
+stop_body = st.group(1) if st else ""
+chk("停止：点击当场锁住按钮并回话，不等那趟请求慢慢回",
+    "vidStopping = true" in stop_body
+    and stop_body.index("vidStopping = true") < stop_body.index("await videoPost"),
+    stop_body[:220])
+chk("停止：按钮文字会变成「正在停…」，任务翻面后自己复原",
+    "正在停" in SRC and "vidStopping = false" in SRC)
+chk("停止：后端发完信号立刻回，不再在请求里等满 10 秒",
+    "for _ in range(40)" not in SERVER and "已请求停止" in SERVER
+    and "threading.Thread(target=_finish_stop" in SERVER)
 
 bad = [c for c in checks if not c[0]]
 print("\n规格体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
