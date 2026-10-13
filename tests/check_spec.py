@@ -86,6 +86,26 @@ for sel in (".wrline .lab", ".wrbar .lab"):
     chk("%s：允许收缩并给了 min-width:0（不再 flex:none）" % sel,
         "flex:0 1 auto" in rule and "min-width:0" in rule and "flex:none" not in rule, rule)
 
+# ── 四、导图缩放走手势（1.2.0）：加减号按钮拆掉，双指 / 触控板捏合接管 ──
+# 用户报「新增双指触控缩放交互，替代固定的右上角加减号按钮」。这一条只读源码，
+# 钉住三件事：那两个 id 真没了、捏合那条路真接了、mmwrap 真把浏览器自己的
+# 双指页面缩放关掉了（不关的话两指落下被浏览器抢走，导图收不到事件）。
+chk("导图：加减号按钮的 id 与引用都拆干净了",
+    "mmZoomIn" not in SRC and "mmZoomOut" not in SRC)
+chk("导图：缩放读数还在（手势改了比例得让人看得见）",
+    'id="mmZoom"' in SRC and "mmZoomAt(" in SRC and "function mmZoomWire(" in SRC
+    and "mmZoomWire();" in SRC)
+chk("导图：触控板捏合（带 ctrl / ⌘ 的滚轮）接到了缩放上",
+    re.search(r"addEventListener\('wheel'.*?ctrlKey", SRC, re.S)
+    and "e.preventDefault()" in SRC)
+chk("导图：真触屏两指捏合有 touchstart / touchmove 两条，且单指滚动不抢",
+    re.search(r"touchstart.*?e\.touches\.length\s*!==\s*2", SRC, re.S)
+    and re.search(r"touchmove.*?e\.touches\.length\s*!==\s*2", SRC, re.S))
+mwrap = re.search(r"\.mmwrap\{([^}]*)\}", SRC)
+chk("导图：mmwrap 关了浏览器的双指页面缩放（touch-action:pan-x pan-y）",
+    bool(mwrap) and re.search(r"touch-action:\s*pan-x\s+pan-y", mwrap.group(1)),
+    mwrap.group(1) if mwrap else None)
+
 bad = [c for c in checks if not c[0]]
 print("\n规格体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
 for _, n, x in bad:

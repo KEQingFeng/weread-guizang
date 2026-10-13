@@ -2270,8 +2270,10 @@
      <svg> 装边。两者叠在 .mmsheet 上，这张「纸」的尺寸就是后端给的 width/height，
      缩放只是对它做一次 transform —— 节点、边、拖拽坐标全跟着走，不必各自换算，
      也就不会出现「放大之后线接不到框上」这种两套几何对不上的老毛病。 */
+  /* touch-action 只放行单指滚动，把浏览器自己的双指页面缩放关掉 ——
+     不关的话两指落下先被浏览器拿去放大整个网页，导图这一层收不到捏合事件。 */
   .mmwrap{flex:1; min-height:0; overflow:auto; position:relative;
-    background:var(--paper-2); scrollbar-width:thin}
+    background:var(--paper-2); scrollbar-width:thin; touch-action:pan-x pan-y}
   .mmsheet{position:relative; transform-origin:0 0}
   .mmsheet>svg.mmedges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none}
   .mmsheet>svg.mmedges path{fill:none}
@@ -4012,9 +4014,7 @@
       <button class="deed" id="mmUndo" type="button" title="撤销（⌘/Ctrl + Z）">撤</button>
       <button class="deed" id="mmRedo" type="button" title="重做（⌘/Ctrl + ⇧ + Z）">重</button>
       <span class="grow"></span>
-      <button class="deed" id="mmZoomOut" type="button">−</button>
-      <span id="mmZoom">100%</span>
-      <button class="deed" id="mmZoomIn" type="button">+</button>
+      <span id="mmZoom" title="双指捏合缩放；桌面端按住 ⌘/Ctrl 滚轮，或触控板双指捏合">100%</span>
       <button class="deed" id="mmZoomFit" type="button" title="缩到能看全">适应</button>
       <span id="ntMapInfo"></span>
     </div>
@@ -17994,6 +17994,49 @@ function mmFit() {
   mmSetZ(Math.max(.4, Math.floor(k * 100) / 100));
   wrap.scrollLeft = 0; wrap.scrollTop = 0;
 }
+/** 绕手势中心缩放（1.2.0 起代替右上角那对加减号）。
+ *  只改 MM.z 谁都会，难的是「手指按住的那块内容别跑」：放大还以左上角为原点的话，
+ *  用户想看清的角落会被推出视口。所以缩完按 画布坐标 = (滚动量 + 视口内坐标) / 比例
+ *  把滚动量补回去，让手势中心下的那个点原地不动 —— 跟地图、看图的手感一致。 */
+function mmZoomAt(z, cx, cy) {
+  const wrap = document.getElementById('mmWrap');
+  const old = MM.z, next = Math.max(.4, Math.min(2, z));
+  if (!wrap || next === old) return;
+  const px = (wrap.scrollLeft + cx) / old, py = (wrap.scrollTop + cy) / old;
+  mmSetZ(next);
+  wrap.scrollLeft = px * next - cx;
+  wrap.scrollTop = py * next - cy;
+}
+/** 导图的缩放手势：真触屏两指捏合，桌面端触控板捏合（浏览器报成带 ctrl 的滚轮）。
+ *  普通滚轮不抢 —— 那是滚动。单指触摸也不抢，交给 .mmwrap 自己滚。 */
+function mmZoomWire() {
+  const wrap = document.getElementById('mmWrap');
+  if (!wrap) return;
+  wrap.addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const r = wrap.getBoundingClientRect();
+    mmZoomAt(MM.z * Math.exp(-e.deltaY / 240), e.clientX - r.left, e.clientY - r.top);
+  }, {passive: false});
+  let pinch = null;
+  const span = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+  const mid = (t, r) => [(t[0].clientX + t[1].clientX) / 2 - r.left,
+                         (t[0].clientY + t[1].clientY) / 2 - r.top];
+  wrap.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2) return;
+    const r = wrap.getBoundingClientRect();
+    pinch = {d: span(e.touches), z: MM.z, m: mid(e.touches, r)};
+  }, {passive: true});
+  wrap.addEventListener('touchmove', e => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const r = wrap.getBoundingClientRect();
+    mmZoomAt(pinch.z * (span(e.touches) / pinch.d), mid(e.touches, r)[0], mid(e.touches, r)[1]);
+  }, {passive: false});
+  const stop = e => { if (!e.touches || e.touches.length < 2) pinch = null; };
+  wrap.addEventListener('touchend', stop);
+  wrap.addEventListener('touchcancel', () => { pinch = null; });
+}
 async function ntMapOpen() {
   if (!NT.book) { whisper('先打开一本书'); return; }
   document.getElementById('ntMapLayer').classList.add('open');
@@ -18877,11 +18920,10 @@ function ntFloatsWire() {
   document.getElementById('mmEmptyRoot').onclick = () => mmAdd('', '');
   document.getElementById('mmEmptyFrom').onclick = mmFromNotes;
   document.getElementById('mmMd').onclick = mmCopyMd;
-  document.getElementById('mmZoomIn').onclick = () => mmSetZ(MM.z + .15);
-  document.getElementById('mmZoomOut').onclick = () => mmSetZ(MM.z - .15);
   document.getElementById('mmZoomFit').onclick = mmFit;
   askWire('mmAsk');
   mmStageWire();
+  mmZoomWire();          // 缩放走手势：两指捏合 / 触控板捏合，不再有加减号按钮
   window.addEventListener('scroll', edGridHide, true);
 }
 /** 导图的撤销 / 重做：整份 doc 进快照栈，回来以后照样让后端重排一次 ——
