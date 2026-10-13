@@ -6,7 +6,7 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
 用户真实的书库与仓库 cache 一个字节都不碰。素材全部来自 tests/seed.py 铺的假书
 （书名是编的，不是真书），安娜的档案那一屏走前端桩，也不碰网络、不开真窗口。
 
-拍九张，落到 docs/shots/：
+拍十一张，落到 docs/shots/：
   home     我的书架（默认那一屏的瀑布铺法）
   reader   阅读器（左目录 / 中正文 / 右这套笔记）
   search   搜书（微信读书书城：搜到 → 加入书架 → 整本取回）
@@ -16,9 +16,11 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
   feed     订阅阅读器（订上源、点开一篇）
   video    视频转笔记（挑一本转好的，看转写段落）
   flomo    便签（导入一份假导出包）
+  clip     剪藏（手指圆钮解析完，弹「解析已完成」，文章在下方列表）
+  clip-ring 剪藏的手指圆钮在解析中外圈那条环形进度（1.2.0 新交互动效）
 
 用法：
-    .venv/bin/python tools/shot_pages.py            # 九张全拍
+    .venv/bin/python tools/shot_pages.py            # 十一张全拍
     .venv/bin/python tools/shot_pages.py home feed  # 只重拍某几张
 """
 import atexit
@@ -407,12 +409,73 @@ def shot_flomo(page):
     shot(page, "flomo")
 
 
+CLIP_LINK = "https://mp.weixin.qq.com/s/gz-demo-article"
+CLIP_PREVIEW = {
+    "title": "把问题拆开之后，每一块都能单独验证",
+    "site": "公众号", "author": "示范作者", "date": "2025-10-13",
+    "words": 3200, "chapters": 3,
+}
+
+
+def clip_stub(route):
+    """剪藏那两张不留真网络：`/api/clip` 用一份编好的正文回执顶掉。
+    书名、作者、字数全是编的，不碰任何真实公众号链接，也不碰用户书库。"""
+    try:
+        req = json.loads(route.request.post_data or "{}")
+    except Exception:
+        req = {}
+    if req.get("mode") == "save":
+        payload = {"ok": True, "msg": "已剪进书库：《%s》" % CLIP_PREVIEW["title"],
+                   "book": {"id": "CLIPDEMO", "title": CLIP_PREVIEW["title"],
+                            "site": "公众号", "chars": 3200, "chapters": 3}}
+    else:
+        payload = {"ok": True, "preview": CLIP_PREVIEW}
+    route.fulfill(status=200, content_type="application/json",
+                  body=json.dumps(payload, ensure_ascii=False))
+
+
+def shot_clip(page):
+    """剪藏那一屏：手指圆钮读剪贴板 → 环形进度 → 「解析已完成」弹框。
+    这一张停在解析收尾那一刻，正好把「弹框 + 下方文章列表」一起交代清。"""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page.route("**/api/clip", clip_stub)
+    page.click('#nav button[data-v="clip"]')
+    page.wait_for_selector('div[data-pane="clip"] #cPick', timeout=8000)
+    page.wait_for_timeout(400)
+    page.evaluate("t => navigator.clipboard.writeText(t)", CLIP_LINK)
+    page.click('div[data-pane="clip"] #cPick')
+    page.wait_for_selector("#veil.open", timeout=15000)
+    page.wait_for_timeout(800)
+    shot(page, "clip")
+    page.locator("#sheetActs button", has_text="知道了").click()
+    page.wait_for_timeout(400)
+    page.unroute("**/api/clip")
+
+
+def shot_clip_ring(page):
+    """手指圆钮在解析中：外圈那条环慢慢走、提示写着「正在解析正文…」。
+    这张直接调界面自己那对 `clipRingStart` / `clipRingDone`，拍到的就是真动效，
+    不手改 DOM 样式去凑一个假进度。"""
+    page.click('#nav button[data-v="clip"]')
+    page.wait_for_selector('div[data-pane="clip"] #cPick', timeout=8000)
+    page.wait_for_timeout(300)
+    page.evaluate("() => { clipSync('%s'); renderClipRows(); clipRingStart(); }" % CLIP_LINK)
+    page.evaluate("() => { const h = document.getElementById('cHint');"
+                  " if (h) h.textContent = '认出 1 条，正在解析正文…'; }")
+    page.wait_for_timeout(1700)
+    shot(page, "clip-ring")
+    page.evaluate("() => clipRingDone()")
+    page.wait_for_timeout(1400)
+
+
 SHOTS = {
     "home": shot_home, "reader": shot_reader, "search": shot_search, "anna": shot_anna,
     "plan": shot_plan,
     "mindmap": shot_mindmap, "feed": shot_feed, "video": shot_video, "flomo": shot_flomo,
+    "clip": shot_clip, "clip-ring": shot_clip_ring,
 }
-ORDER = ["home", "reader", "search", "anna", "plan", "mindmap", "feed", "video", "flomo"]
+ORDER = ["home", "reader", "search", "anna", "plan", "mindmap", "feed", "video", "flomo",
+         "clip", "clip-ring"]
 
 
 def main():
