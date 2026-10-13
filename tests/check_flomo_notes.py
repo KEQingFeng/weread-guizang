@@ -383,6 +383,46 @@ chk("F18 空账上算画像不炸（首启时就是这个状态）",
     fn.build_portrait(fn.load(D))["memos"] == 0
     and fn.portrait_markdown(fn.build_portrait(fn.load(D))).startswith("# 我的记忆画像"))
 
+# ── G：手记（左边那支笔记下来的） ────────────────────────────────
+# 导进来的一条和手写的一条必须是同一个口径：日期/时分秒从同一串时间拆、标签与字数用同一把尺、
+# id 同样由「时间 + 正文」算 —— 否则右边时间线、标签统计、收进书架、记忆画像都要为「手写的」
+# 另开一套分支，两边迟早分叉。另起一只干净账本，不踩上面那些用例。
+G = os.path.join(ROOT, "flomo-hand")
+g1 = fn.add_memo(G, "  想到一个点子：把书架按颜色排一排  #灵感  ", now=1756500000)
+chk("G1 手记一条：落进账本、报回本机总数",
+    g1["ok"] and g1["dupe"] is False and g1["total"] == 1
+    and len(fn.load(G)["memos"]) == 1, g1)
+chk("G2 正文前后空白被清掉（md 是 id 的来源，不许把空格算进去）",
+    g1["memo"]["md"] == "想到一个点子：把书架按颜色排一排  #灵感", g1["memo"]["md"])
+chk("G3 手记那条 == 拿同一串时间走 memo_of 的那条（日期 / 时分秒 / ts / id 全一样）",
+    {k: g1["memo"][k] for k in ("id", "date", "clock", "ts")}
+    == {k: fn.memo_of(fn.stamp_now(1756500000), g1["memo"]["md"])[k]
+        for k in ("id", "date", "clock", "ts")}, g1["memo"])
+chk("G4 标签与字数走同一把尺（#灵感 被认出来，字数就是 words_of 那个数）",
+    g1["memo"]["tags"] == ["灵感"] and g1["memo"]["words"] == fn.words_of(g1["memo"]["md"]),
+    g1["memo"])
+chk("G5 手记的交付字段和导入的一条一样齐（收成书 / 画像都认它）",
+    set(g1["memo"]) >= {"id", "date", "clock", "ts", "md", "plain", "tags", "words", "atts", "book"},
+    sorted(g1["memo"]))
+g2 = fn.add_memo(G, "想到一个点子：把书架按颜色排一排  #灵感", now=1756500000)
+chk("G6 同一秒里同一句连点两下不堆两条（id 认得出还是它，只报 dupe）",
+    g2["ok"] and g2["dupe"] is True and g2["total"] == 1
+    and len(fn.load(G)["memos"]) == 1, g2)
+chk("G7 空正文（只有空白）不收，也不动账本",
+    fn.add_memo(G, "   \n\t ", now=1756500001)["ok"] is False
+    and len(fn.load(G)["memos"]) == 1)
+g3 = fn.add_memo(G, "第二条", now=1756503600)
+chk("G8 换一秒就是新的一条，且排在最新那一条前面（右边时间线看得见刚写的）",
+    g3["total"] == 2 and fn.pick(fn.load(G))["memos"][0]["id"] == g3["memo"]["id"],
+    fn.pick(fn.load(G))["memos"][0]["md"])
+chk("G9 手记也进标签统计与画像（不靠「导入过」这个前提）",
+    any(x["tag"] == "灵感" for x in fn.tag_counts(fn.load(G)))
+    and fn.build_portrait(fn.load(G))["memos"] == 2)
+g_list = fn.pick(fn.load(G), limit=0)["memos"]
+chk("G10 手记的 plain 同样摘掉自己那个标签（外部读者与屏幕上是同一条）",
+    all("#" + t not in m["plain"] for m in g_list for t in m["tags"]),
+    [(m["tags"], m["plain"]) for m in g_list])
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print()
 print("flomo 便签后端：通过 %d 项，失败 %d 项" % (PASSED, len(FAIL)))

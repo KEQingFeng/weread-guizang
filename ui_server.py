@@ -51,6 +51,7 @@ import person
 import readplan
 import sync as cloudsync
 import video_note
+import web_browse
 import web_parse
 import writer as writer_mod
 
@@ -59,7 +60,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.0.9"
+VERSION = "1.1.0"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -2129,16 +2130,20 @@ def agent_url_full(url):
     """把用户填的地址补成真正的 completions 端点。
 
     有人填 https://api.x.com（少了 /v1），有人填 …/v1（少了 /chat/completions），
-    两种都按常见约定补齐；填全了的原样返回。
+    两种都按常见约定补齐；填全了的原样返回。查询串（Azure 那种 ?api-version=…）
+    单独摘出来，补路径时不把它顶掉、也不让它在中间把 /v1 判丢。
     """
-    u = (url or "").strip().rstrip("/")
+    u = (url or "").strip()
     if not re.match(r"^https?://", u):
         return ""
-    if u.endswith("/chat/completions"):
-        return u
-    if re.search(r"/v\d+$", u):
-        return u + "/chat/completions"
-    return u + "/v1/chat/completions"
+    base, sep, query = u.partition("?")
+    base = base.rstrip("/")
+    tail = (sep + query) if sep else ""
+    if base.endswith("/chat/completions") or base.endswith("/completions"):
+        return base + tail
+    if re.search(r"/v\d+$", base):
+        return base + "/chat/completions" + tail
+    return base + "/v1/chat/completions" + tail
 
 
 def set_agent_cfg(url, key, model):
@@ -2166,6 +2171,55 @@ def set_agent_cfg(url, key, model):
         cfg["agent_key"] = key.strip()
     save_cfg(cfg)
     return True, "小 Agent 已连上 " + full
+
+
+def ai_cfg():
+    """阅读 AI（小结 / 生成导图）的接口三项。
+
+    与小 Agent 分开存：划词追问、写作续写读的是 agent_*，阅读小结读写的是 ai_*。
+    老用户只配过小 Agent 的暂时沿用（不能因为拆配置就把已经能用的功能变成「没配」），
+    一旦单独配了阅读 AI，两条线就彻底分开 —— 改一边不动另一边。
+    """
+    c = load_cfg()
+    url = (c.get("ai_url") or "").strip()
+    if url:
+        return url, (c.get("ai_key") or "").strip(), (c.get("ai_model") or "").strip()
+    return agent_cfg()
+
+
+def ai_state():
+    """阅读 AI 的状态快照。`independent` 说清现在这份是单独配的、还是沿用的小 Agent ——
+    界面上那句话要照着它写，不然用户改了阅读 AI 却以为改的是小 Agent。"""
+    c = load_cfg()
+    indep = bool((c.get("ai_url") or "").strip())
+    url, key, model = ai_cfg()
+    return {"url": url, "model": model, "url_set": bool(url),
+            "key_set": bool(key), "key_tail": key[-4:] if key else "",
+            "independent": indep}
+
+
+def set_ai_cfg(url, key, model):
+    """存阅读 AI 这三件套。规则与小 Agent 一致：地址清空即撤销单独配置、回退到沿用小 Agent；
+    Key 传空串表示不改（页面只回显占位符，只改模型时不该被逼着重贴一遍）。"""
+    url = (url or "").strip()
+    model = (model or "").strip()[:80]
+    cfg = load_cfg()
+    if not url:
+        for k in ("ai_url", "ai_key", "ai_model"):
+            cfg.pop(k, None)
+        save_cfg(cfg)
+        return True, "阅读 AI 已改为沿用小 Agent"
+    full = agent_url_full(url)
+    if not full:
+        return False, "地址要写成 http:// 或 https:// 开头"
+    if not model:
+        return False, "还差一个模型名"
+    cfg["ai_url"] = full
+    cfg["ai_model"] = model
+    if (key or "").strip():
+        cfg["ai_key"] = key.strip()
+    save_cfg(cfg)
+    return True, "阅读 AI 已连上 " + full
 
 
 def set_media_cfg(engine, lang, url=None, key=None, model=None):
@@ -2358,6 +2412,27 @@ class AgentStreamCut(RuntimeError):
     """
 
 
+def choice_piece(ch):
+    """一条 choices → (正文, 这条算不算收尾)。
+
+    优先 `delta`（标准流式）；没有 delta 就退到 `message`（有些中转站无视
+    stream:true，按非流式整段回）—— 那种形状内容一到手就该按收尾算，不是断流。
+    `content` 偶尔是分段数组（多模态），拼起来再吐。
+    """
+    def text_of(v):
+        if isinstance(v, list):
+            return "".join(str((p or {}).get("text") or "") for p in v if isinstance(p, dict))
+        return str(v) if v else ""
+
+    d = ch.get("delta")
+    if isinstance(d, dict) and text_of(d.get("content")):
+        return text_of(d.get("content")), bool(ch.get("finish_reason"))
+    m = ch.get("message")
+    if isinstance(m, dict) and text_of(m.get("content")):
+        return text_of(m.get("content")), True
+    return "", bool(ch.get("finish_reason"))
+
+
 def agent_deltas(resp):
     """把上游的 SSE 拆成一段段正文。上游字段缺失/半行 JSON 都直接跳过 ——
     宁可少吐几个字，也不能因为一行脏数据把整段对话打断。
@@ -2366,39 +2441,107 @@ def agent_deltas(resp):
     那就是中途拔线，不是答完了。实测（/tmp/probe_cut.py）这种断法不抛任何异常，
     urllib 把 EOF 读成「正常结束」，所以只能自己记 —— 不记的话调用方会把半截
     当完整答案存进 _ai/，界面上还写着「小结好了」。
+
+    还有一类「假断流」：有的中转站收了 stream:true 却整段 JSON 一次回（不带
+    `data:` 前缀），或者 SSE 里给的是 `message` 而不是 `delta`。这两种都是答完了，
+    只是形状不是标准流式 —— 照旧判成断流，用户会看着满屏好好的答案被说成断线。
     """
     ended = False        # 见过 data: [DONE]（OpenAI 系的标准收尾）
-    finished = False     # 见过 finish_reason（有些中转不发 [DONE]，只发这个，不能当断了）
+    finished = False     # 见过 finish_reason，或回的是 message 整段（都算答完了）
     for raw in resp:
         line = raw.decode("utf-8", "replace").strip()
-        if not line.startswith("data:"):
+        if line.startswith("data:"):
+            data = line[5:].strip()
+        elif line.startswith("{"):
+            # 没有 data: 前缀的整行 JSON：上游无视 stream:true 直接回了完整一段。
+            data = line
+        else:
             continue
-        data = line[5:].strip()
-        if data == "[DONE]":
+        if data in ("[DONE]", "[done]"):
             ended = True
             break
         try:
             j = json.loads(data)
         except Exception:
             continue
+        if not isinstance(j, dict):
+            continue
         for ch in (j.get("choices") or []):
-            piece = (ch.get("delta") or {}).get("content")
+            if not isinstance(ch, dict):
+                continue
+            piece, fin = choice_piece(ch)
             if piece:
                 yield piece
-            if ch.get("finish_reason"):
+            if fin:
                 finished = True
     if not (ended or finished):
         raise AgentStreamCut("上游话说一半就断了线，这次这份没存（上一次的那份还在）")
 
 
-def agent_once(messages, timeout=90, extra=None):
+def completion_text(raw):
+    """把一次「非流式」响应抠成正文。
+
+    上游偶尔无视 stream:false，仍按 SSE 一坨回来；直接 json.loads 会炸成
+    「Expecting value」这种看不懂的话。两种形状都认：标准 JSON 与 data: 行。
+    认不出就回空串，由调用方翻成「那边没给出内容」。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if s[:1] in "{[":
+        try:
+            j = json.loads(s)
+        except Exception:
+            j = None
+        if isinstance(j, dict):
+            try:
+                ch = (j.get("choices") or [{}])[0] or {}
+            except Exception:
+                ch = {}
+            if isinstance(ch, dict):
+                txt = ((ch.get("message") or {}).get("content")
+                       or (ch.get("delta") or {}).get("content") or "")
+                if isinstance(txt, list):
+                    txt = "".join(str((p or {}).get("text") or "")
+                                  for p in txt if isinstance(p, dict))
+                if str(txt).strip():
+                    return str(txt).strip()
+    # SSE 兜底：把每一行 data: 里的 delta / message 拼起来
+    out = []
+    for line in s.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        d = line[5:].strip()
+        if d in ("[DONE]", "[done]"):
+            continue
+        try:
+            j = json.loads(d)
+        except Exception:
+            continue
+        for ch in (j.get("choices") or []):
+            if not isinstance(ch, dict):
+                continue
+            piece = ((ch.get("delta") or {}).get("content")
+                     or (ch.get("message") or {}).get("content") or "")
+            if isinstance(piece, list):
+                piece = "".join(str((p or {}).get("text") or "")
+                                for p in piece if isinstance(p, dict))
+            if piece:
+                out.append(str(piece))
+    return "".join(out).strip()
+
+
+def agent_once(messages, timeout=90, extra=None, cfg=None):
     """问一次、等整段答案（不流式）。要 JSON 的那些活儿用它 —— 导图、画像这类，
     半棵树在屏幕上蹦出来没有意义，拼完整了才能解析。失败抛人话，由调用方翻成提示。
 
     `extra` 是给上游 body 补的那几项（`max_tokens`、`stop` 之类）。写作平台的
     灵感与润色用它把长度摁住：不限制的话，一句「给三个方向」能回出一整篇文章。
+    `cfg` 指定用哪套接口（url, key, model）；不给就沿用小 Agent。阅读 AI 传自己的那份，
+    写作三件套默认走小 Agent —— 两批活儿从此不再共用一把钥匙。
     """
-    url, key, model = agent_cfg()
+    url, key, model = cfg if cfg else agent_cfg()
     if not url or not model:
         raise RuntimeError("还没配 AI 接口：设置 → 读书小助手，填地址和模型名")
     body = {"model": model, "messages": messages, "stream": False}
@@ -2406,12 +2549,7 @@ def agent_once(messages, timeout=90, extra=None):
         body.update(extra)
     with agent_open({"url": url, "key": key, "body": body},
                     stream=False, timeout=timeout) as r:
-        j = json.loads(r.read().decode("utf-8", "replace"))
-    try:
-        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-    except Exception:
-        say = ""
-    say = str(say).strip()
+        say = completion_text(r.read().decode("utf-8", "replace"))
     if not say:
         raise RuntimeError("那边没给出内容，模型名或地址可能不对")
     return say
@@ -2430,14 +2568,10 @@ def agent_test():
                                   "messages": [{"role": "user",
                                                 "content": "只回两个字：在的"}]}},
                         stream=False, timeout=45) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+            say = completion_text(r.read().decode("utf-8", "replace"))
     except Exception as e:
         return False, str(e)[:200], 0
     ms = int((time.time() - t0) * 1000)
-    try:
-        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-    except Exception:
-        say = ""
     return True, "通了，%d 毫秒。它说：%s" % (ms, (say or "（没说话）")[:60]), ms
 
 
@@ -2483,14 +2617,9 @@ def agent_quick(mode, text, ctx=""):
     try:
         with agent_open({"url": url, "key": key, "body": body},
                         stream=False, timeout=60) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+            say = completion_text(r.read().decode("utf-8", "replace"))
     except Exception as e:
         return False, str(e)[:200]
-    try:
-        say = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-    except Exception:
-        say = ""
-    say = (say or "").strip()
     return (True, say) if say else (False, "那边没给出内容，换个模型名试试")
 
 
@@ -2529,9 +2658,9 @@ def ai_summary_stream(book_id, style, chapter, emit):
     ok, src = ai_source(book_id, chapter)
     if not ok:
         return False, src
-    url, key, model = agent_cfg()
+    url, key, model = ai_cfg()
     if not url or not model:
-        return False, "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"
+        return False, "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"
     msgs = ai_sum.messages(style, src["scope"], src["title"], src["text"], src["module"])
     body = {"model": model, "messages": msgs, "stream": True}
     got = []
@@ -2561,12 +2690,12 @@ def ai_mindmap(book_id, chapter=""):
     ok, src = ai_source(book_id, chapter)
     if not ok:
         return False, {"msg": src}
-    url, _, model = agent_cfg()
+    url, _, model = ai_cfg()
     if not url or not model:
-        return False, {"msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"}
+        return False, {"msg": "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"}
     msgs = ai_sum.map_messages(src["title"], src["text"], src["scope"])
     try:
-        raw = agent_once(msgs, 180)
+        raw = agent_once(msgs, 180, cfg=ai_cfg())
     except Exception as e:
         return False, {"msg": "没能问出导图：%s" % str(e)[:160]}
     tree, warn = ai_sum.parse_map(raw, src["title"], src["text"])
@@ -4165,7 +4294,7 @@ def flomo_view(q):
 
 
 def flomo_do(body):
-    """POST /api/flomo/notes —— 导入 / 收成书 / 忘条 / 清空 / 打标签。"""
+    """POST /api/flomo/notes —— 导入 / 手记 / 收成书 / 忘条 / 清空 / 打标签。"""
     act = str((body or {}).get("act") or "").strip()
     try:
         if act == "import":
@@ -4186,6 +4315,16 @@ def flomo_do(body):
             log("--- flomo 导入：%d 条（新 %d · 图 %d）---"
                 % (res["total"], res["added"], res["atts"]))
             return dict({"ok": True, "stats": flomo_stats()}, **res)
+        if act == "add":
+            # 左边那支笔：在本机账上添一条，字段与导入的一条同一个口径。
+            # 收成书 / 打标签 / 画像都认它，不需要「这条是手写的」这种分支。
+            res = flomo_notes.add_memo(FLOMO_DIR, (body or {}).get("md") or "",
+                                       str((body or {}).get("when") or ""))
+            if res.get("ok"):
+                _FLOMO_STATS["k"] = None
+                log("--- flomo：手记一条（本机 %d 条）---" % res["total"])
+                res["stats"] = flomo_stats()
+            return res
         if act == "shelf":
             mid = str(body.get("id") or "")
             if not mid:
@@ -4407,6 +4546,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, mime, f.read(),
                                   {"Cache-Control": "public, max-age=86400"})
 
+        # 内置浏览器：外站页面由本机取回来、改一改再送进界面里那个 iframe。这不是 JSON
+        # 接口（iframe 要的就是一页 HTML），所以不走 _dispatch；失败也回 200 + 一页人话，
+        # 别让内核甩自己的错误页。地址校验、内网拦截、<base> 与点链接脚本都在 web_browse.py。
+        if path == "/api/browse":
+            r = web_browse.browse((q.get("url") or [""])[0])
+            if not r.get("ok"):
+                return self._send(200, "text/html; charset=utf-8",
+                                  web_browse.error_page(r.get("msg"), r.get("url")))
+            return self._send(200, r["ctype"], r["body"],
+                              {"X-Content-Type-Options": "nosniff"})
+
         if path == "/api/state":
             with _lock:
                 task = {k: v for k, v in TASK.items() if k != "proc"}
@@ -4465,6 +4615,7 @@ class Handler(BaseHTTPRequestHandler):
                 "writer": writer_totals(),
                 "export": {"dir": export_dir()},
                 "agent": agent_state(),
+                "ai": ai_state(),
                 "sync": sync_state(),
                 # 订阅与视频这两条线的「有没有 / 能不能」——书目在 books 里已经有了
                 "feed": feed_summary(),
@@ -5100,10 +5251,10 @@ class Handler(BaseHTTPRequestHandler):
             ok, src = ai_source(book, (body or {}).get("chapter"))
             if not ok:
                 return self._json({"ok": False, "msg": src})
-            url, key, model = agent_cfg()
+            url, key, model = ai_cfg()
             if not url or not model:
                 # 和聊天一样：一旦转成流就改不了状态码，这类「没配好」必须在前头挡掉。
-                return self._json({"ok": False, "msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"})
+                return self._json({"ok": False, "msg": "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"})
             self._sse_start()
             sent = []
 
@@ -5602,6 +5753,10 @@ class Handler(BaseHTTPRequestHandler):
         if action == "agent.save":
             ok, msg = set_agent_cfg(body.get("url"), body.get("key"), body.get("model"))
             return self._json({"ok": ok, "msg": msg, "agent": agent_state()})
+
+        if action == "ai.save":
+            ok, msg = set_ai_cfg(body.get("url"), body.get("key"), body.get("model"))
+            return self._json({"ok": ok, "msg": msg, "ai": ai_state()})
 
         if action == "agent.test":
             ok, msg, _ms = agent_test()

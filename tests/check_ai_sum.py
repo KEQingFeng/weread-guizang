@@ -381,6 +381,34 @@ except ui_server.AgentStreamCut:
     pass
 chk("脏行照旧跳过：一行脏数据不许打断整段对话（断流判定只认收尾块）", got2 == ["正文"], got2)
 
+# ── H3. 阅读 AI 与小 Agent 分开配 ─────────────────────────────
+# 用户点名：阅读小结要用自己那份接口，不许跟着「小 Agent」走。这一栏验的就是
+# 「单独配了就各走各的，没单独配才沿用」这条口径。
+ui_server.set_agent_cfg("https://agent.example.com", "sk-agent-1234", "agent-model")
+ui_server.set_ai_cfg("", "", "")
+url, key, model = ui_server.ai_cfg()
+chk("阅读 AI：没单独配时沿用「小 Agent」，不是报没配（老用户不该因为拆配置就用不了）",
+    url.startswith("https://agent.example.com") and model == "agent-model"
+    and key == "sk-agent-1234", (url, model))
+ui_server.set_ai_cfg("https://ai.example.com/v1", "sk-ai-5678", "ai-model")
+url, key, model = ui_server.ai_cfg()
+chk("阅读 AI：单独配了就用自己的地址 / Key / 模型",
+    url == "https://ai.example.com/v1/chat/completions" and key == "sk-ai-5678"
+    and model == "ai-model", (url, key, model))
+st = ui_server.ai_state()
+chk("阅读 AI：状态里 independent=true，Key 只回末四位（明文不往界面送）",
+    st["independent"] is True and st["key_tail"] == "5678" and st["url_set"] is True, st)
+# 改了小 Agent，阅读 AI 那份不动 —— 这才是「分开」。
+ui_server.set_agent_cfg("https://agent2.example.com", "", "agent2-model")
+a_url, _, a_model = ui_server.ai_cfg()
+chk("阅读 AI：改小 Agent 不动阅读 AI（两条线各存各的）",
+    a_url.startswith("https://ai.example.com") and a_model == "ai-model", (a_url, a_model))
+ui_server.set_ai_cfg("", "", "")
+url, key, model = ui_server.ai_cfg()
+chk("阅读 AI：清空单独配置后回退到沿用小 Agent，而不是变成一个坏地址",
+    url.startswith("https://agent2.example.com") and model == "agent2-model", (url, model))
+ui_server.set_agent_cfg("", "", "")
+
 # ── I. 接线 ──────────────────────────────────────────────────
 SRV = read_repo("ui_server.py")
 HTML = read_repo("ui.html")
@@ -406,6 +434,11 @@ chk("接线：接口传来的模式先过白名单（不认的一概退回归纳
     SRV.count("if style not in ai_sum.STYLE_KEYS") >= 2)
 chk("接线：导图存完顺手回一张 SVG（用户要的是能直接看的图，不只是一棵树）",
     'out["svg"] = mindmap.render_svg(out["doc"])' in SRV)
+chk("接线：阅读 AI 走的是自己那条配置（ai_cfg），不是小 Agent 的 agent_cfg",
+    SRV.count("url, key, model = ai_cfg()") >= 1 and "url, _, model = ai_cfg()" in SRV
+    and 'if action == "ai.save"' in SRV and '"ai": ai_state()' in SRV)
+chk("接线：设置里阅读 AI 那一栏能存（saveai → ai.save），而不是只画了两个空框",
+    "id=\"saveai\"" in HTML and "post('ai.save'" in HTML and "function paintAi" in HTML)
 chk("接线：ai_sum.py 在进包清单里（漏了它，装完点小结就是 ModuleNotFoundError）",
     "\n  ai_sum.py\n" in BUILD)
 chk("界面：入口只有一枚「小结」（三种内容共用一个按钮，不各摆一个）",
@@ -420,14 +453,21 @@ chk("界面：流式回话按帧合并渲染（每来一段就重排整篇 Markd
     "requestAnimationFrame" in HTML.split("async function sumRun")[1][:2600])
 chk("界面：半路断了的字留在屏幕上（一个字不剩，用户只当按钮坏了）",
     "断了 · 这次没存" in HTML)
-chk("界面：画完导图要先收掉小结层再开脑图层（两层同 z-index，不关就盖住）",
-    HTML.split("async function aiSumShowMap")[1].find(
-        "$sum('Layer').classList.remove('open')")
+chk("界面：画完导图先把小结页签收回去再开脑图层（不然小结还在右栏、导图盖在上面）",
+    HTML.split("async function aiSumShowMap")[1].find("aiSumHide()")
     < HTML.split("async function aiSumShowMap")[1].find("ntMapLayer"))
-chk("界面：存为笔记也要先收掉小结层再开编辑器（真机栽过：保存那颗钮被小结层盖住点不动）",
-    HTML.split("function aiSumNote")[1].find(
-        "$sum('Layer').classList.remove('open')")
+chk("界面：存为笔记也要先收起小结页签再开编辑器（真机栽过：保存那颗钮被小结层盖住点不动）",
+    HTML.split("function aiSumNote")[1].find("aiSumHide()")
     < HTML.split("function aiSumNote")[1].find("ntEdOpen(null)"))
+chk("界面：小结是阅读器右栏的第三个页签（不再是一层全屏浮层）",
+    'data-tab="ai"' in HTML and 'class="ntai" id="aiSumLayer"' in HTML
+    and 'id="aiSumLayer"' in HTML.split("function readerSkeleton")[1]
+    and 'class="ntlay narrow" id="aiSumLayer"' not in HTML)
+chk("界面：点「小结」/点页签都走同一条进小结栏的路，翻章时小结跟着换章（不弹窗）",
+    "NT.tab = 'ai'" in HTML.split("function ntTab")[1][:400]
+    and "aiSumOpen();" in HTML.split("function ntTab")[1][:400]
+    and "if (NT.tab === 'ai' && SUM.book === RD.book)" in HTML
+    and "sumLoad(false)" in HTML)
 chk("界面：换书 / 换屏时把上一本书的浮层收掉（真机栽过：这五层挂在 body 上，"
     "旧书的小结盖在新书上面，那颗「小结」点下去只会撞在它）",
     "function rdLayersTuck() {" in HTML
@@ -438,8 +478,9 @@ chk("界面：收浮层时编辑器里那篇还没存的先落盘（不能为了
         "NTED.dirty")
     < HTML.split("function rdLayersTuck")[1].split("async function openReader")[0].find(
         "ntEdClose"))
-chk("界面：AI 那层接上了 Esc 与点外关闭（开着的层收不掉，等于把阅读器锁死）",
-    "aiSumClose()" in HTML and "sum = document.getElementById('aiSumLayer')" in HTML)
+chk("界面：小结栏接上了 Esc 与收起钮，也能从页签切回来（开着的栏收不掉，等于把阅读器锁死）",
+    "aiSumClose()" in HTML and "sum = document.getElementById('aiSumLayer')" in HTML
+    and "function aiSumHide()" in HTML and "aiSumAct(t)" in HTML)
 chk("零 emoji：ai_sum 的提示词里一个 emoji 都没有（模型会照着提示词的语气回，界面也跟着学）",
     not EMOJI.search(read_repo("ai_sum.py")))
 
