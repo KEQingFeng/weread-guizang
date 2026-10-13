@@ -4216,7 +4216,7 @@ def flomo_view(q):
 
 
 def flomo_do(body):
-    """POST /api/flomo/notes —— 导入 / 收成书 / 忘条 / 清空 / 打标签。"""
+    """POST /api/flomo/notes —— 导入 / 手记 / 收成书 / 忘条 / 清空 / 打标签。"""
     act = str((body or {}).get("act") or "").strip()
     try:
         if act == "import":
@@ -4237,6 +4237,16 @@ def flomo_do(body):
             log("--- flomo 导入：%d 条（新 %d · 图 %d）---"
                 % (res["total"], res["added"], res["atts"]))
             return dict({"ok": True, "stats": flomo_stats()}, **res)
+        if act == "add":
+            # 左边那支笔：在本机账上添一条，字段与导入的一条同一个口径。
+            # 收成书 / 打标签 / 画像都认它，不需要「这条是手写的」这种分支。
+            res = flomo_notes.add_memo(FLOMO_DIR, (body or {}).get("md") or "",
+                                       str((body or {}).get("when") or ""))
+            if res.get("ok"):
+                _FLOMO_STATS["k"] = None
+                log("--- flomo：手记一条（本机 %d 条）---" % res["total"])
+                res["stats"] = flomo_stats()
+            return res
         if act == "shelf":
             mid = str(body.get("id") or "")
             if not mid:
