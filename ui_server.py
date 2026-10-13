@@ -2440,14 +2440,16 @@ def agent_deltas(resp):
         raise AgentStreamCut("上游话说一半就断了线，这次这份没存（上一次的那份还在）")
 
 
-def agent_once(messages, timeout=90, extra=None):
+def agent_once(messages, timeout=90, extra=None, cfg=None):
     """问一次、等整段答案（不流式）。要 JSON 的那些活儿用它 —— 导图、画像这类，
     半棵树在屏幕上蹦出来没有意义，拼完整了才能解析。失败抛人话，由调用方翻成提示。
 
     `extra` 是给上游 body 补的那几项（`max_tokens`、`stop` 之类）。写作平台的
     灵感与润色用它把长度摁住：不限制的话，一句「给三个方向」能回出一整篇文章。
+    `cfg` 指定用哪套接口（url, key, model）；不给就沿用小 Agent。阅读 AI 传自己的那份，
+    写作三件套默认走小 Agent —— 两批活儿从此不再共用一把钥匙。
     """
-    url, key, model = agent_cfg()
+    url, key, model = cfg if cfg else agent_cfg()
     if not url or not model:
         raise RuntimeError("还没配 AI 接口：设置 → 读书小助手，填地址和模型名")
     body = {"model": model, "messages": messages, "stream": False}
@@ -2615,7 +2617,7 @@ def ai_mindmap(book_id, chapter=""):
         return False, {"msg": "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"}
     msgs = ai_sum.map_messages(src["title"], src["text"], src["scope"])
     try:
-        raw = agent_once(msgs, 180)
+        raw = agent_once(msgs, 180, cfg=ai_cfg())
     except Exception as e:
         return False, {"msg": "没能问出导图：%s" % str(e)[:160]}
     tree, warn = ai_sum.parse_map(raw, src["title"], src["text"])
@@ -5150,10 +5152,10 @@ class Handler(BaseHTTPRequestHandler):
             ok, src = ai_source(book, (body or {}).get("chapter"))
             if not ok:
                 return self._json({"ok": False, "msg": src})
-            url, key, model = agent_cfg()
+            url, key, model = ai_cfg()
             if not url or not model:
                 # 和聊天一样：一旦转成流就改不了状态码，这类「没配好」必须在前头挡掉。
-                return self._json({"ok": False, "msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"})
+                return self._json({"ok": False, "msg": "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"})
             self._sse_start()
             sent = []
 
