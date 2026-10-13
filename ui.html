@@ -3354,6 +3354,7 @@
     <button class="pcat" data-cat="out">导出</button>
     <button class="pcat" data-cat="notes">笔记</button>
     <button class="pcat" data-cat="agent">小 Agent</button>
+    <button class="pcat" data-cat="ai">阅读 AI</button>
     <button class="pcat" data-cat="media">视频转写</button>
     <button class="pcat" data-cat="sync">云同步</button>
     <button class="pcat" data-cat="maint">维护</button>
@@ -3490,8 +3491,34 @@
         <button class="deed" id="saveagent">保存</button>
         <button class="deed" id="agenttest" style="margin-left:6px">测一下</button>
       </div>
-      <div class="hint" id="agenthint">兼容 OpenAI 的接口地址与密钥，用于阅读器里划词提问、以及 AI 小结与写作续写。地址写到 /v1 为止。密钥仅保存在本机，不显示在界面中。</div>
+      <div class="hint" id="agenthint">兼容 OpenAI 的接口地址与密钥，用于阅读器里划词提问与写作续写。地址写到 /v1 为止。密钥仅保存在本机，不显示在界面中。</div>
       <div class="hint">提问时，小 Agent 会读取以下本机数据并发往上述接口：书架与阅读进度、已下载书籍的划线笔记、阅读统计汇总。仅在提问时发送。</div>
+    </section>
+
+    <section class="popcat" data-cat="ai">
+      <div class="sechd">阅读小结接口（「AI 小结」与「画一张导图」用）</div>
+      <div class="row">
+        <span class="k">地址</span>
+        <input id="aiurl" type="text" spellcheck="false" autocomplete="off" placeholder="https://api.example.com/v1"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">Key</span>
+        <input id="aikey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">模型</span>
+        <input id="aimodel" type="text" spellcheck="false" autocomplete="off" placeholder="gpt-4o-mini"
+               style="flex:1;min-width:0;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);font:inherit;font-size:11.5px;color:var(--ink);outline:none">
+      </div>
+      <div class="row">
+        <span class="k">状态</span>
+        <span class="v" id="v-ai">没配</span>
+        <span class="grow"></span>
+        <button class="deed" id="saveai">保存</button>
+      </div>
+      <div class="hint" id="aihint">这份接口只服务阅读小结与 AI 导图，与小 Agent 各存各的，改一边不影响另一边。留空保存则回退到沿用小 Agent 的接口。</div>
     </section>
 
     <section class="popcat" data-cat="media">
@@ -4873,6 +4900,7 @@ async function drawState(force) {
   const ve = $('#v-export');
   if (ve) { ve.textContent = exDir || '默认'; ve.title = exDir || '系统「下载」文件夹'; }
   paintAgent(s.agent || {});
+  paintAi(s.ai || {});
   paintSync(s.sync || {});
   paintVideoCfg(s.video || {});
   paintAnna(s.anna || {});
@@ -19645,6 +19673,29 @@ function paintAgent(cfg) {
   renderChips();
 }
 
+let aiCfg = {};           // 后端回的那份阅读 AI 状态：url_set / key_set / model / independent
+let aiFilled = false;     // 设置里那三栏只回填一次，别把用户正清空的地址又填回去
+
+/** 设置里「阅读 AI」那一栏的显示。独立与否由后端算（independent），界面只照说 ——
+ *  两条线各存各的，但没单独配时如实说「沿用」，不让用户以为自己已经分开了。 */
+function paintAi(cfg) {
+  aiCfg = cfg || {};
+  const va = $('#v-ai');
+  if (va) {
+    const model = (aiCfg.model || '').trim();
+    va.textContent = !aiCfg.url_set ? '没配' : (model || '缺模型名')
+      + (aiCfg.independent ? '' : ' · 沿用小 Agent');
+  }
+  const ku = $('#aikey');
+  if (ku) ku.placeholder = aiCfg.key_set ? '已保存 ····' + (aiCfg.key_tail || '') : 'sk-…';
+  if (!aiFilled && (aiCfg.url || aiCfg.model)) {
+    aiFilled = true;
+    const uu = $('#aiurl'), mu = $('#aimodel');
+    if (uu) uu.value = aiCfg.url || '';
+    if (mu) mu.value = aiCfg.model || '';
+  }
+}
+
 /* 开场白 + 三个能问的问题。空面板最容易让人不知道说什么。 */
 const AG_TIPS = [
   '我最近在读什么？哪些书一直没读完？',
@@ -19841,6 +19892,17 @@ $('#saveagent').onclick = async () => {
     $('#agentkey').value = '';
     $('#agenttest').click();     // 存下就顺手验一次：配错当场知道，别等真要用时才发现
   }
+};
+
+$('#saveai').onclick = async () => {
+  const url = $('#aiurl').value.trim();
+  const key = $('#aikey').value.trim();
+  const model = $('#aimodel').value.trim();
+  // 地址留空＝收掉单独配置、回退到沿用小 Agent，与小 Agent 那栏的用法一致
+  const r = await post('ai.save', {url, key, model});
+  whisper(r.msg || '已保存');
+  paintAi(r.ai || {});
+  if (r.ok) $('#aikey').value = '';
 };
 
 $('#agenttest').onclick = async () => {

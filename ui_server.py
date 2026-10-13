@@ -2168,6 +2168,55 @@ def set_agent_cfg(url, key, model):
     return True, "小 Agent 已连上 " + full
 
 
+def ai_cfg():
+    """阅读 AI（小结 / 生成导图）的接口三项。
+
+    与小 Agent 分开存：划词追问、写作续写读的是 agent_*，阅读小结读写的是 ai_*。
+    老用户只配过小 Agent 的暂时沿用（不能因为拆配置就把已经能用的功能变成「没配」），
+    一旦单独配了阅读 AI，两条线就彻底分开 —— 改一边不动另一边。
+    """
+    c = load_cfg()
+    url = (c.get("ai_url") or "").strip()
+    if url:
+        return url, (c.get("ai_key") or "").strip(), (c.get("ai_model") or "").strip()
+    return agent_cfg()
+
+
+def ai_state():
+    """阅读 AI 的状态快照。`independent` 说清现在这份是单独配的、还是沿用的小 Agent ——
+    界面上那句话要照着它写，不然用户改了阅读 AI 却以为改的是小 Agent。"""
+    c = load_cfg()
+    indep = bool((c.get("ai_url") or "").strip())
+    url, key, model = ai_cfg()
+    return {"url": url, "model": model, "url_set": bool(url),
+            "key_set": bool(key), "key_tail": key[-4:] if key else "",
+            "independent": indep}
+
+
+def set_ai_cfg(url, key, model):
+    """存阅读 AI 这三件套。规则与小 Agent 一致：地址清空即撤销单独配置、回退到沿用小 Agent；
+    Key 传空串表示不改（页面只回显占位符，只改模型时不该被逼着重贴一遍）。"""
+    url = (url or "").strip()
+    model = (model or "").strip()[:80]
+    cfg = load_cfg()
+    if not url:
+        for k in ("ai_url", "ai_key", "ai_model"):
+            cfg.pop(k, None)
+        save_cfg(cfg)
+        return True, "阅读 AI 已改为沿用小 Agent"
+    full = agent_url_full(url)
+    if not full:
+        return False, "地址要写成 http:// 或 https:// 开头"
+    if not model:
+        return False, "还差一个模型名"
+    cfg["ai_url"] = full
+    cfg["ai_model"] = model
+    if (key or "").strip():
+        cfg["ai_key"] = key.strip()
+    save_cfg(cfg)
+    return True, "阅读 AI 已连上 " + full
+
+
 def set_media_cfg(engine, lang, url=None, key=None, model=None):
     """存「视频转笔记」这条线的转写配置：引擎、语言、接口地址与 Key、模型名。
 
@@ -2529,9 +2578,9 @@ def ai_summary_stream(book_id, style, chapter, emit):
     ok, src = ai_source(book_id, chapter)
     if not ok:
         return False, src
-    url, key, model = agent_cfg()
+    url, key, model = ai_cfg()
     if not url or not model:
-        return False, "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"
+        return False, "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"
     msgs = ai_sum.messages(style, src["scope"], src["title"], src["text"], src["module"])
     body = {"model": model, "messages": msgs, "stream": True}
     got = []
@@ -2561,9 +2610,9 @@ def ai_mindmap(book_id, chapter=""):
     ok, src = ai_source(book_id, chapter)
     if not ok:
         return False, {"msg": src}
-    url, _, model = agent_cfg()
+    url, _, model = ai_cfg()
     if not url or not model:
-        return False, {"msg": "还没配 AI 接口：设置 → 读书小助手，填地址和模型名"}
+        return False, {"msg": "还没配 AI 接口：设置 → 阅读 AI，填地址和模型名"}
     msgs = ai_sum.map_messages(src["title"], src["text"], src["scope"])
     try:
         raw = agent_once(msgs, 180)
@@ -4465,6 +4514,7 @@ class Handler(BaseHTTPRequestHandler):
                 "writer": writer_totals(),
                 "export": {"dir": export_dir()},
                 "agent": agent_state(),
+                "ai": ai_state(),
                 "sync": sync_state(),
                 # 订阅与视频这两条线的「有没有 / 能不能」——书目在 books 里已经有了
                 "feed": feed_summary(),
@@ -5602,6 +5652,10 @@ class Handler(BaseHTTPRequestHandler):
         if action == "agent.save":
             ok, msg = set_agent_cfg(body.get("url"), body.get("key"), body.get("model"))
             return self._json({"ok": ok, "msg": msg, "agent": agent_state()})
+
+        if action == "ai.save":
+            ok, msg = set_ai_cfg(body.get("url"), body.get("key"), body.get("model"))
+            return self._json({"ok": ok, "msg": msg, "ai": ai_state()})
 
         if action == "agent.test":
             ok, msg, _ms = agent_test()
