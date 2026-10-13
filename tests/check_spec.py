@@ -168,6 +168,33 @@ chk("剪藏：解析完弹「解析已完成」，并说明文章已在下方列
 chk("剪藏：读不到剪贴板时有个弹层退路（不含屏顶常驻输入框）",
     "function clipPasteFallback(" in SRC and "读不到剪贴板" in SRC)
 
+# ── 七、便签：富文本编辑 + 复制粘贴保留 Markdown（1.2.0）──
+# 用户要的：便签那一格能写富文本（点一下就是粗体 / 标题 / 列表），复制粘贴导出时留 Markdown。
+# 这一格原先是一块 textarea，只有一个 input 事件与一个 value；换成 contenteditable 之后，
+# 「存盘写什么、复制出去是什么、粘回来变成什么」最容易各走各的，所以四条各钉一处。
+chk("便签：左栏那支笔从 textarea 换成 contenteditable 的富文本区",
+    'id="fmNew" contenteditable="true"' in SRC and 'id="fmNew" spellcheck' not in SRC
+    and not re.search(r"<textarea[^>]*id=\"fmNew\"", SRC))
+chk("便签：工具条在位，粗体 / 斜体 / 标题 / 列表 / 引用 / 行内码各一颗",
+    'id="fmBar"' in SRC
+    and all(('data-do="%s"' % k) in SRC for k in
+            ("bold", "italic", "h2", "ul", "ol", "quote", "code"))
+    and "function fmExec(" in SRC and "function fmWrapCode(" in SRC)
+chk("便签：存盘走同一把 Markdown 尺（wrGet 接受任意编辑块，不再写死写作页）",
+    re.search(r"function wrGet\(root\)", SRC) and "const ed = root || wrEd();" in SRC
+    and "function fmDraftMd(" in SRC and "wrGet(FM.new)" in SRC
+    and re.search(r"const md = fmDraftMd\(\);", SRC))
+chk("便签：复制时把 text/plain 换成 Markdown（粘去别处仍是记号）",
+    "function fmCopyHandler(" in SRC and "setData('text/plain', sel.md)" in SRC
+    and "addEventListener('copy', fmCopyHandler)" in SRC)
+chk("便签：粘回的 Markdown 渲染成富文本，认不出记号的当纯文本落进来",
+    "function fmPasteHandler(" in SRC and "wrParse(text)" in SRC
+    and "insertText', false, text" in SRC
+    and "addEventListener('paste', fmPasteHandler)" in SRC)
+chk("便签：卡片上那颗「复制」把这一条的 Markdown 原样放上剪贴板",
+    "function fmCopyMd(" in SRC and "(m && m.md)" in SRC
+    and "feBtn('复制', () => fmCopyMd(m))" in SRC)
+
 bad = [c for c in checks if not c[0]]
 print("\n规格体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
 for _, n, x in bad:

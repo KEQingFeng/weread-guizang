@@ -1607,12 +1607,43 @@
     min-height:0; border-right:1px solid var(--line); background:var(--paper)}
   .fmcompose{display:flex; flex-direction:column; gap:9px; padding:14px 14px 12px; height:100%; min-height:0}
   .fmcompose .ttl{font-size:12px; font-weight:600; color:var(--ink-2); letter-spacing:.02em}
-  .fmcompose textarea{
-    flex:1 1 auto; min-height:150px; resize:none; padding:11px 12px; border-radius:var(--r-sm);
+  /* 工具条 + 一块真正的富文本区：点一下就加粗 / 变标题 / 起列表，不用自己敲记号。
+     和写作页同一套 Markdown 口径（记下来时经 wrGet 转回 Markdown 落盘），
+     所以左边的笔与右边时间线、Agent 读到的都是同一种写法。 */
+  .fmbar{display:flex; align-items:center; gap:2px; flex-wrap:wrap;
+    padding:3px; border:1px solid var(--line-2); border-bottom:0;
+    border-radius:var(--r-sm) var(--r-sm) 0 0; background:var(--surface-2)}
+  .fmbar button{
+    width:27px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:transparent; color:var(--ink-2); font:inherit; font-size:12px; line-height:1;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .fmbar button:hover{background:var(--accent-soft); color:var(--accent)}
+  .fmbar button:active{transform:scale(.94)}
+  .fmbar button.on{background:var(--accent); color:#fff}
+  .fmbar .sep{width:1px; height:15px; margin:0 2px; background:var(--line-2)}
+  .fmcompose .fmed{
+    flex:1 1 auto; min-height:150px; overflow:auto; padding:11px 12px;
+    border-radius:0 0 var(--r-sm) var(--r-sm);
     border:1px solid var(--line-2); background:var(--surface); color:var(--ink);
-    font:inherit; font-size:12.5px; line-height:1.7; outline:none;
+    font-size:12.5px; line-height:1.7; outline:none;
     transition:border-color .16s ease, box-shadow .16s ease}
-  .fmcompose textarea:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .fmcompose .fmed:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .fmcompose .fmed.fmbare{position:relative}
+  /* 占位语由 CSS 画，不在 DOM 里 —— 不然会被当成正文存进稿子。 */
+  .fmcompose .fmed.fmbare::before{content:attr(data-ph); position:absolute; left:12px; top:11px;
+    max-width:calc(100% - 24px); white-space:pre-line; color:var(--ink-3); pointer-events:none}
+  .fmed p{margin:0 0 .6em}
+  .fmed>*:first-child{margin-top:0}
+  .fmed h1,.fmed h2,.fmed h3{margin:.45em 0 .35em; font-size:1.15em; font-weight:650}
+  .fmed ul,.fmed ol{margin:.3em 0 .6em; padding-left:1.6em}
+  .fmed li{margin:.15em 0}
+  .fmed blockquote{margin:.4em 0; padding:.1em 0 .1em 10px;
+    border-left:3px solid var(--accent); color:var(--ink-2)}
+  .fmed code{font-size:11.5px; padding:1px 5px; border-radius:5px; background:var(--paper-inset)}
+  .fmed pre{margin:.4em 0; padding:8px 10px; border-radius:8px; overflow:auto;
+    background:var(--paper-inset)}
+  .fmed pre code{padding:0; background:none}
   .fmcompose .bar{display:flex; align-items:center; gap:8px}
   .fmcompose .bar .grow{flex:1}
   .fmcompose .bar .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
@@ -1698,7 +1729,7 @@
     .fmcols{flex-direction:column}
     .fmleft{width:auto; border-right:0; border-bottom:1px solid var(--line)}
     .fmcompose{height:auto}
-    .fmcompose textarea{flex:none; min-height:118px}
+    .fmcompose .fmed{flex:none; min-height:118px}
     .fmcard{margin:0 6px 7px}
     .fmimg img{width:88px; height:88px}
   }
@@ -6363,9 +6394,11 @@ const WR_ROOT_BLOCK = {P: 1, DIV: 1, SECTION: 1, UL: 1, OL: 1, BLOCKQUOTE: 1,
     正文的根上偶尔挂着「没有家的字」：浏览器直接往 contenteditable 里塞的那一串，
     没包成段落。它们不在 children（只收元素）里，按元素走一遍就等于没看见 ——
     屏幕上有字、稿子里没有，那是最恶劣的一种丢稿。所以零散的行内内容先攒成一段再算。 */
-function wrGet() {
-  const ed = wrEd();
-  if (!ed) return WR.text || "";
+function wrGet(root) {
+  // root 可选：便签那一格的富文本编辑器不是写作页那块 #wrTextIn，但用的是同一把尺
+  // （块判据、行内标记、转义全走 wrBlock），所以把「哪一块」当参数传进来，别复制一份。
+  const ed = root || wrEd();
+  if (!ed) return root ? "" : (WR.text || "");
   const parts = [];
   let loose = null;
   const emit = one => { if (one.length) parts.push(one.join("\n")); };
@@ -12896,7 +12929,8 @@ function renderFeedView() {
 let fmMemos = [], fmTotal = 0, fmTags = [], fmStats = {}, fmErr = '';
 let fmBusy = false;
 const fmFilter = {tag: '', q: ''};
-const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null, new: null, add: null, newCnt: null};
+const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null,
+            bar: null, new: null, add: null, newCnt: null};
 /* 一次铺这么多条：几百条一把铺完要给每张卡算一次 Markdown，首屏就慢下来了。时间线的用法
    是「从上往下扫」，扫到底再要下一批完全够用。 */
 const FM_PAGE = 120;
@@ -12995,6 +13029,7 @@ function fmCard(m) {
   if (m.book) acts.append(feBtn('去书库', () => openReader(m.book, fmName(m), 'flomo')));
   else acts.append(feBtn('收进书架', () => fmShelf(m)));
   acts.append(feBtn('标签', () => fmEditTags(m)));
+  acts.append(feBtn('复制', () => fmCopyMd(m)));
   acts.append(feBtn('忘掉', () => fmForget(m)));
   hd.append(acts);
 
@@ -13157,10 +13192,148 @@ function flomoReload() {
   flomoLoad(0);
 }
 
+/* ── 左栏那支笔：富文本编辑（1.2.0）──────────────────────────
+   用户要的是「富文本格式的笔记编辑」与「复制粘贴导出时保留 Markdown」。这一格因此
+   从 textarea 换成一整块 contenteditable，工具条点一下就落格式；存盘前经 wrGet
+   转回 Markdown（和写作页、导入的 flomo 笔记同一种写法），复制时把 text/plain
+   换成 Markdown，粘回去再把 Markdown 渲染成富文本 —— 里外都是一个口径，不出现
+   「界面上是粗体、导出去一堆 <b>」。 */
+
+/** 这块编辑器现在的 Markdown（存盘 / 复制都读它）。 */
+function fmDraftMd() {
+  return FM.new ? (wrGet(FM.new) || '').trim() : '';
+}
+
+/** 空块给占位语：CSS 画的那一句，不进 DOM，也就不会被当成正文存下。 */
+function fmPh() {
+  const box = FM.new;
+  if (!box) return;
+  const bare = !(box.textContent || '').replace(/\s/g, '')
+    && !box.querySelector('img,table,hr,pre,ul,ol,blockquote');
+  box.classList.toggle('fmbare', bare);
+}
+
+/** 工具条那几个「现在是不是这一种」的灯。取不到就都灭着，不硬猜。 */
+function fmBarState() {
+  const bar = FM.bar;
+  if (!bar) return;
+  const on = {};
+  try { on.bold = document.queryCommandState('bold'); }
+  catch (e) { on.bold = false; }
+  try { on.italic = document.queryCommandState('italic'); }
+  catch (e) { on.italic = false; }
+  bar.querySelectorAll('button[data-do]').forEach(b => {
+    const k = b.dataset.do;
+    if (k === 'bold' || k === 'italic') b.classList.toggle('on', !!on[k]);
+  });
+}
+
+/** 编辑之后的三件事：占位语、字数、工具条状态。顺序别换，字数读的是改完的 DOM。 */
+function fmAfterEdit() {
+  const box = FM.new;
+  if (!box) return;
+  box.normalize();
+  fmPh();
+  fmNewCount();
+  fmBarState();
+}
+
+/** 把一块 Markdown 涂进编辑器（换一篇 / 清空后都用它）。 */
+function fmSetHtml(md) {
+  if (!FM.new) return;
+  FM.new.innerHTML = wrParse(md || '') || '<p><br></p>';
+  FM.new.normalize();
+  fmAfterEdit();
+}
+
+/** 行内代码：execCommand 没有这一条命令，自己把选中的字包进 <code>。 */
+function fmWrapCode() {
+  const box = FM.new;
+  const sel = window.getSelection();
+  if (!box) return;
+  if (!sel || !sel.rangeCount) { box.focus(); return; }
+  const r = sel.getRangeAt(0);
+  if (r.collapsed || !box.contains(r.commonAncestorContainer)) {
+    whisper('先选中要当成代码的那几个字，再点这个');
+    return;
+  }
+  const code = document.createElement('code');
+  try { code.appendChild(r.extractContents()); } catch (e) { return; }
+  r.insertNode(code);
+  const back = document.createRange();
+  back.selectNodeContents(code);
+  sel.removeAllRanges();
+  sel.addRange(back);
+  fmAfterEdit();
+}
+
+/** 一条格式化命令：先确保焦点在正文里（不在的话 execCommand 会打到别的框上）。 */
+function fmExec(what) {
+  const box = FM.new;
+  if (!box) return;
+  box.focus();
+  if (what === 'code') { fmWrapCode(); return; }
+  const cmd = {bold: ['bold'], italic: ['italic'], h2: ['formatBlock', 'h2'],
+    ul: ['insertUnorderedList'], ol: ['insertOrderedList'],
+    quote: ['formatBlock', 'blockquote']}[what];
+  if (!cmd) return;
+  let ok = false;
+  try { ok = document.execCommand(cmd[0], false, cmd[1] === undefined ? null : cmd[1]); }
+  catch (e) { ok = false; }
+  if (!ok) whisper('这个格式在这里用不了');
+  fmAfterEdit();
+}
+
+/** 选中的那一段：Markdown 与 HTML 各来一份（复制时两样都放上剪贴板）。 */
+function fmSelection() {
+  const box = FM.new;
+  const sel = window.getSelection();
+  if (!box || !sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  if (!box.contains(r.commonAncestorContainer)) return null;
+  const tmp = document.createElement('div');
+  tmp.appendChild(r.cloneContents());
+  const md = (wrGet(tmp) || '').trim();
+  return md ? {md, html: tmp.innerHTML} : null;
+}
+
+/** 复制：text/plain 换成 Markdown —— 粘到别的编辑器 / 导出流水线里也是记号，不是一坨标签。 */
+function fmCopyHandler(e) {
+  const sel = fmSelection();
+  if (!sel || !e.clipboardData) return;
+  e.clipboardData.setData('text/plain', sel.md);
+  e.clipboardData.setData('text/html', sel.html);
+  e.preventDefault();
+}
+
+/** 粘贴：从别的编辑器带过来的 Markdown 先渲染成富文本，认不出记号的就当纯文本落进来。 */
+function fmPasteHandler(e) {
+  const dt = e.clipboardData;
+  if (!dt || !FM.new) return;
+  const text = dt.getData('text/plain') || '';
+  if (!text) return;
+  e.preventDefault();
+  const rich = /^ {0,3}(#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|\|)/m.test(text)
+    || /\*\*[^*]+\*\*|`[^`]+`/.test(text);
+  try {
+    if (rich) document.execCommand('insertHTML', false, wrParse(text));
+    else document.execCommand('insertText', false, text);
+  } catch (err) { return; }
+  fmAfterEdit();
+}
+
+/** 卡片上那颗「复制」：把这一条的 Markdown 原样放进剪贴板，粘去别处仍是 Markdown。 */
+async function fmCopyMd(m) {
+  const md = String((m && m.md) || '').trim();
+  if (!md) { whisper('这条没有可复制的正文'); return; }
+  try { await navigator.clipboard.writeText(md); whisper('Markdown 已复制'); }
+  catch (e) { whisper('这台机器不让页面写剪贴板'); }
+}
+
 /** 左栏那支笔的字数：跟卡头同一个口径（去空白与记号），写的时候心里有个数。 */
 function fmNewCount() {
   if (!FM.newCnt) return;
-  const s = FM.new ? (FM.new.value || '') : '';
+  const s = FM.new ? (FM.new.textContent || '') : '';
   FM.newCnt.textContent = s.trim() ? (s.replace(/\s+/g, '').length + ' 字') : '';
 }
 
@@ -13170,15 +13343,14 @@ function fmNewCount() {
 async function fmAdd() {
   const box = FM.new;
   if (!box) return;
-  const md = (box.value || '').trim();
+  const md = fmDraftMd();
   if (!md) { whisper('还没写内容'); box.focus(); return; }
   const btn = FM.add;
   if (btn) { btn.disabled = true; btn.classList.add('busy'); }
   const r = await flomoPost({act: 'add', md});
   if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
   if (!r || !r.ok) { whisper((r && r.msg) || '这条没记上'); return; }
-  box.value = '';
-  fmNewCount();
+  fmSetHtml('');
   whisper(r.dupe ? '这条刚记过，没重复存' : `记下了 · 本机 ${r.total || 0} 条`);
   drawState(true).then(() => flomoReload());
 }
@@ -13312,6 +13484,7 @@ function wireFlomo(p) {
   FM.cnt = p.querySelector('#fmCnt');
   FM.q = p.querySelector('#fmQ');
   FM.file = p.querySelector('#fmFile');
+  FM.bar = p.querySelector('#fmBar');
   FM.new = p.querySelector('#fmNew');
   FM.add = p.querySelector('#fmAdd');
   FM.newCnt = p.querySelector('#fmNewCnt');
@@ -13319,11 +13492,26 @@ function wireFlomo(p) {
   // 左栏那支笔：点「记下来」或 Ctrl / ⌘ + Enter 都记一条；打字时只更字数，不打后端。
   if (FM.add) FM.add.onclick = () => fmAdd();
   if (FM.new) {
-    FM.new.addEventListener('input', fmNewCount);
+    FM.new.addEventListener('input', fmAfterEdit);
+    FM.new.addEventListener('keyup', fmBarState);
+    FM.new.addEventListener('mouseup', fmBarState);
+    FM.new.addEventListener('copy', fmCopyHandler);
+    FM.new.addEventListener('paste', fmPasteHandler);
     FM.new.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fmAdd(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fmAdd(); return; }
+      if (e.key === 'Tab') e.preventDefault();   // 这一格不接 Tab 缩进，别把焦点弹去按钮上
     });
   }
+  // 工具条按钮点下去不许把正文的选区抢走（抢走了「选中几个字点代码」就没了对象）。
+  if (FM.bar) {
+    FM.bar.addEventListener('mousedown', e => e.preventDefault());
+    FM.bar.addEventListener('click', e => {
+      const b = e.target.closest('button[data-do]');
+      if (b) fmExec(b.dataset.do);
+    });
+  }
+  if (FM.new && !FM.new.innerHTML) FM.new.innerHTML = '<p><br></p>';
+  fmAfterEdit();
   fmNewCount();
 
   const imp = p.querySelector('#fmImport');
@@ -13357,8 +13545,18 @@ function renderFlomoView() {
           <aside class="fmleft">
             <div class="fmcompose">
               <div class="ttl">记一条灵感</div>
-              <textarea id="fmNew" spellcheck="false"
-                placeholder="想到什么就写下来…&#10;支持 Markdown 与 #标签，Ctrl / ⌘ + Enter 记下"></textarea>
+              <div class="fmbar" id="fmBar">
+                <button type="button" data-do="bold" title="加粗"><b>B</b></button>
+                <button type="button" data-do="italic" title="斜体"><i>I</i></button>
+                <span class="sep"></span>
+                <button type="button" data-do="h2" title="小标题">H</button>
+                <button type="button" data-do="ul" title="无序列表">•</button>
+                <button type="button" data-do="ol" title="有序列表">1.</button>
+                <button type="button" data-do="quote" title="引用">引</button>
+                <button type="button" data-do="code" title="行内代码">&lt;/&gt;</button>
+              </div>
+              <div class="fmed" id="fmNew" contenteditable="true" spellcheck="false"
+                data-ph="想到什么就写下来…&#10;支持 Markdown 与 #标签，Ctrl / ⌘ + Enter 记下"></div>
               <div class="bar">
                 <span class="cnt" id="fmNewCnt"></span>
                 <span class="grow"></span>
