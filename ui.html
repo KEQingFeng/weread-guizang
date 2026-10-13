@@ -1356,6 +1356,18 @@
   .vcap .it.no i{background:#c8554a; opacity:1}
   .vcap .it.no{color:var(--err)}
   .vcap .grow{flex:1}
+  /* 任务区先把「要做什么」摆清楚：贴链接 → 认一下 → 开始转，最后一步的去向也写在旁边。
+     学生看一遍就知道下一步点哪，不用在按钮之间试。字号压小、不抢正文的位。 */
+  .vtsteps{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 15px;
+    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-3);
+    background:var(--paper-2)}
+  .vtsteps b{font-size:11.5px; font-weight:600; color:var(--ink-2); margin-right:2px}
+  .vtsteps .st{display:inline-flex; align-items:center; gap:5px; color:var(--ink-2)}
+  .vtsteps .st i{font-style:normal; width:15px; height:15px; border-radius:50%; text-align:center;
+    line-height:15px; font-size:10px; color:var(--accent); background:var(--accent-soft)}
+  .vtsteps .arw{color:var(--ink-3); opacity:.7}
+  .vtsteps .tip{margin-left:auto; color:var(--ink-3)}
+  @media (max-width:860px){ .vtsteps .tip{margin-left:0} }
   /* 识别结果与进度：视频转笔记是分钟级长任务，得有一处能看着它往前走 */
   .vbox{padding:13px 15px; border-bottom:1px solid var(--line); display:none}
   .vbox.on{display:block}
@@ -1383,16 +1395,19 @@
   .vtwrap.nonav > .vtside{opacity:0; pointer-events:none; overflow:hidden}
   .vtwrap > .vtmain{overflow:hidden}
   #vShelf{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
-  .vtbook{display:flex; align-items:flex-start; gap:8px; padding:9px 12px;
+  .vtbook{display:flex; align-items:flex-start; gap:8px; padding:10px 12px;
     border-bottom:1px solid var(--line); cursor:pointer; transition:background .15s ease}
   .vtbook:hover{background:var(--accent-soft)}
   .vtbook.on{background:var(--accent-soft); box-shadow:inset 2px 0 0 var(--accent)}
   .vtbook .mk{flex:1; min-width:0}
-  .vtbook .nm{display:block; font-size:12px; color:var(--ink); line-height:1.45;
+  .vtbook .nm{display:block; font-size:12.5px; font-weight:550; color:var(--ink); line-height:1.45;
     overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
     word-break:break-word}
-  .vtbook .ct{display:block; margin-top:3px; font-size:10.5px; color:var(--ink-3);
+  .vtbook .ct{display:block; margin-top:4px; font-size:11px; color:var(--ink-3);
     font-variant-numeric:tabular-nums}
+  /* 时长是扫列表时最先要的那一项，单独提一档对比度；段数/节数留在后面当补充 */
+  .vtbook .ct b{color:var(--ink-2); font-weight:600}
+  .vtbook .rd{align-self:center}
   .vtbook .lt{display:flex; gap:4px; margin-top:6px; flex-wrap:wrap}
   .vtbook .lt i{font-style:normal; font-size:10px; line-height:1; padding:3px 6px; border-radius:6px;
     border:1px solid var(--line-2); color:var(--ink-3); background:var(--paper)}
@@ -1400,6 +1415,11 @@
   /* 任务区（能力灯 + 贴链接 + 进度）占上头一块，长视频转完的日志也不会把工作台顶出视野 */
   .vttask{flex:none; min-height:0; max-height:46%; overflow:auto; overscroll-behavior:contain}
   .vtwork{flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line)}
+  /* 结果区的分区标题：一句话交代这块是干什么的、怎么用，下面的工具条就不再挤一句说明 */
+  .vtsec{flex:none; display:flex; align-items:baseline; gap:9px; flex-wrap:wrap;
+    padding:10px 12px 0; background:var(--paper)}
+  .vtsec b{font-size:12.5px; font-weight:600; color:var(--ink)}
+  .vtsec span{font-size:11px; color:var(--ink-3)}
   .vttb{flex:none; display:flex; align-items:center; gap:7px; flex-wrap:wrap;
     padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper)}
   .vttb .grow{flex:1}
@@ -1408,8 +1428,8 @@
   .vttb input.st{width:76px}
   #vRows{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
   .vtrow{display:grid; grid-template-columns:56px 84px minmax(0,1fr) auto; gap:9px;
-    align-items:start; padding:9px 12px; border-bottom:1px solid var(--line);
-    font-size:12.5px; line-height:1.62}
+    align-items:start; padding:11px 13px; border-bottom:1px solid var(--line);
+    font-size:12.5px; line-height:1.72}
   .vtrow:hover{background:var(--paper-2)}
   .vtrow .ts{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums;
     padding-top:2px; cursor:pointer; border-radius:6px; transition:color .15s ease}
@@ -1436,7 +1456,19 @@
   .vtrow.hit .tx{background:var(--accent-soft)}
   .vtrow textarea{width:100%; min-height:58px; padding:8px 10px; border-radius:9px; outline:none;
     border:1px solid var(--accent); background:var(--surface-2); font:inherit; font-size:12.5px;
-    line-height:1.62; color:var(--ink); resize:vertical}
+    line-height:1.72; color:var(--ink); resize:vertical}
+  .vtrow textarea::placeholder,.vtrow input.f::placeholder{color:var(--ink-3)}
+  /* 改字的这一格：正文输入 + 说话人 + 一行「记好 / 先不改」。原来这三样没有自己的样式，
+     挤在行尾一个 auto 宽的格里，提示字和按钮都发灰看不清。整条挪到正文下面占满一行。 */
+  .vtrowbar{grid-column:2 / -1; display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+    margin-top:7px; padding-top:8px; border-top:1px dashed var(--line)}
+  .vtrowbar .cnt{margin-right:auto; font-size:11px; color:var(--ink-3)}
+  .vtrowbar button{height:26px; padding:0 11px; border-radius:8px; cursor:pointer;
+    font:inherit; font-size:11px; line-height:1; border:1px solid var(--line-2);
+    background:transparent; color:var(--ink-2);
+    transition:background .15s ease, color .15s ease, transform .12s ease}
+  .vtrowbar button:hover{background:var(--accent-soft); color:var(--accent)}
+  .vtrowbar button:active{transform:scale(.94)}
   .vtrow.new{background:rgba(47,157,95,.07)}
   .vtmore{padding:11px 12px; display:flex; justify-content:center}
   .vtexp{display:flex; gap:8px; flex-wrap:wrap; padding:10px 12px; border-top:1px solid var(--line)}
@@ -1463,6 +1495,10 @@
     #vRows{max-height:60vh}
     .vtrow{grid-template-columns:52px minmax(0,1fr) auto}
     .vtrow .spk{display:none}
+    /* 展开左栏时它占满整宽：书名放到三行、状态灯之间收紧，别让标题和三个小灯挤成一坨 */
+    .vtbook{padding:9px 11px}
+    .vtbook .nm{-webkit-line-clamp:3}
+    .vtbook .lt{gap:3px}
   }
   @media (prefers-color-scheme:dark){
     .frow .st.done{color:#7fd3a0}
@@ -10227,8 +10263,9 @@ function modEmpty(mod) {
     d.innerHTML = '<b>还没有剪藏的文章</b>把公众号链接贴进上面那个框，点「解析正文」看一眼，'
       + '再点「全部入库」就进这一格了。之后随时能读到它，也能划线做笔记。';
   } else if (mod === 'video') {
-    d.innerHTML = '<b>还没有转出来的视频</b>把视频链接贴进右边那格，转完之后这里会多一本'
-      + '可以读、可以改转写、能导字幕和 EPUB 的笔记。';
+    d.innerHTML = '<b>还没有转出来的视频</b>先贴一条课堂回放 / 网课链接到右边那格，'
+      + '点「识别」认一下，再点「开始转笔记」。转完这里会多一本能读、能改转写、'
+      + '能导字幕和 EPUB 的笔记。';
   } else if (mod === 'local') {
     d.innerHTML = '<b>本地书架还是空的</b>点右上角「导入书籍」，把你自己手里的 MD / EPUB / PDF 放进来。'
       + '从微信读书取回的书归在「我的书架」那一格。';
@@ -13927,11 +13964,14 @@ function renderVideoShelf() {
     const mk = feEl('div', 'mk');
     mk.append(feEl('span', 'nm', b.title || b.id));
     const bits = [];
-    if (b.duration) bits.push(fmtTime(b.duration));
     bits.push((b.segments || 0) + ' 段');
     bits.push((b.chapters || 0) + ' 节');
     if (Number(b.pages) > 1) bits.push('第 ' + (Number(b.page) || 1) + ' / ' + b.pages + ' P');
-    mk.append(feEl('span', 'ct', bits.join(' · ')));
+    // 时长单独提一档对比度：扫「哪本转完了、值不值得点开」时先看它，段数节数是补充。
+    const ct = feEl('span', 'ct');
+    if (b.duration) ct.append(feEl('b', '', fmtTime(b.duration)), document.createTextNode(' · '));
+    ct.append(document.createTextNode(bits.join(' · ')));
+    mk.append(ct);
     const lt = feEl('div', 'lt');
     const lamp = (on, txt, title) => {
       const i = feEl('i', on ? 'on' : '', txt);
@@ -14090,6 +14130,15 @@ function renderVideoView() {
       <div class="vtmain">
         <div class="vttask">
           <div class="vcap" id="vCap"></div>
+          <div class="vtsteps">
+            <b>转成笔记，三步</b>
+            <span class="st"><i>1</i>贴链接</span>
+            <span class="arw">→</span>
+            <span class="st"><i>2</i>点「识别」认一下</span>
+            <span class="arw">→</span>
+            <span class="st"><i>3</i>点「开始转笔记」</span>
+            <span class="tip">转完自动进左边书架，点开就能改听错的字、导字幕</span>
+          </div>
           <div class="clipin">
             <textarea class="clipta" id="vTa" spellcheck="false"
               placeholder="粘贴视频链接。B 站（BV 号或整段分享文案）、YouTube 都认。&#10;例：https://www.bilibili.com/video/BV1xx411c7mD"></textarea>
@@ -14105,6 +14154,9 @@ function renderVideoView() {
           <div class="vbox" id="vProg"></div>
         </div>
         <div class="vtwork">
+          <div class="vtsec"><b>转写结果</b>
+            <span>点段落改听错的字 · 点时间戳复制时间 · 点「原片」跳回原视频那一句</span>
+          </div>
           <div class="vttb">
             <button class="ic unf" id="vUnfold" title="展开左边那栏书">看哪本</button>
             <select class="f" id="vPick"><option value="">挑一本转出来的书</option></select>
