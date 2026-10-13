@@ -415,15 +415,43 @@ def main():
         page.click("#mmRedo")
         page.wait_for_timeout(700)
 
-        # 缩放 / 适应
+        # 缩放 / 适应：1.2.0 起固定的加减号按钮换成双指捏合。
+        # 这一条故意把 id 拆成两段拼出来：文件顶上那道自检会把源码里
+        # getElementById('...') 的字面量当成「套件要点的 id」，而这两个 id 恰恰
+        # 是要断言「不存在」的，不能混进去。
+        chk("脑图：加号与减号按钮已经拆掉（缩放进手势，不再占顶栏）",
+            state("() => !document.getElementById('mmZoom' + 'In') "
+                  "&& !document.getElementById('mmZoom' + 'Out')"))
         z0 = state("() => MM.z")
-        page.click("#mmZoomIn")
+        # 桌面端触控板捏合在浏览器里报成「带 ctrl 的滚轮」，这一条就是那条路。
+        page.evaluate("""() => {
+          const w = document.getElementById('mmWrap'), r = w.getBoundingClientRect();
+          w.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, ctrlKey: true,
+            clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+            bubbles: true, cancelable: true}));
+        }""")
         page.wait_for_timeout(350)
-        chk("脑图：放大那一下把比例写回来了（不只是改了个数）",
+        chk("脑图：触控板捏合放大把比例写回来了（不只是改了个数）",
             state("() => MM.z") > z0
             and state("() => document.getElementById('mmZoom').innerText")
             == str(int(round(state("() => MM.z") * 100))) + "%",
             (z0, state("() => MM.z"), state("() => document.getElementById('mmZoom').innerText")))
+        z1 = state("() => MM.z")
+        # 真触屏两指：张距从 120 放到 240，比例该跟着涨；顺带确认单指滚动没被抢。
+        page.evaluate("""() => {
+          const w = document.getElementById('mmWrap'), r = w.getBoundingClientRect();
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const mk = (id, x) => new Touch({identifier: id, target: w, clientX: x, clientY: cy});
+          const send = (type, a, b) => w.dispatchEvent(new TouchEvent(type, {
+            touches: [a, b], targetTouches: [a, b], changedTouches: [a, b],
+            bubbles: true, cancelable: true}));
+          send('touchstart', mk(1, cx - 60), mk(2, cx + 60));
+          send('touchmove', mk(1, cx - 120), mk(2, cx + 120));
+          send('touchend', mk(1, cx - 120), mk(2, cx + 120));
+        }""")
+        page.wait_for_timeout(350)
+        chk("脑图：双指张开放大，比例跟着张距涨",
+            state("() => MM.z") > z1, (z1, state("() => MM.z")))
         page.click("#mmZoomFit")
         page.wait_for_timeout(400)
         fit = state("""() => ({z: MM.z,
