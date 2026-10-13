@@ -14832,7 +14832,10 @@ function fetchPicks() {
       list.push(...dedupe(flat(own.books), seen));
       return list.slice(0, 6);
     };
-    if (list.length >= 6) return list;               // 一次就够了，第二趟没发过
+    // 一次就够了，第二趟没发过。这里必须真的切到 6：官方 /book/recommend 偶尔
+    // 一次回十几本，原来直接 `return list` 会把整批摆上去，用户看到的就不是
+    // 「为我推荐六本」而是两排半 —— 「只出现六本」的判据要以这道切片为准。
+    if (list.length >= 6) return list.slice(0, 6);
     if (seed) return sim.then(fill);                 // 种子本地就有，第二趟已在飞
     const first = list[0] || {};
     if (!first.bookId) return list;                  // 连种子都拿不出，不硬补
@@ -14843,7 +14846,9 @@ function fetchPicks() {
 function prePick() { prefetch('pick', fetchPicks); }
 
 async function renderPickView() {
-  const {body} = viewPane('pick', viewHeader('为我推荐'));
+  // 这一屏只有书：不给页头、不给计数。原来那行「为我推荐 / 一次 N 本」横在
+  // 六本书上面，用户要的是「翻开就是一排封面」，所以连标题一起让掉。
+  const {body} = viewPane('pick', '');
   if (!keySet) { setHtml(body, notReady()); return; }
   const cold = !pickList.length;
   if (pickList.length) paintPick(body);
