@@ -319,11 +319,13 @@ chk("接线：后台补齐封面时，非微信读书的书走 meta 里那个地
 
 # 微信书架那一屏的封面走的是另一条路：官方 /shelf/sync 每条带一条 cover URL，可个别书
 # 官方就是不给（老书、文章合辑）。前端得肯退到本地这一口 `/api/cover?book=<书城短 id>`
-# —— 有 Key 时它会现取一次并缓存，没封面也只是一次 404。这条改的是 ui.html，静态钉住。
+# —— 有 Key 时它会现取一次并缓存。没 Key 时这一趟注定 404（后端 ensure_cover 直接返回），
+# 所以退这一口要先看 keySet：否则书架每次重画都在控制台留一条红字。这条改的是 ui.html，
+# 静态钉住「有 Key 才退」与「退的时候别把卡片弄空」两件事。
 UI = read_repo("ui.html")
-chk("接线：微信书架卡缺官方封面时退到 /api/cover（不再空着）",
-    "|| (storeId ? '/api/cover?book='" in UI and "coverAlt:" in UI,
-    "cardBits 里没有「官方不给封面就退本地这一口」那段")
+chk("接线：微信书架卡缺官方封面时退到 /api/cover（不再空着，且要配了 Key 才试）",
+    "|| (keySet && storeId ? '/api/cover?book='" in UI and "coverAlt:" in UI,
+    "cardBits 里没有「官方不给封面就退本地这一口」那段，或没按 keySet 收口")
 chk("接线：官方封面 URL 打不开时换 /api/cover 再试一次，两条都空才用生成式封面",
     "let alt = t.coverAlt || ''" in UI
     and "if (alt) { const u = alt; alt = ''; img.src = u; return; }" in UI,

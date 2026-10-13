@@ -4585,13 +4585,14 @@ function cardBits(b) {
   return {
     readerId, id, storeId, detailStore, detailReader, mine, busy, part, stt,
     // 微信书架的封面是官方给的一条 URL，但个别书官方就是不给（老书、文章合辑）。
-    // 那种退回本地这一口：`/api/cover?book=<书城短 id>` 配了 Key 时现取一次并缓存，
-    // 真取不到也只是 404 —— 总比整张卡空着像界面坏了强。
+    // 那种退回本地这一口：`/api/cover?book=<书城短 id>` 配了 Key 时现取一次并缓存。
+    // 没配 Key 时这一趟注定取不回来（后端 ensure_cover 直接返回 None），只会白敲一次
+    // 换回 404 —— 控制台多一条红字，卡片也照样落回生成式封面。所以只有配了 Key 才试。
     coverUrl: (typeof b.cover === 'string' && b.cover ? b.cover : '')
-      || (storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
+      || (keySet && storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : ''),
     // 远端那条 URL 打不开时（图床拒了来路、链接过期）再退到本地这口试一次；
-    // 只试一次，不然两个地址会互相打转。
-    coverAlt: (typeof b.cover === 'string' && b.cover && storeId)
+    // 只试一次，不然两个地址会互相打转；同样要有 Key 才有意义。
+    coverAlt: (typeof b.cover === 'string' && b.cover && storeId && keySet)
       ? '/api/cover?book=' + encodeURIComponent(storeId) : '',
     // 骨架形状：只有这三件事会让卡片结构变化（进度条、取书↔正文、取完↔没取完）
     shape: (busy ? 'b' : '-') + (mine ? (part ? 'p' : 'm') : '-'),
@@ -15528,7 +15529,10 @@ async function renderDetailView(storeId, readerId, title) {
   const detailStore = storeId || d.bookId || '';
   const notesKey = detailStore || id;
   p.dataset.key = notesKey || '';   // 卡片回顾「返回」时按这个认书，别回到另一本的详情
-  const coverUrl = info.cover || (storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : '');
+  // 详情页同理：官方没给封面 URL 时才退到本地这一口，且要有 Key —— 没 Key 后端取不回来，
+  // 白敲一次只会在控制台留一条 404。
+  const coverUrl = info.cover
+    || (keySet && storeId ? '/api/cover?book=' + encodeURIComponent(storeId) : '');
   const pctv = typeof pg.progress === 'number' ? pg.progress : null;
 
   const kv = (k, val) => `<div class="it"><div class="k">${k}</div><div class="v">${val}</div></div>`;
