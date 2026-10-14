@@ -609,11 +609,16 @@ def read_epub(data):
         return docs, images, cover, meta_info
 
 
-def _chapters_from_docs(docs):
-    """把一批 xhtml 文档转成章节：[标题, markdown]。"""
+def _chapters_from_docs(docs, namemap=None):
+    """把一批 xhtml 文档转成章节：[标题, markdown]。
+
+    namemap 是「包内路径 → 落盘名」。图片要在这一层就按本文档所在目录解好 ——
+    一旦几篇文档合并成一份 md，同名图来自哪个目录就分不出来了。
+    """
     out = []
-    for _full, txt in docs:
-        md = _md_from_xhtml(txt)
+    for full, txt in docs:
+        md = _rewrite_imgs(_md_from_xhtml(txt), namemap,
+                           posixpath.dirname(full or ""))
         if not md.strip():
             continue
         for t, b in split_markdown(md):
@@ -659,16 +664,40 @@ def _pdf_text(data):
 _IMG_REF = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
-def _rewrite_imgs(md):
-    """把章内图片引用归到 images/<落盘名>；网络图与 data: 原样保留。"""
+def _img_flat(raw, namemap=None, doc_dir=""):
+    """章内图片引用 → 落盘名。
+
+    有 namemap（EPUB）时，先按「本文档所在目录 + 相对路径」解析成包内路径再查表；
+    解析不出来就退回按文件名找，最后才退回 `_safe_name`（与落盘那一步同一把尺子）。
+    查询串 / 锚点（`pic.png?v=2`、`pic.png#f`）不参与文件名。
+    """
+    if namemap:
+        key = urllib.parse.unquote(raw.split("#", 1)[0].split("?", 1)[0])
+        cand = posixpath.normpath(posixpath.join(doc_dir or "", key)).lstrip("/")
+        flat = namemap.get(cand) or namemap.get(key)
+        if not flat:
+            base = posixpath.basename(key)
+            flat = next((v for k, v in namemap.items()
+                         if posixpath.basename(k) == base), None)
+        if flat:
+            return flat
+    return _safe_name(urllib.parse.unquote(raw))
+
+
+def _rewrite_imgs(md, namemap=None, doc_dir=""):
+    """把章内图片引用归到 images/<落盘名>；网络图与 data: 原样保留。
+
+    带 namemap 时不能只看文件名：两篇文档各自引一张 `pic.png`（分别落在包内不同
+    目录）时，只看 basename 会双双指向先登记的那张 —— 用户看到的是「这一章的配图
+    其实是上一章的」，而且不报任何错。按文档目录解析出包内路径才分得清。
+    """
     def rep(m):
         alt, src = m.group(1), m.group(2)
         if src.startswith(("http://", "https://", "data:")):
             return m.group(0)
         if src.startswith("images/"):
             return m.group(0)
-        name = _safe_name(urllib.parse.unquote(src))
-        return "![%s](images/%s)" % (alt, name)
+        return "![%s](images/%s)" % (alt, _img_flat(src, namemap, doc_dir))
     return _IMG_REF.sub(rep, md or "")
 
 
@@ -714,9 +743,12 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
     name = os.path.basename(filename or "").strip() or "未命名"
     opf_meta = {}
     images, cover_orig = [], None
+    namemap = {}
     if fmt == "epub":
         docs, images, cover_orig, opf_meta = read_epub(data)
-        chapters = _chapters_from_docs(docs)
+        # 落盘名只算一次：正文引用与真正写文件必须查同一张表，否则同名图对不上。
+        namemap = _unique_names([n for n, _ in images])
+        chapters = _chapters_from_docs(docs, namemap)
     elif fmt == "pdf":
         text = _normalize_lines(_pdf_text(data))
         chapters = split_markdown(text) if re.search(r"(?m)^#\s", text) else split_plain(text)
@@ -749,7 +781,7 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
     if images:
         img_dir = os.path.join(d, "images")
         os.makedirs(img_dir, exist_ok=True)
-        namemap = _unique_names([n for n, _ in images])
+        namemap = namemap or _unique_names([n for n, _ in images])
         for orig, blob in images:
             flat = namemap.get(orig)
             if not flat:
