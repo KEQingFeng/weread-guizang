@@ -239,10 +239,15 @@ def export_markdown(doc, meta=None, titles=None, book_label=""):
             L.append("### %s" % (e.get("title") or "无标题"))
             L.append("")
             for r in (e.get("refs") or []):
-                if (r.get("text") or "").strip():
-                    L.append("> 引用：%s%s" % (r["text"].replace("\n", " "),
-                                          ("（%s）" % titles.get(r.get("ch")) if r.get("ch") in titles else "")
-                                          .rstrip("（）")))
+                if not isinstance(r, dict):
+                    continue
+                if not (r.get("text") or "").strip():
+                    continue
+                # 章节名要加就成对地加：`.rstrip("（）")` 会把刚写上的右括号一起啃掉，
+                # 而目录里标题为空时它又只剩一个左括号 —— 两种都在导出的 md 里留半截括号。
+                title = str(titles.get(r.get("ch")) or "").strip() if r.get("ch") in titles else ""
+                L.append("> 引用：%s%s" % (r["text"].replace("\n", " "),
+                                          ("（%s）" % title) if title else ""))
             body = (e.get("body") or "").strip()
             L.append(body or "（这一条还是空的）")
             L.append("")
