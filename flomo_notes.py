@@ -374,8 +374,58 @@ def path_in(flomo_dir):
     return os.path.join(flomo_dir, "notes.json")
 
 
+def _as_int(value, default=0):
+    """脏账里的数字：能认的照认（"42" 也是 42），认不出的回 default，绝不抛。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_list(value):
+    """脏账里的容器：认 list/tuple；裸字符串收成「一个元素」。
+
+    裸字符串要是直接 `for t in "读书"` 会被逐字拆开，标签统计里就冒出「读」「书」
+    两个各一条的假标签；tags 与 atts 都得先过这一道。
+    """
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    return []
+
+
+def _clean_memo(m):
+    """读回来的一条：按 `memo_of` 定义的那个形状把字段收干净。
+
+    这份账不只本进程在写（用户会手工编辑，旧版本也落过别的形状），而读它的地方
+    直接 `int()` / `for` 遍历：`"words": "abc"` 让 /api/flomo/stats 与记忆画像抛
+    ValueError，`"ts": "oops"` 让列表页排序处抛穿请求，`"tags": "读书"` 被逐字拆成
+    两个标签、数字全是假的。条目本身一律留下，只把认不出的字段回成安全值。
+    字数认不出时按正文重算 —— `words_of` 是唯一那把尺，比硬塞 0 诚实。
+    """
+    out = dict(m)
+    out["id"] = str(m.get("id") or "")
+    out["date"] = str(m.get("date") or "")
+    out["clock"] = str(m.get("clock") or "")
+    out["md"] = str(m.get("md") or "")
+    out["ts"] = _as_int(m.get("ts"))
+    out["tags"] = [str(t) for t in _as_list(m.get("tags")) if str(t).strip()]
+    out["atts"] = [str(a) for a in _as_list(m.get("atts")) if str(a).strip()]
+    out["imgs"] = [str(s) for s in _as_list(m.get("imgs")) if str(s).strip()]
+    out["book"] = str(m.get("book") or "")
+    words = _as_int(m.get("words"), None)
+    out["words"] = words if words is not None else words_of(out["md"])
+    return out
+
+
 def load(flomo_dir):
-    """读那份账；坏了、没有都给空的（导入这件事必须能从零开始，不许被旧脏数据挡死）。"""
+    """读那份账；坏了、没有都给空的（导入这件事必须能从零开始，不许被旧脏数据挡死）。
+
+    条目形状在这里收口（`_clean_memo`）：列表页、标签统计、记忆画像、收成书都从
+    这一扇门进出，脏字段不许再穿到 `int()` 与逐字遍历那里去。能认的值照旧，条目
+    不因为一个字段坏掉就整条丢。
+    """
     try:
         with open(path_in(flomo_dir), encoding="utf-8") as f:
             d = json.load(f)
@@ -386,9 +436,10 @@ def load(flomo_dir):
     memos = d.get("memos")
     if not isinstance(memos, list):
         memos = []
-    d["memos"] = [m for m in memos if isinstance(m, dict) and m.get("id")]
-    d.setdefault("at", 0)
-    d.setdefault("src", "")
+    d["memos"] = [_clean_memo(m) for m in memos
+                  if isinstance(m, dict) and str(m.get("id") or "").strip()]
+    d["at"] = _as_int(d.get("at"))
+    d["src"] = str(d.get("src") or "")
     d.setdefault("version", VERSION)
     return d
 
