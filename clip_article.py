@@ -312,17 +312,55 @@ def _attr_str(d):
     return (" " + " ".join(parts)) if parts else ""
 
 
+def _img_src(node, base):
+    """这张 <img> 的真实地址，没有（只剩占位）就返回空串。
+
+    微信的图是懒加载的：src 里往往只是 1px 占位（data:image/…），真地址在
+    data-src 一类属性里 —— 所以要在候选里挑第一个「不是 data:」的，而不是
+    第一个非空，不然一张真图会被占位符顶掉。
+    """
+    for key in ("data-src", "data-lazy-src", "data-original", "data-croporisrc", "src"):
+        v = (node.attr(key) or "").strip()
+        if v and not v.lower().startswith("data:"):
+            return _abs(v, base)
+    return ""
+
+
 def _cell_text(cell, base):
-    """格子里可能有段落与链接：压成一行，链接保留。"""
+    """格子里可能有段落、链接、图片：压成一行，链接与图片保留。
+
+    遍历时把「别处会整块丢掉的标签」（脚本、样式、表单…）连同子树一起跳过，
+    否则 <td>x<script>…</script></td> 的脚本文本会被当成正文抄进表格。
+    碰到 <a> 只产出一次链接、不再往下走它的子节点 —— 老写法按整棵子树收文本，
+    锚文字会先记成 Markdown 链接、再被当纯文本记第二遍。
+    """
     parts = []
-    for n in _walk_all(cell):
-        if isinstance(n, _Text):
-            parts.append(n.text.strip())
-        elif n.tag == "a":
-            t = re.sub(r"\s+", " ", n.inner_text()).strip()
-            href = _safe_href(n.attr("href"), base)
+
+    def take(node):
+        if isinstance(node, _Text):
+            t = node.text.strip()
             if t:
+                parts.append(t)
+            return
+        if node.tag in DROP_TAGS or (node.hint and DROP_INSIDE.search(node.hint)):
+            return
+        if node.tag == "a":
+            t = re.sub(r"\s+", " ", node.inner_text()).strip()
+            if t:
+                href = _safe_href(node.attr("href"), base)
                 parts.append("[%s](%s)" % (t, href) if href else t)
+            return
+        if node.tag == "img":
+            src = _img_src(node, base)
+            if src:
+                alt = re.sub(r"\s+", " ", node.attr("alt") or "").strip()
+                parts.append("![%s](%s)" % (alt, src))
+            return
+        for k in node.kids:
+            take(k)
+
+    for k in cell.kids:
+        take(k)
     return " ".join(p for p in parts if p).replace("|", "\\|")   # 竖线会切断表格列
 
 
@@ -387,6 +425,12 @@ def _emit(node, out, base, tables):
         if md:
             out.append("<p>@@T%d@@</p>" % len(tables))
             tables.append(md)
+        else:
+            # 只有一行（或根本没有格子）的表格转不出管道表：与其整块丢掉，
+            # 不如把格子里的文字当普通段落收进正文，别让内容凭空消失。
+            txt = _cell_text(node, base)
+            if txt:
+                out.append("<p>%s</p>" % html.escape(txt, quote=False))
         return
     if tag == "br":
         out.append("<br>")
@@ -405,17 +449,10 @@ def _emit(node, out, base, tables):
         return
     attrs = {}
     if tag == "img":
-        # 懒加载的图，src 里往往是 1px 占位（data:image/…），真地址在 data-src ——
-        # 所以要在候选里挑第一个「不是 data:」的，而不是第一个非空
-        src = ""
-        for key in ("data-src", "data-lazy-src", "data-original", "data-croporisrc", "src"):
-            v = (node.attr(key) or "").strip()
-            if v and not v.lower().startswith("data:"):
-                src = v
-                break
+        src = _img_src(node, base)
         if not src:
             return                # 只剩占位图：留个坏链接不如不留
-        attrs = {"src": _abs(src, base), "alt": node.attr("alt")}
+        attrs = {"src": src, "alt": node.attr("alt")}
     if tag in ("img", "hr"):
         out.append("<%s%s>" % (tag, _attr_str(attrs)))
         return
@@ -426,10 +463,16 @@ def _emit(node, out, base, tables):
 
 
 def _restore_tables(md, tables):
-    """占位符换回真表格。占位符单独成段，转换后正好占一行，直接串替换。"""
-    for i, t in enumerate(tables):
-        md = md.replace("@@T%d@@" % i, t)
-    return re.sub(r"@@T\d+@@", "", md)
+    """占位符换回真表格。占位符单独成段，转换后正好占一行。
+
+    一次性扫描替换，而不是 for 循环 + str.replace：格子里的文字也可能含
+    「@@T1@@」这样的字样，逐个替换会让先塞进去的内容被后一轮再替换一遍，
+    把两张表串在一起。
+    """
+    def sub(m):
+        i = int(m.group(1))
+        return tables[i] if 0 <= i < len(tables) else ""
+    return re.sub(r"@@T(\d+)@@", sub, md or "")
 
 
 def _pick_body(tree):
