@@ -2361,11 +2361,13 @@
   .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:10px 14px;
     font-size:13px; line-height:17px; color:var(--ink);
     border:1px solid rgba(20,30,45,.13); box-shadow:0 1px 2px rgba(20,30,45,.07);
-    cursor:grab; user-select:none; overflow:hidden; word-break:break-word;
+    cursor:grab; user-select:none; overflow:visible;
     transition:box-shadow .14s ease, outline-color .12s ease}
-  /* 后端已经把文字按字宽折成几行了（layout.boxes.lines），这里一行一个块 ——
-     行高 17px 和它算框高用的同一个数，屏幕上的框和导出的 SVG 才对得上。 */
-  .mmnode .mmln{display:block}
+  /* 后端已经把文字按像素宽折成几行了（layout.boxes.lines），这里一行一个块 ——
+     行高 17px 和它算框高用的同一个数，屏幕上的框和导出的 SVG 才对得上。
+     每行 nowrap：框宽是后端按同一把逐字像素尺量出来的，行内不该再被浏览器折一次；
+     万一字体比估算略宽，也是溢出可见而不是被裁掉（1.2.1 修「小框挤掉文字」）。 */
+  .mmnode .mmln{display:block; white-space:nowrap}
   .mmnode:hover{box-shadow:0 3px 12px rgba(20,30,45,.15)}
   .mmnode.drag{cursor:grabbing; box-shadow:0 8px 22px rgba(20,30,45,.22); z-index:4}
   .mmnode.sel{outline:2px solid var(--accent); outline-offset:1px}

@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import random
 import re
 import shutil
@@ -3206,35 +3207,89 @@ def reset_book_output(book_id):
 
 # ---------- task runner ----------
 
+# 引擎进程退出后，最多再等这么久把管道里剩的几行读干净，然后无条件收尾。
+# 为什么需要它：引擎会拉起浏览器 / playwright 驱动等子进程，它们可能继承并攥住
+# stdout 的写端。引擎自己退了、孙子进程还活着时 `for line in proc.stdout` 永远等不到
+# EOF —— TASK["running"] 卡在 True，界面一直「正在取」，再点取书被「已有任务在运行」
+# 顶回来，用户看到的就是「取书卡住」。真正的收尾依据是「进程退了没」+ 一小段排水窗口。
+PIPE_DRAIN_GRACE = 2.0
+
+
+def _iter_lines(proc):
+    """逐行产出子进程输出，同时盯着进程退没退（不让管道 EOF 决定生死）。
+
+    读放在一条 daemon 线上（readline 是阻塞的），主循环只等队列：队列空就回头看
+    进程还在不在，退了就再给 PIPE_DRAIN_GRACE 秒收干净最后几行，然后结束。
+    """
+    q = queue.Queue()
+    poll = getattr(proc, "poll", None)
+
+    def pump():
+        try:
+            for raw in iter(proc.stdout.readline, ""):
+                q.put(raw)
+        except Exception:
+            pass                    # 管道被并发关掉之类：pump 安静退场，收尾由下面兜
+        finally:
+            q.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    idle_deadline = None
+    while True:
+        try:
+            raw = q.get(timeout=0.5)
+        except queue.Empty:
+            if poll is None:
+                continue            # 测试里的假进程没有 poll：照旧等管道 EOF
+            if poll() is not None:
+                if idle_deadline is None:
+                    idle_deadline = time.time() + PIPE_DRAIN_GRACE
+                elif time.time() >= idle_deadline:
+                    return
+            continue
+        if raw is None:
+            return
+        yield raw
+
+
 def _reader(proc):
     title, author = None, None
     done = False
-    for raw in iter(proc.stdout.readline, ""):
-        line = raw.rstrip("\n")
-        if not line.strip():
-            continue
-        m = re.search(r"📖\s*(.+?)\s*—\s*(.*)$", line)
-        # 「未知」是引擎读不到书名时的占位，不能拿它覆盖 meta 里已有的真书名。
-        if m and not title and m.group(1).strip() != "未知":
-            title = m.group(1).strip()
-            author = m.group(2).strip()
-        if "全书导出完成" in line:
-            done = True
-        # 子进程要交回结构化结果（比如视频那条线：书 id、字数、AI 缺席原因），
-        # 就走这一行约定：`##GUIZANG## {json}`。日志照旧原样记，前端也能看到。
-        # 之所以不用退出码带信息：退出码只能是 0-255 的一个数，装不下一个 json。
-        if line.startswith(RESULT_MARK):
-            try:
-                with _lock:
-                    TASK["result"] = json.loads(line[len(RESULT_MARK):])
-            except Exception:
-                pass
-        log(line)
-    proc.wait()
-    with _lock:
-        TASK["exit_code"] = proc.returncode
-        TASK["running"] = False
-        book = TASK["book"]
+    try:
+        for raw in _iter_lines(proc):
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            m = re.search(r"📖\s*(.+?)\s*—\s*(.*)$", line)
+            # 「未知」是引擎读不到书名时的占位，不能拿它覆盖 meta 里已有的真书名。
+            if m and not title and m.group(1).strip() != "未知":
+                title = m.group(1).strip()
+                author = m.group(2).strip()
+            if "全书导出完成" in line:
+                done = True
+            # 子进程要交回结构化结果（比如视频那条线：书 id、字数、AI 缺席原因），
+            # 就走这一行约定：`##GUIZANG## {json}`。日志照旧原样记，前端也能看到。
+            # 之所以不用退出码带信息：退出码只能是 0-255 的一个数，装不下一个 json。
+            if line.startswith(RESULT_MARK):
+                try:
+                    with _lock:
+                        TASK["result"] = json.loads(line[len(RESULT_MARK):])
+                except Exception:
+                    pass
+            log(line)
+    except Exception as e:
+        # 读输出本身出错（管道断了、解码坏了）也必须往下走收尾：原来异常一出，
+        # 下面那段「running=False」根本轮不到执行，任务就永远钉在运行中。
+        log(f"--- 读任务输出出错（{type(e).__name__}: {e}），任务照样收尾 ---")
+    finally:
+        try:
+            proc.wait()
+        except Exception:
+            pass
+        with _lock:
+            TASK["exit_code"] = proc.returncode
+            TASK["running"] = False
+            book = TASK["book"]
     if TASK.get("kind") in ("export",) and book:
         write_meta(book, title, author, done)
     if TASK.get("kind") == "video":
