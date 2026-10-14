@@ -1172,9 +1172,16 @@ def _merge_entries(data, fid, items, new_ids=None):
             if key in index:
                 old = index[key]
                 if old.get("content_hash") != chash:
-                    old["content_hash"] = chash
-                    old["summary"] = item.get("summary", old.get("summary", ""))
-                    old["content_html"] = item.get("content_html", old.get("content_html", ""))
+                    # 这一趟源里这条的正文是空的：有的源在两次抓取之间只在 title / link
+                    # 之间摆动，也可能只是一次半截响应。那不是「文章被改短了」，是
+                    # 「这一趟没给正文」—— 照单覆盖就等于把已经存下来的正文抹成空。
+                    # 所以只认非空的正文：留着旧的，等下一趟真有正文再换；content_hash
+                    # 也跟着先不动，下一趟拿到正文时才认得出「确实变了」。
+                    new_html = item.get("content_html") or ""
+                    if new_html:
+                        old["content_hash"] = chash
+                        old["summary"] = item.get("summary", old.get("summary", ""))
+                        old["content_html"] = new_html
             seen[key] = _now()
             continue
         ts = _to_ts(item.get("published"))
