@@ -504,13 +504,39 @@ def lib_forget(lib, book_id, module=None):
 
 # ---------- 配置（含微信读书 API Key） ----------
 
+# config.json 里每个键该是什么形状。顶层是对象还不够 —— 内层字段写脏（用户手工编辑、
+# 旧版本落过别的形状、外部 Agent 代写过）原先会一路穿到 `.strip()` / `for x in` /
+# `[-8:]` 那几处去。而 `/api/state` 是界面每 2.6s 一轮的轮询：只要 `export_dir` 或
+# `nav_order` 是数字，整条响应就抛穿连接，界面表现为**整页失联**（书架、任务、设置
+# 一起没了），不是某一格报错。别的账本（readstat / activity / readplan / library /
+# feed / meta / login / notes_index）都已收过形状，配置这里补上。
+CFG_STR_KEYS = ("weread_key", "export_dir", "flomo_url", "avatar_mime", "wall_mime",
+                "sidebar_mode",
+                "agent_url", "agent_key", "agent_model",
+                "ai_url", "ai_key", "ai_model",
+                "asr_engine", "asr_lang", "asr_url", "asr_key", "asr_model")
+CFG_LIST_KEYS = ("nav_order", "nav_hidden")
+CFG_DICT_KEYS = ("sync",)
+
+
 def load_cfg():
     try:
         with open(CFG_PATH, encoding="utf-8") as f:
             d = json.load(f)
     except Exception:
         d = {}
-    return d if isinstance(d, dict) else {}
+    if not isinstance(d, dict):
+        return {}
+    for key in CFG_STR_KEYS:
+        if key in d and not isinstance(d[key], str):
+            d.pop(key, None)                 # 形状不对当没设，调用方那句 `or ""` 自然兜住
+    for key in CFG_LIST_KEYS:
+        if key in d and not isinstance(d[key], list):
+            d.pop(key, None)
+    for key in CFG_DICT_KEYS:
+        if key in d and not isinstance(d[key], dict):
+            d.pop(key, None)
+    return d
 
 
 def save_cfg(d):
