@@ -422,14 +422,14 @@ def get_last_chapter_title(md_dir):
     if not files:
         return None, 0
     idx = int(files[-1].replace(".md", ""))
-    with open(os.path.join(md_dir, files[-1])) as f:
+    with open(os.path.join(md_dir, files[-1]), encoding="utf-8") as f:
         title = f.readline().strip().replace("# ", "")
     return title, idx
 
 
 def load_last_catalog_title(catalog_path):
     try:
-        with open(catalog_path) as f:
+        with open(catalog_path, encoding="utf-8") as f:
             titles = json.load(f)
         return titles[-1] if titles else ""
     except Exception:
@@ -1052,7 +1052,7 @@ async def dump_catalog_titles(page, catalog_path):
         titles = await page.evaluate("""() => Array.from(
             document.querySelectorAll('.readerCatalog_list_item')).map(el => el.textContent.trim())""")
         if titles and catalog_path:
-            with open(catalog_path, "w") as f:
+            with open(catalog_path, "w", encoding="utf-8") as f:
                 json.dump(titles, f, ensure_ascii=False)
         try:
             await page.click("button.readerControls_item.catalog", timeout=2000)
@@ -1069,12 +1069,33 @@ def save_chapter(ch_title, blocks, ch_idx, md_dir, raw_dir):
     text_len = sum(len(b["text"]) for b in blocks if b["type"] == "text")
     if text_len == 0 and not img_records:
         return 0, []
-    with open(os.path.join(md_dir, f"{ch_idx:04d}.md"), "w") as f:
+    with open(os.path.join(md_dir, f"{ch_idx:04d}.md"), "w", encoding="utf-8") as f:
         f.write(body)
-    with open(os.path.join(raw_dir, f"{ch_idx:04d}.json"), "w") as f:
+    with open(os.path.join(raw_dir, f"{ch_idx:04d}.json"), "w", encoding="utf-8") as f:
         json.dump({"title": ch_title, "images": img_records, "text_len": text_len},
                   f, ensure_ascii=False)
     return text_len, img_records
+
+
+def merge_chapters(md_dir, output_dir, safe_name, title, author):
+    """把落盘的各章合并成 <output_dir>/<safe_name>.md 一份整本，返回它的路径。
+
+    读写都显式 UTF-8。`open()` 不给 encoding 时用的是**系统默认编码**
+    （Windows 上是 GBK 一类的代码页），而章节正文是中文：
+      · 写：生僻字 / emoji 直接 UnicodeEncodeError —— 用户等完整场导出，
+        最后一秒才看到「导出失败」；能编出来的字也写成另一套字节。
+      · 读：这里读的章文件由 save_chapter 按 UTF-8 写，用默认编码读回来就花屏。
+    所以合并这一处、以及上游写章那一处，都得钉死 UTF-8。
+    """
+    files = sorted(f for f in os.listdir(md_dir) if f.endswith(".md"))
+    merged = os.path.join(output_dir, "%s.md" % safe_name)
+    with open(merged, "w", encoding="utf-8") as out:
+        out.write("# %s\n\n**%s**\n\n---\n\n" % (title, author))
+        for fn in files:
+            with open(os.path.join(md_dir, fn), encoding="utf-8") as fh:
+                out.write(fh.read())
+            out.write("\n\n---\n\n")
+    return merged
 
 
 async def goto_ready(page, url, timeout=30000, need_canvas=True):
@@ -1513,7 +1534,7 @@ async def main(book_id):
     seen_imgs = set()
     for jf in os.listdir(raw_dir):
         if jf.endswith(".json"):
-            for img in json.load(open(os.path.join(raw_dir, jf))).get("images", []):
+            for img in json.load(open(os.path.join(raw_dir, jf), encoding="utf-8")).get("images", []):
                 seen_imgs.add(img["url"])
 
     catalog_path = os.path.join(book_dir, "_catalog.json")
@@ -1677,12 +1698,7 @@ async def main(book_id):
     book_title = book_title or BOOK_INFO["title"] or meta.get("title") or book_id
     if book_title == "未知": book_title = book_id
     safe = re.sub(r'[<>:"/\\|?*]', '_', book_title)
-    merged = os.path.join(OUTPUT_DIR, f"{safe}.md")
-    with open(merged, "w") as out:
-        out.write(f"# {book_title}\n\n**{book_author}**\n\n---\n\n")
-        for fn in total_files:
-            out.write(open(os.path.join(md_dir, fn)).read())
-            out.write("\n\n---\n\n")
+    merged = merge_chapters(md_dir, OUTPUT_DIR, safe, book_title, book_author)
     # 早先认不出书名时留下过「<书号>.md」这份合并文件。书名认出来之后它就是同一本书的
     # 另一份拷贝（两份内容一样、名字不一样，翻起来最容易搞混），所以顺手清掉旧的。
     stale = os.path.join(OUTPUT_DIR, f"{book_id}.md")
