@@ -424,6 +424,11 @@ run "内置浏览器（内网拦截 / base 与跳转脚本 / 透传 / 接线）"
 # 内置浏览器那一屏直接 500。两条取网页的路现在都过 clip_article.safe_charset 收口；假 urlopen /
 # 假 opener 顶掉网络，坏名字、好名字、伪编码与响应头注入形状逐条钉住。全离线。
 run "取网页的字符集口径（坏 charset 不抛 / 真编码照旧 / 回显只带验过的名字）" "$PY" tests/check_page_charset.py
+# 上一条收的是剪藏与内置浏览器两条路；平台解析取 X 的 syndication JSON 走的是自己的
+# `fetch_json`（绕开了 clip_article.fetch 那条「必须有 <」的检查），charset 那句一直没被
+# 尺子量过 —— 一份假 urlopen 顶掉网络，坏名字 / 没声明 / 真 GBK / 解不出的字节逐条钉住，
+# 外加 X 端到端与 extract_or_none 不被异常穿透。全离线。
+run "平台解析的字符集口径（X 的 JSON 坏 charset 不抛 / 真编码照旧 / 端到端）" "$PY" tests/check_charset_json.py
 # 上面那条钉的是「内网地址不许碰」这件事本身，这一条钉的是「换身写法也不许溜进来」：
 # 2130706433 / 0x7f000001 / 0177.0.0.1 这些老式 IPv4 写法，以及 [::ffff:127.0.0.1] /
 # [::] / [fc00::1] 这些 IPv6 段，浏览器和 getaddrinfo 都认、旧正则全不认。四条替用户
