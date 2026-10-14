@@ -531,8 +531,10 @@ def build_mindmap_svg(tree, title=""):
            'Microsoft YaHei, sans-serif">' % (width, height, width, height),
            '<rect width="%d" height="%d" fill="#fbf7ef"/>' % (width, height)]
     if title:
+        # 先按可见字数截、再转义：`_esc(title)[:60]` 会把 `&amp;` 这类实体切成
+        # 半截（`&am`），产出的 SVG 不再是合法 XML，浏览器里就是一张破图。
         out.append('<text x="%.1f" y="%.1f" font-size="13" fill="#8b8171">%s</text>'
-                   % (_PAD_X, _TOP_PAD - 4, _esc(title)[:60]))
+                   % (_PAD_X, _TOP_PAD - 4, _esc(title[:60])))
     for n in nodes:
         cx, cy = col_x[n["_d"]], n["_y"]
         for k in n["kids"]:
