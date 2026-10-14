@@ -88,6 +88,12 @@ run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.p
 # 被静默覆盖成空。这一条把「空正文保留旧值 / 真有新正文照刷 / 用户已读状态不丢 /
 # 新出现的空正文条目仍收」一起钉住，纯逻辑、离线，归静态段。
 run "订阅刷新合并（空正文不抹旧正文 / 真改动仍刷新 / 状态保留）" "$PY" tests/check_feed_merge.py
+# 条目里的时间字段也会被手改坏：`published_ts` / `fetched_at` 写成字符串时，列表里
+# 只要有一条是数字、另一条是字符串，排序就是 `'<' not supported between 'str' and
+# 'int'`，`entries(since=…)` / `mark_read_all(older_than=…)` / `prune(days=…)` 也一起
+# 500。这一条把手改的脏 feed.json 喂进去，钉住「入库即整数、纯数字串不误判成 0、
+# 认不出的当 0 且不丢条目、未知字段照旧保留」，纯逻辑、离线。
+run "订阅条目时间字段脏值（排序 / since / 标已读 / 裁剪不抛）" "$PY" tests/check_feed_ts.py
 # 订阅正文的清洗是外站内容进成品的那道边界。原来那把尺子只量原始字节，浏览器却会
 # 先解一层 HTML 实体、再把 URL 里的 TAB / 换行删掉 —— `&#106;avascript:` 与
 # `java<TAB>script:` 在浏览器手里都是 javascript:；截断的 `<script>` 没有闭合标签，
