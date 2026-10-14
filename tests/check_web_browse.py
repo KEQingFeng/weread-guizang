@@ -141,7 +141,10 @@ chk("内置浏览器这一屏有地址条与 iframe", 'id="bzUrl"' in UI and 'id
 chk("iframe 带着 sandbox（外面那页读不到界面）", 'sandbox="allow-scripts' in UI)
 chk("界面收得到网页里 postMessage 回来的跳转",
     "window.addEventListener('message'" in UI and "gzBrowse" in UI)
-chk("安娜那一栏也给了「内置浏览器」入口", 'id="anWeb"' in UI and "openBrowse('https://' + host" in UI)
+# 1.2.1：安娜的档案砍到只剩搜索框与搜索键，那颗「内置浏览器」随整块界面一起去掉了 ——
+# 这一路由 AI 导航那颗钮独占，别人不再往这屏塞入口。
+chk("安娜那一栏不再有「内置浏览器」入口（1.2.1 砍到只剩搜索）",
+    'id="anWeb"' not in UI and "openBrowse('https://' + host" not in UI)
 chk("内置浏览器这一屏按「一屏刚好」收口", 'data-pane="browse"' in UI and "name === 'browse'" in UI)
 
 bad = [c for c in checks if not c[0]]

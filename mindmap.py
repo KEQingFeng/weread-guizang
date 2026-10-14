@@ -20,6 +20,7 @@ import math
 import os
 import re
 import time
+import unicodedata
 import uuid
 from collections.abc import Iterator
 
@@ -61,12 +62,19 @@ _FONT = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
 # 框内多留白、列距与行距翻近一倍；框整体变大，四种形态的画布自然跟着放大，
 # 不用对每种形态各改一套魔法数。CSS 的 .mmnode 内边距与行高跟这里的 _PAD_/_ROW 对齐，
 # 屏幕上的框与导出的 SVG 才对得上（改一处要两处一起改）。
+#
+# 1.2.1：用户报「小框把文字挤掉/显示不全」。根子是折行按「几个字」断，而框宽又拿
+# 字数 × 一个字宽去算 —— 全角与半角、中文与英文的实际宽差着一倍，估算一偏，最后一行
+# 就比框宽，屏幕上被 word-break + overflow:hidden 顶成竖排再切掉。现在折行与框宽都用
+# 同一把「逐字像素尺」量：全角一个宽、半角一个宽，按像素断行、按像素给框，并且不再把
+# 超过三行的文字截断 —— 文字全留在 lines 里，框高按行数长，完整显示。
 _ROW = 17.0                   # 行高（与 ui.html .mmnode 的 line-height 同一个数）
 _PAD_X, _PAD_Y = 14.0, 10.0   # 文字到框边（与 .mmnode 的 padding 对齐）
-_CHAR_W = 13.2                # 中文按字宽算，一个字号约这么多像素
-_WRAP_NODE, _WRAP_LEAF = 12, 20
-_MAX_LINES = 3                # 折三行就截：中途省略比把框撑到屏幕外好
+_CHAR_W = 13.6                # 全角字（中文/全角标点）一个字约这么宽，略宽于字号更稳
+_THIN_W = 7.6                 # 半角字（拉丁字母/数字/空格）的估算宽
 _BOX_MAX_W = 360.0
+_WRAP_NODE_W = 220.0          # 有孩子的节点窄一点，给右边那排留位置
+_WRAP_LEAF_W = _BOX_MAX_W - _PAD_X * 2   # 末端节点用满整框宽（按像素算）
 _COL_GAP = 64.0               # 括号图列间距
 _V_GAP = 20.0                 # 同层上下间隔
 _ROOT_GAP = 76.0              # 括号图里两棵树之间
@@ -497,19 +505,52 @@ def _make_boxes(entries):
     return boxes
 
 
+def _char_w(ch):
+    """一个字占多宽：全角（中文、全角标点、表情）按字号算，其余按半角算。
+
+    用 unicodedata 的东亚宽度分类，而不是猜「是不是 ASCII」：中文标点、日文假名、
+    emoji 都是全角，混在一句话里按 ASCII 之外的都算全角反而会把「，。！？」量宽，
+    框留太多空白。分类为 'W'（宽）/ 'F'（全角）/ 'A'（不确定，按全角兜底）的走 _CHAR_W，
+    'Na'（窄）/ 'H'（半角）走 _THIN_W。
+    """
+    return _CHAR_W if unicodedata.east_asian_width(ch) in ("W", "F", "A") else _THIN_W
+
+
+def _text_w(text):
+    """一句话按逐字像素尺量出来的宽度。"""
+    return sum(_char_w(ch) for ch in text)
+
+
 def _measure(text, is_leaf):
-    """框的大小：宽按最长一行字算（中文约一个字号一像素宽），高按行数算。"""
-    lines = _wrap(text, _WRAP_LEAF if is_leaf else _WRAP_NODE)
-    wide = max(len(x) for x in lines)
-    return lines, min(_BOX_MAX_W, _PAD_X * 2 + wide * _CHAR_W), _PAD_Y * 2 + _ROW * len(lines)
+    """框的大小：宽按最长一行「量」出来（不再按字数乘一个常数），高按行数算。"""
+    lines = _wrap(text, _WRAP_LEAF_W if is_leaf else _WRAP_NODE_W)
+    wide = max(_text_w(x) for x in lines)
+    return lines, min(_BOX_MAX_W, _PAD_X * 2 + wide), _PAD_Y * 2 + _ROW * len(lines)
 
 
-def _wrap(text, width):
-    """按字宽折行，最多三行 —— 思维导图中途截断比把框撑到画布外好。"""
+def _wrap(text, max_w):
+    """按像素折行，不截断 —— 文字全留在 lines 里，框高会跟着长。
+
+    旧版按固定字数断行、超过三行就「…」截掉，正是用户说的「小框把文字挤没了」：
+    中英混排时字数与像素宽对不上，最后一行总有一段比框宽，屏幕上被裁掉。这里改成
+    逐字累加像素，超过 max_w 就断一行；同一份尺子同时给 _measure 算框宽，两边不会漂。
+    """
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return ["…"]
-    return [text[i:i + width] for i in range(0, len(text), width)][:_MAX_LINES]
+    lines, cur, w = [], "", 0.0
+    for ch in text:
+        cw = _char_w(ch)
+        if cur and w + cw > max_w:
+            lines.append(cur)
+            cur, w = "", 0.0
+            if ch == " ":           # 换行处的空格不留到下一行行首
+                continue
+        cur += ch
+        w += cw
+    if cur:
+        lines.append(cur)
+    return lines or ["…"]
 
 
 def _box_colors(node, depth):

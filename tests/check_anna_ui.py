@@ -1,25 +1,22 @@
 # -*- coding: utf-8 -*-
-"""「安娜的档案」这一栏 —— 状态契约 / 四颗按钮 / 三份记录 / 下载接进本地书架 —— 真机主验收集。
+"""「安娜的档案」这一栏 —— 搜索口令契约 / 砍到只剩搜索 / 下载接进本地书架 —— 真机主验收集。
 
-为什么要真机：这一栏的全部风险都长在「看得见」的那一侧。窗口那头是个独立进程，界面
-只能靠一份小账本猜它的状态；账本说「开着」而进程早被杀了，就得显示「上一次说还开着，
-其实已经不在了」，不能继续骗人说窗口在。四颗按钮各写各的字段（口令、域名、补收、清账），
-少接一根线就是「按下去没反应」；而「补收下载夹」这条是这一路的价值所在 —— 原始文件
-真的转成一本书、真的出现在本地书架里，这一步只有点一遍才知道成不成。
+为什么要真机：这一栏的风险一半长在「看得见」的那一侧 —— 界面这一屏 1.2.1 起只剩搜索框与
+搜索键，点一下、按一下回车都得真把搜索口令发出去；另一半长在「原件真能转成书」上 ——
+原始文件真的转成一本书、真的出现在本地书架里，这一步只有点一遍才知道成不成。
 
 窗口本身不在这里开：门禁里弹一个真浏览器窗口会占住任务槽、还会在用户屏幕上乱开页面，
-所以「窗口开着时长什么样」是把页面里那套状态函数拿来摆明面的状态演一遍（真开窗归
-tests/ 之外的人工实测，见 docs/交接说明.md）。
+所以测试用的那份服务开着 GUIZANG_ANNA_NO_WINDOW=1（search 只写口令不起窗口），前端那半条
+用请求截获验「发出去的确实是 mode=search」（真开窗归 tests/ 之外的人工实测，见 docs/交接说明.md）。
 
 验的东西（每条都对应界面上真能点、或后端真会答的一件事）：
   · /api/state 带着这一栏的账，字段齐、窗口缺省是没开；名册十三格、最后一格是它；
-  · 「让窗口去搜」写关键词（窗口没开也写，回执要说清「口令记下了」）、空关键词挡下来；
-  · 「存这个镜像域名」把 https/路径洗成干净的 host，输入框随后清空；
-  · 往下载夹放一份 Markdown + 一份 .mobi → 点「补收下载夹」→ Markdown 真进本地书架
-    （磁盘上有那本书、/api/state.books 里 module=local、界面上列进「最近收进本地书架」），
-    mobi 进「没收进来的」并写明「格式不认」、原文件留着；同一份再补收不重复入库；
-  · 「清空记录」只清账：书架上那本书与下载夹里的原文件一个都不动；
-  · 窗口没开时「关掉窗口 / 查看详情」收起、状态点带 off；账本说谎时改口成「已经不在了」；
+  · search 写关键词、空关键词挡下来（门禁关掉真开窗，回执要说清「口令记下了」）；
+  · domain 把 https/路径洗成干净的 host（接口还在，界面上的入口砍了）；
+  · 往下载夹放一份 Markdown + 一份 .mobi → collect → Markdown 真进本地书架
+    （磁盘上有那本书、/api/state.books 里 module=local），mobi 写明「格式不认」、原文件留着；
+  · 界面这一屏只剩搜索框与搜索键：点搜索 / 按回车都发 mode=search，窗口状态 / 镜像域名 /
+    补收 / 清空 / 三份记录整块不在；
   · 四档视口无横向溢出、这一屏零 emoji、零 console 报错；
   · 搜书页回到「只有微信读书一栏」，整屏不再出现 Z-Library。
 
@@ -167,7 +164,7 @@ term = "示范关键词"
 got = anna("search", q=term)
 chk("写关键词：账本记下这一条", (got.get("anna") or {}).get("keyword") == term,
     (got.get("anna") or {}).get("keyword"))
-chk("写关键词：窗口没开时不谎报「已经让窗口去搜」，而是说口令记下了",
+chk("写关键词：门禁里关掉了真开窗，回执说清「口令记下了」而不是谎报窗口已经在搜",
     got.get("ok") is False and "口令记下了" in (got.get("msg") or ""), got.get("msg"))
 chk("写关键词：界面那格 placeholder 跟着改口（state 里能看见）",
     state_anna().get("keyword") == term, state_anna().get("keyword"))
@@ -241,28 +238,11 @@ chk("补收：同一份再点一次不重复入库（按字节摘要认出收过
     and (again.get("anna") or {}).get("imported") == 1,
     {k: again.get(k) for k in ("done", "duplicated", "skipped")})
 
-# ── 四、真机：这一屏点得动、三份列表摆得出、窗口状态不说谎 ──────
+# ── 四、真机：这一屏只剩搜索，点它 / 回车都直接去搜 ──────────
 PANE = '#view > .vpane[data-pane="anna"]'
 SPANE = '#view > .vpane[data-pane="search"]'
 OVERFLOW_JS = "() => ({sw: document.documentElement.scrollWidth, iw: window.innerWidth})"
 EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2190-\u27BF\u2B00-\u2BFF\uFE0F]")
-
-
-def wait_text(page, sel, needle, ms=30000):
-    """等这一栏里那一格的文字变成应有的样子。
-
-    点「补收 / 清空」发出去的是异步 POST，界面要等回执才重画；立刻读常常读到上一轮
-    的那一份 —— 于是「后端慢」会被报成「按钮没生效」。等不到不算失败，
-    紧随其后的那条断言会给出真相。
-    """
-    try:
-        page.wait_for_function(
-            "(a) => { const el = document.querySelector(a[0]);"
-            "  return !!el && el.textContent.indexOf(a[1]) >= 0; }",
-            arg=[sel, needle], timeout=ms)
-    except Exception:
-        pass
-    page.wait_for_timeout(150)
 
 
 with sync_playwright() as pw:
@@ -279,144 +259,52 @@ with sync_playwright() as pw:
     chk("真机：导航画了十三格，最后一格是「安娜的档案」",
         len(nav_ids) == 13 and nav_ids[-1] == "anna", nav_ids)
 
+    # ── 四、真机：这一屏只剩搜索，点它 / 回车都直接去搜 ──────────
     page.click('#nav button[data-v="anna"]')
-    page.wait_for_selector(PANE + ' #anWinDot', timeout=6000)
-    page.wait_for_timeout(400)
-
-    ids = ["anWinDot", "anWinText", "anTip", "anOpen", "anStop", "anLog", "anCollect",
-           "anClear", "anCnt", "anQ", "anGo", "anDom", "anDomSave", "anBooks", "anFiles",
-           "anPending"]
-    missing = [i for i in ids if page.locator(PANE + " #" + i).count() != 1]
-    chk("真机：这一屏该有的控件一个不缺（缺一颗就是按下去没反应）", not missing, missing)
+    page.wait_for_selector(PANE + " #anQ", timeout=6000)
+    page.wait_for_timeout(300)
 
     def pane_text(sel):
         loc = page.locator(PANE + " " + sel)
         return loc.inner_text().strip() if loc.count() else ""
 
-    def pane_lines(sel):
-        """同一种小标题有好几份时用它：Playwright 的严格模式不许一个选择器指多个元素。"""
-        return [t.strip() for t in page.locator(PANE + " " + sel).all_inner_texts()]
+    chk("真机：搜索框与搜索键各一颗",
+        page.locator(PANE + " #anQ").count() == 1
+        and page.locator(PANE + " #anGo").count() == 1)
+    gone = ["anWinDot", "anWinText", "anTip", "anOpen", "anStop", "anLog", "anCollect",
+            "anClear", "anCnt", "anDom", "anDomSave", "anBooks", "anFiles", "anPending"]
+    still = [i for i in gone if page.locator(PANE + " #" + i).count()]
+    chk("真机：窗口状态 / 镜像域名 / 补收 / 清空 / 三份记录整块砍干净", not still, still)
+    hero = pane_text(".vbody")
+    chk("真机：页头说清「写书名 → 搜索或回车，窗口自动跳过去」",
+        "回车" in hero and ("自动" in hero or "跳" in hero), hero[:200])
 
-    chk("真机：窗口没开时状态写「窗口没开」", pane_text("#anWinText") == "窗口没开",
-        pane_text("#anWinText"))
-    chk("真机：窗口没开时状态点是灭的（off）",
-        "off" in (page.get_attribute(PANE + " #anWinDot", "class") or ""),
-        page.get_attribute(PANE + " #anWinDot", "class"))
-    chk("真机：窗口没开时「关掉窗口 / 查看详情」都收起",
-        page.locator(PANE + " #anStop").is_hidden()
-        and page.locator(PANE + " #anLog").is_hidden())
-    chk("真机：窗口没开时那句话说的是这一路怎么用",
-        "浏览器窗口" in pane_text("#anTip"), pane_text("#anTip")[:120])
-    # 2026-10-07 在有头窗口里实测：详情页每一条下载链接都指向 /account，写着
-    # 「Log in to access downloads」。这句不写在明处，用户只会觉得「点了没反应」，
-    # 所以把它钉成断言 —— 谁把提示改没了，这里就红。
-    chk("真机：那句话提醒「要先登录才给下载」",
-        "登录" in pane_text("#anTip"), pane_text("#anTip")[:160])
-    chk("真机：三块记录各有小标题，讲清各是什么",
-        all(s in pane_text(".vbody") for s in ("最近收进本地书架", "下载夹里", "没收进来的")),
-        page.locator(PANE + ' .ansec').all_inner_texts())
-    chk("真机：计数条摆出「接住几份 · 进书架几本 · 没收进来几份」",
-        "接住" in pane_text("#anCnt") and "进书架" in pane_text("#anCnt")
-        and "没收进来" in pane_text("#anCnt"), pane_text("#anCnt"))
-    chk("真机：接口那两份样本列在「下载夹里」那一格",
-        MD_NAME in pane_text("#anFiles") and MOBI_NAME in pane_text("#anFiles"),
-        pane_text("#anFiles")[:200])
-    chk("真机：入库那本列在「最近收进本地书架」，并给了「看这本」",
-        book_rows[0]["title"] in pane_text("#anBooks")
-        and page.locator(PANE + ' #anBooks button:has-text("看这本")').count() >= 1,
-        pane_text("#anBooks")[:200])
-    chk("真机：mobi 那行显示「原文件留着」并把原因写在下面",
-        MOBI_NAME in pane_text("#anPending") and "格式不认" in pane_text("#anPending"),
-        pane_text("#anPending")[:200])
+    # 门禁不弹真窗口：把 /api/anna 截下来，只验前端发出去的是不是这一条口令。
+    sent = []
 
-    # ── 五、四颗按钮各写各的字段（真点，不只看代码） ────────────
+    def grab(route):
+        try:
+            sent.append(json.loads(route.request.post_data or "{}"))
+        except Exception:
+            sent.append({})
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"ok": True, "msg": "正在打开窗口去搜",
+                                       "anna": {"keyword": "真机关键词"}}))
+
+    page.route("**/api/anna", grab)
     page.fill(PANE + " #anQ", "真机关键词")
     page.click(PANE + " #anGo")
-    page.wait_for_timeout(500)
-    chk("真机点「让窗口去搜」：关键词落进账本",
-        state_anna().get("keyword") == "真机关键词", state_anna().get("keyword"))
-    chk("真机点「让窗口去搜」：搜索框占位改口成上一次搜的那条",
-        "真机关键词" in (page.get_attribute(PANE + " #anQ", "placeholder") or ""),
-        page.get_attribute(PANE + " #anQ", "placeholder"))
+    page.wait_for_timeout(400)
+    chk("真机点「搜索」：带上 mode=search 与书名去后端（后端据此把窗口领起来）",
+        sent and sent[-1].get("mode") == "search" and sent[-1].get("q") == "真机关键词",
+        sent[-1:])
 
-    page.fill(PANE + " #anDom", "annas-archive.se")
-    page.click(PANE + " #anDomSave")
-    page.wait_for_timeout(500)
-    chk("真机点「存这个镜像域名」：域名写进账本",
-        state_anna().get("domain") == "annas-archive.se", state_anna().get("domain"))
-    chk("真机点「存这个镜像域名」：输入框当场清空（免得下次误以为还没存）",
-        (page.input_value(PANE + " #anDom") or "") == "", page.input_value(PANE + " #anDom"))
-
-    # 「窗口开着」那一层的界面：账本 + 任务槽一起说了算，所以拿页面的状态函数演一遍。
-    page.evaluate("() => { running = true; runningKind = 'anna_browser';"
-                  "paintAnna(Object.assign({}, annaState, {window: 'open'})); }")
-    page.wait_for_timeout(150)
-    chk("真机（窗口开着）：状态写「窗口开着」，那颗点变亮",
-        "窗口开着" in pane_text("#anWinText")
-        and "off" not in (page.get_attribute(PANE + " #anWinDot", "class") or ""),
-        pane_text("#anWinText"))
-    chk("真机（窗口开着）：「关掉窗口 / 查看详情」摆出来，「打开浏览器窗口」按住",
-        page.locator(PANE + " #anStop").is_visible()
-        and page.locator(PANE + " #anLog").is_visible()
-        and page.locator(PANE + " #anOpen").is_disabled())
-    chk("真机（窗口开着）：明说这期间发起的取书会排队（任务槽只有一个位置）",
-        "排队" in pane_text("#anTip"), pane_text("#anTip")[:140])
-
-    # 账本说谎（进程被强杀、来不及写 closed）：真源是任务槽，界面得改口。
-    page.evaluate("() => { running = false; runningKind = '';"
-                  "paintAnna(Object.assign({}, annaState, {window: 'open'})); }")
-    page.wait_for_timeout(150)
-    chk("真机（账本说开着、进程其实没了）：改口成「已经不在了」而不是继续谎报",
-        "已经不在了" in pane_text("#anWinText"), pane_text("#anWinText"))
-    page.evaluate("() => paintAnna(Object.assign({}, annaState,"
-                  "{window: 'failed', last_error: '没能起浏览器'}))")
-    page.wait_for_timeout(150)
-    chk("真机（窗口没起来）：错误原因显示在明处、按钮改口「重新打开窗口」、状态点还是灭的",
-        "没能起浏览器" in pane_text("#anTip") and "重新打开" in pane_text("#anOpen")
-        and "off" in (page.get_attribute(PANE + " #anWinDot", "class") or ""),
-        (pane_text("#anTip"), pane_text("#anOpen")))
-
-    # ── 六、界面上补收一次（放一份新的进下载夹） ────────────────
-    os.remove(MADE["md"])
-    write(MADE["md"], MD_TEXT.replace("第一章 起首", "第一章 界面补收"))
-    page.click(PANE + " #anCollect")
-    wait_text(page, PANE + " #anCnt", "进书架 2 本")
-    chk("真机点「补收下载夹」：那本书列进「最近收进本地书架」两本",
-        page.locator(PANE + ' #anBooks .zrow').count() == 2,
-        pane_text("#anBooks")[:200])
-    chk("真机点「补收下载夹」：计数跟着涨（进书架 2 本）",
-        "进书架 2 本" in pane_text("#anCnt"), pane_text("#anCnt"))
-
-    page.click('#nav button[data-v="local"]')
-    page.wait_for_selector('#view > .vpane[data-pane="local"]', timeout=6000)
-    page.wait_for_timeout(700)
-    local_text = page.locator('#view > .vpane[data-pane="local"]').inner_text()
-    chk("真机（本地书架）：接口那条路收的书真的摆在书架上",
-        book_rows[0]["title"] in local_text, local_text[:200])
-
-    # ── 七、清空记录只清账 ──────────────────────────────────────
-    page.click('#nav button[data-v="anna"]')
-    page.wait_for_timeout(500)
-    page.click(PANE + " #anClear")
-    page.wait_for_selector('#veil.open', timeout=5000)
-    chk("真机点「清空记录」：先问一句，说清只清账不动书",
-        "一个都不动" in (page.locator("#sheetText").inner_text() or ""),
-        page.locator("#sheetText").inner_text()[:160])
-    page.click('#sheetActs button.sure')
-    wait_text(page, PANE + " #anBooks", "还没有从窗口里接住的书")
-    chk("真机点「确认清空」：三份记录回到空态",
-        "还没有从窗口里接住的书" in pane_text("#anBooks")
-        and "没有没收进来的文件" in pane_text("#anPending"),
-        (pane_text("#anBooks"), pane_text("#anPending")))
-    chk("真机点「确认清空」：计数归零",
-        "接住 0 份" in pane_text("#anCnt"), pane_text("#anCnt"))
-    a = state_anna()
-    chk("真机点「确认清空」：账本清空，但书架上的两本书还在",
-        a.get("imported") == 0 and a.get("books") == [] and len(MADE["book"]) > 0
-        and os.path.isdir(os.path.join(SHELF, MADE["book"])),
-        {k: a.get(k) for k in ("caught", "imported", "skipped")})
-    chk("真机点「确认清空」：下载夹里的原文件也没动",
-        os.path.isfile(MADE["mobi"]), MOBI_NAME)
+    page.fill(PANE + " #anQ", "回车关键词")
+    page.press(PANE + " #anQ", "Enter")
+    page.wait_for_timeout(400)
+    chk("真机在输入框按回车：与点搜索同一路（用户要的「回车直接跳」）",
+        len(sent) >= 2 and sent[-1].get("q") == "回车关键词", sent[-2:])
+    page.unroute("**/api/anna")
 
     page.screenshot(path=SHOT)
 

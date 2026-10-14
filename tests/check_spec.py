@@ -195,6 +195,18 @@ chk("便签：卡片上那颗「复制」把这一条的 Markdown 原样放上�
     "function fmCopyMd(" in SRC and "(m && m.md)" in SRC
     and "feBtn('复制', () => fmCopyMd(m))" in SRC)
 
+# ── 1.2.1：取书多少都能先读 ────────────────────────────────────
+# 以前卡片要等 bookFull 才给「正文」，取到一半只给「续取」；用户报「取书卡住就读不了」。
+# 改成：盘上只要有章节就先给「阅读」，取到一半的旁边再并一颗「续取」，从没取过的才是「取书」。
+chk("书架卡：有章节先给「阅读」、取到一半并一颗「续取」、没取过才是「取书」",
+    "if (mine && (done || (mine.chapters || 0) > 0))" in SRC
+    and "mk('阅读', () => openReader(id, b.title || id, 'shelf'))" in SRC
+    and "if (!done) strip.append(mk('续取', () => beginFetch(id, b.title)))" in SRC
+    and "strip.append(mk('取书', () => beginFetch(id, b.title)))" in SRC)
+chk("详情页：取到一半也能先读（「阅读」摆在「接着取」前面）",
+    "mk('阅读', () => openReader(id || storeId, info.title || title, 'detail'))" in SRC
+    and "mk('接着取'" in SRC)
+
 bad = [c for c in checks if not c[0]]
 print("\n规格体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
 for _, n, x in bad:
