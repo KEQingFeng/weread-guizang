@@ -117,7 +117,11 @@ def fetch_json(url):
         raise ValueError("打不开这个页面：%s" % str(e)[:120])
     if len(blob) > MAX_BYTES:
         raise ValueError("取回来的东西太大了（超过 6MB），不像一条正文")
-    return blob.decode(charset or "utf-8", errors="replace"), final
+    # 响应头里的 charset 是对方站点写的，可能是手滑的名字（实测有页面写 `charset=x-unknown`）
+    # 或压根不是文本编码（`base64` / `hex`）。这类名字 `bytes.decode` 抛的是 LookupError ——
+    # `errors="replace"` 管字节不管名字。这条 X 取值路绕开了 clip_article.fetch，字符集那道
+    # 尺子就得自己再走一遍：和剪藏 / 内置浏览器共用 safe_charset，认不出就退回 utf-8。
+    return blob.decode(clip_article.safe_charset(charset), errors="replace"), final
 
 
 def _fetch_page(url, wall_msg):
