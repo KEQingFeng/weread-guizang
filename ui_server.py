@@ -60,7 +60,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -3689,13 +3689,29 @@ def anna_do(body):
         term = str(b.get("q") or b.get("term") or "").strip()
         if not term:
             return {"ok": False, "msg": "先写个书名或关键词"}
-        st = anna_state.read_state(DATA_DIR)
         anna_state.write_cmd(DATA_DIR, term)
-        # 窗口没开时口令条照样写：界面会告诉他「点了打开窗口就会搜这个」。
-        return {"ok": st.get("window") == "open",
-                "msg": "已经让窗口去搜：%s" % term if st.get("window") == "open"
-                       else "口令记下了，打开窗口就会搜：%s" % term,
-                "anna": anna_state.write_state(DATA_DIR, {"keyword": term})}
+        # 1.2.1：输入书名点搜索（或回车）就直接跳 —— 窗口没开就顺手把它领起来，用户
+        # 不必先去点「打开窗口」再回来敲字。判「窗口是不是真活着」用任务槽，不用账本：
+        # 账本里的 window=open 可能是上一次被强杀留下的谎（进程早没了），任务槽才是真源。
+        with _lock:
+            live = bool(TASK["running"] and TASK.get("kind") == "anna_browser")
+        # 门禁里不许弹真窗口（会占住任务槽、还会在用户屏幕上乱开页面），所以留一个开关：
+        # GUIZANG_ANNA_NO_WINDOW=1 时只写口令、不起窗口。界面上手动点的路径默认不受影响。
+        auto = os.environ.get("GUIZANG_ANNA_NO_WINDOW") != "1"
+        started, why = False, ""
+        if auto and not live:
+            started, why = start_task("anna_browser", [py(), script("anna_browser.py")],
+                                      env_extra=task_env("local"))
+        st = anna_state.write_state(DATA_DIR, {"keyword": term})
+        if live:
+            msg = "已经让窗口去搜：%s" % term
+        elif started:
+            msg = "正在打开窗口去搜：%s" % term
+        elif not auto:
+            msg = "口令记下了，打开窗口就去搜：%s" % term
+        else:
+            msg = "口令记下了，但没能起窗口：%s" % (why or "任务槽正忙")
+        return {"ok": bool(started or live), "started": started, "msg": msg, "anna": st}
 
     if mode == "domain":
         dom = anna_state.clean_domain(b.get("domain"))

@@ -10,7 +10,7 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
   home     我的书架（默认那一屏的瀑布铺法）
   reader   阅读器（左目录 / 中正文 / 右这套笔记）
   search   搜书（微信读书书城：搜到 → 加入书架 → 整本取回）
-  anna     安娜的档案（工具自己开一个浏览器窗口，这一屏是它接住了什么）
+  anna     安娜的档案（写书名 → 搜索或回车，窗口自动跳过去）
   plan     每本书的阅读计划（详情页定完之后的读数）
   mindmap  笔记脑图（从笔记按标签生成一张图）
   feed     订阅阅读器（订上源、点开一篇）
@@ -296,32 +296,15 @@ def shot_search(page):
 def shot_anna(page):
     """「安娜的档案」这一屏。
 
-    拍这张不真的开浏览器窗口 —— 展示图要说的是「这一栏会告诉你窗口接住了什么」，
-    窗口里装的是别人家的网页，不是归藏的界面。所以只往沙盒的账本里铺一份样例：
-    两本进了书架、一份格式不认、下载夹里留着一份 EPUB 和一份 Mobi。
-    书名全是编的，文件写在临时沙盒里，跑完连目录一起删。
+    1.2.1 起这一屏只剩一行搜索框加一颗搜索键：拍这张不真的开浏览器窗口 ——
+    窗口里装的是别人家的网页，不是归藏的界面；只在账本里放一个「上一次搜过的词」，
+    让输入框的占位有内容可看。
     """
     data = os.environ["GUIZANG_DATA"]
-    incoming = anna_state.incoming_dir(data, create=True)
-    for name, size in (("示范这本.epub", 240 * 1024), ("旧格式样本.mobi", 96 * 1024)):
-        with open(os.path.join(incoming, name), "wb") as f:
-            f.write(b"%PDF-ish" + b"0" * (size - 8))
-    now = int(time.time())
-    anna_state.write_state(data, {
-        "domain": "annas-archive.is", "window": "closed", "keyword": "示范",
-        "caught": 3, "imported": 2, "skipped": 1,
-        "note": "窗口关掉了，接住的三份都处理完了",
-        "books": [{"name": "示范这本.epub", "title": TITLE, "author": "张三",
-                   "book": BOOK, "bytes": 240 * 1024, "chapters": 12, "at": now},
-                  {"name": "长夜读本.epub", "title": "长夜读本", "author": "王五",
-                   "book": "", "bytes": 318 * 1024, "chapters": 8, "at": now - 60}],
-        "pending": [{"name": "旧格式样本.mobi",
-                     "reason": "格式不认（现在只收 EPUB / PDF / TXT / Markdown），原文件留着没动",
-                     "bytes": 96 * 1024, "at": now - 30}],
-    })
+    anna_state.write_state(data, {"domain": "annas-archive.is", "keyword": "长夜读本"})
     page.click('#nav button[data-v="anna"]')
-    page.wait_for_selector("#anWinDot", timeout=8000)
-    page.wait_for_timeout(1400)          # 那一格下载夹要等 listing 回来才有内容
+    page.wait_for_selector("#anQ", timeout=8000)
+    page.wait_for_timeout(600)
     wait_toast_gone(page)
     shot(page, "anna")
 

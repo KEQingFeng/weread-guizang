@@ -24,6 +24,10 @@ export GUIZANG_SELFTEST_DIR="$SANDBOX"
 export GUIZANG_DATA="$SANDBOX/cache"
 export GUIZANG_BOOKS="$SANDBOX/books"
 export GUIZANG_SHOT_DIR="$SANDBOX/shots"
+# 门禁里不弹安娜的档案真窗口：那会在用户屏幕上开一个 Chromium、还占住唯一任务槽。
+# 打开 UI_SERVER 那一侧的这条开关后，/api/anna 的 search 只写口令不起窗口；
+# 界面自己手动点搜索仍会照常开窗（这条只影响测试用的那份服务）。
+export GUIZANG_ANNA_NO_WINDOW=1
 mkdir -p "$GUIZANG_DATA" "$GUIZANG_BOOKS" "$GUIZANG_SHOT_DIR"
 
 FAILED=()
