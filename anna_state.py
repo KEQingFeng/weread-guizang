@@ -146,7 +146,8 @@ def state_path(data_dir):
 def read_state(data_dir):
     """读账本。没读过就回一份全默认的 —— 首次点开这一栏也要有东西可显示。"""
     try:
-        with open(state_path(data_dir), encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(state_path(data_dir), encoding="utf-8-sig") as f:
             return normalize(json.load(f))
     except Exception:
         return _blank()
@@ -208,7 +209,7 @@ def write_cmd(data_dir, term):
 
 def read_cmd(data_dir):
     try:
-        with open(cmd_path(data_dir), encoding="utf-8") as f:
+        with open(cmd_path(data_dir), encoding="utf-8-sig") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:

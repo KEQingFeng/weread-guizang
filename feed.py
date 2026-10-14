@@ -200,7 +200,8 @@ def _normalize(data):
 
 def _load():
     try:
-        with open(STORE, encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(STORE, encoding="utf-8-sig") as f:
             data = json.load(f)
     except Exception:
         return _blank()
@@ -2232,7 +2233,7 @@ def to_shelf(entry_id, out_dir):
     mp = os.path.join(info["dir"], "meta.json")
     meta = {}
     try:
-        with open(mp, encoding="utf-8") as f:
+        with open(mp, encoding="utf-8-sig") as f:
             meta = json.load(f)
     except Exception:
         meta = {}

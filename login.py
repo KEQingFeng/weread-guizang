@@ -58,7 +58,8 @@ def normalize_state(raw):
 def read_state(path=STATE_PATH):
     """读账本唯一入口：坏 JSON / 半截档 / 脏形状都回 None，绝不把脏值往下游传。"""
     try:
-        with open(path, encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(path, encoding="utf-8-sig") as f:
             return normalize_state(json.load(f))
     except Exception:
         return None
