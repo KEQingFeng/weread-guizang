@@ -1949,6 +1949,18 @@ def prune(days=None, max_entries=None, keep_starred=None, feed_id=None, group=No
 
 # ── OPML ────────────────────────────────────────────────────────────
 
+# 导入的 OPML 是「从别处下载的订阅清单」，按不可信文件办，这里两个上限都是给它的。
+#
+# 实体闸门原来只看开头 8192 字节，在前面垫一段超长注释就能把 DOCTYPE 顶出窗口绕过它。
+# 改成全文扫描（见 import_opml 里的说明）。
+_OPML_DOCTYPE = re.compile(r"<!doctype", re.I)
+_OPML_ENTITY = re.compile(r"<!entity", re.I)
+# 嵌套层级：正常阅读器导出的组套组也就两三层，32 层已经宽到不可能误伤真实清单。
+# 没有这道上限时，几千层嵌套的 outline 会把 walk() 的递归撞穿，抛出的 RecursionError
+# 不是我们给用户的那种人话，导入眼看着就「炸了」。
+MAX_OPML_DEPTH = 32
+
+
 def _esc(v):
     return html.escape(str(v or ""), quote=True)
 
@@ -2042,8 +2054,10 @@ def import_opml(xml, default_group="", dry_run=False):
     text = _opml_text(xml)
     # 别处下载的 OPML 属于不可信外部文件：xml.etree 不会去取外部实体，但**内部**实体
     # 展开照样能被「十亿笑」把内存撑爆，所以带实体声明的一律不解析（正常 OPML 没有 DTD）。
-    low = text[:8192].lower()
-    if "<!doctype" in low and "<!entity" in low:
+    # 这里必须扫全文，不能只看开头：DOCTYPE / ENTITY 是标记而不是内容（属性里的尖括号得
+    # 写成 &lt;），所以正文里翻不出这两个串；而只看前 8192 字节时，一段超长注释就能把
+    # DOCTYPE 顶到窗口外，闸门等于不存在（expat 老一点的 Python 上就是真能撑爆）。
+    if _OPML_DOCTYPE.search(text) and _OPML_ENTITY.search(text):
         raise ValueError("这份 OPML 里声明了自定义实体，为安全不解析")
     try:
         root = ET.fromstring(text)
@@ -2051,7 +2065,11 @@ def import_opml(xml, default_group="", dry_run=False):
         raise ValueError("这份 OPML 解析不了：%s" % str(e)[:80])
     cands = []
 
-    def walk(node, path):
+    def walk(node, path, depth=0):
+        # 层级闸门放在递归入口而不是出口：撞上限立刻收手，不再往下把栈耗光。
+        # 超深的多半是来撞递归的恶意文件，说人话拒掉比抛 RecursionError 好查。
+        if depth > MAX_OPML_DEPTH:
+            raise ValueError("这份 OPML 嵌套太深（超过 %d 层），为安全不解析" % MAX_OPML_DEPTH)
         url = (node.get("xmlUrl") or node.get("xmlurl") or node.get("url") or "").strip()
         name = (node.get("title") or node.get("text") or "").strip()
         if url and url.lower() != "file:///":
@@ -2060,7 +2078,7 @@ def import_opml(xml, default_group="", dry_run=False):
         nxt = path + ([name] if name and not url else [])
         for ch in list(node):
             if ch.tag.lower().split("}")[-1] == "outline":
-                walk(ch, nxt)
+                walk(ch, nxt, depth + 1)
 
     body = root.find("body")
     for ch in list(body if body is not None else root):
