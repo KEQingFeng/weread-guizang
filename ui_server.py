@@ -1740,7 +1740,9 @@ def local_note_items(max_age=20):
     按 mtime 感觉不出来、按时间缓存 20 秒：连点「换一批」不重复扫盘。
     """
     now = time.time()
-    if _LOCAL_NOTES["items"] and now - _LOCAL_NOTES["at"] < max_age:
+    # 空结果也缓存：建索引时 /api/notes_index 每 2.5s 被问一次，没本机划线时
+    # 不能每次都把整座书库扫一遍（at 从 0 起，第一次必扫）。
+    if now - _LOCAL_NOTES["at"] < max_age:
         return _LOCAL_NOTES["items"]
     items = []
     try:
