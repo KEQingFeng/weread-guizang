@@ -26,6 +26,7 @@ import time
 
 from playwright.async_api import async_playwright
 
+import book_ids
 import platform_compat as pc
 
 USER_DATA_DIR = os.path.join("cache", "browser_profile")
@@ -49,24 +50,9 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
-# 书城短 id 的尺子：5–20 位 ASCII 数字。必须和另外三个入口（界面 ui.html、
-# 本地服务 ui_server.py、MCP 适配器）完全同尺 —— 那把尺子写的是 `\d{5,20}`，
-# 而 JS 的 \d 本来就只认 0-9。Python 的 \d 连全角「１２３」和阿拉伯-印度数字
-# 「٥٥٥」都算数字，同一个正则换到这边就漏了；长度原来也比别人短一截
-# （5,12），13–20 位的短 id 会被界面收下、到这里又判成「没有可用编号」。
-SHELF_ID = re.compile(r"^[0-9]{5,20}$")
-
-
-def clean_ids(raw):
-    """只留得住书架格式的 id：5–20 位 ASCII 数字。顺手挡掉误传的阅读器长 id / 链接。"""
-    out = []
-    for s in raw:
-        s = (s or "").strip()
-        if SHELF_ID.match(s) and s not in out:
-            out.append(s)
-    return out
-
-
+# 书城短 id 的尺子只有 book_ids.py 一处（#12 抽出的模块）；这里只留下 #11 的成功数
+# 翻译。两处修的是同一件事的两面：尺子对齐（13–20 位的书不再点得动却加不上）与
+# 报数准确（1 本成了不许报成 3 本）。
 def added_count(succ, total):
     """把接口回的成败数翻译成「真加进去几本」，看不懂回 None。
 
@@ -144,7 +130,9 @@ async def post_add(ctx, ids):
 
 
 async def main():
-    ids = clean_ids([a for a in sys.argv[1:] if not a.startswith("--")])
+    # 短 id 的尺子只在 book_ids.py 一处（原来这里只到 12 位，界面那层到 20 位，
+    # 13–20 位的书点下去就被这里悄悄丢掉）。
+    ids = book_ids.clean_store_book_ids([a for a in sys.argv[1:] if not a.startswith("--")])
     if not ids:
         fail("没有可用的书籍编号（需要书城短 id）")
 
