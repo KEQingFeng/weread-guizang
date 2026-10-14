@@ -81,12 +81,48 @@ _H_PLAIN = re.compile(
     r"|Chapter\s+[0-9IVXLCivxlc]{1,6}"
     r"|CHAPTER\s+[0-9IVXLCivxlc]{1,6})\s*[^\n]{0,40}$")
 
+# 围栏代码块的开 / 收：行首最多三个空格，三个以上的 ` 或 ~，后面跟 info string。
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fenced_mask(text):
+    """逐行标出「这一行属于围栏代码块」。True 的行不许再拿去认标题。
+
+    代码块里的 `# 安装依赖` 是注释，不是章节 —— 不标出来的话，导入一本带代码示例的
+    Markdown 书会照着注释行切章，目录里多出一批并不存在的章节、正文也被剪成碎块。
+    口径按 CommonMark：开栏三个以上同种字符，收栏必须同种、不短于开栏且后面只剩空白；
+    反引号开栏的 info string 里再出现反引号就不算开栏，没有收栏的块一直吃到文末。
+    """
+    mask = []
+    fence = None                       # (字符, 长度)，None 表示不在块里
+    for ln in (text or "").split("\n"):
+        m = _FENCE.match(ln)
+        if m:
+            ch, run, info = m.group(1)[0], len(m.group(1)), m.group(2)
+            if fence is None:
+                if not (ch == "`" and "`" in info):
+                    fence = (ch, run)
+                    mask.append(True)
+                    continue
+            elif ch == fence[0] and run >= fence[1] and not info.strip():
+                fence = None
+                mask.append(True)
+                continue
+        mask.append(fence is not None)
+    return mask
+
 
 def _split_at(text, pattern):
-    """按标题正则切章，返回 [(标题, 正文), ...]。标题前若还有散段落，单列一章。"""
+    """按标题正则切章，返回 [(标题, 正文), ...]。标题前若还有散段落，单列一章。
+
+    代码块里的行一律不认标题，理由见 `_fenced_mask`。
+    """
     lines = (text or "").split("\n")
+    mask = _fenced_mask(text)
     heads = []
     for i, ln in enumerate(lines):
+        if mask[i]:
+            continue
         m = pattern.match(ln)
         if not m:
             continue
@@ -144,8 +180,11 @@ def split_markdown(text):
     """md 优先按标题切：从最浅的一级标题往下找，选中「这一级至少有两段」的那级；
     `#` 是章、`##` 是小节时就不会把小节拆成章。切不出来再按字数分块。"""
     text = text or ""
+    mask = _fenced_mask(text)
     levels = {}
-    for ln in text.split("\n"):
+    for ln, in_code in zip(text.split("\n"), mask):
+        if in_code:
+            continue
         m = _H_MD.match(ln)
         if m:
             n = len(m.group(1))
