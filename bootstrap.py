@@ -86,15 +86,15 @@ def python_works(exe, code):
 
 
 def browser_ready():
-    """Chromium 装没装。与 ui_server.chromium_ready 同一套判断（认官方环境变量）。"""
-    base = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
-    if not base or base == "0":
-        if os.name == "nt":
-            base = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "ms-playwright")
-        elif sys.platform == "darwin":
-            base = os.path.expanduser("~/Library/Caches/ms-playwright")
-        else:
-            base = os.path.expanduser("~/.cache/ms-playwright")
+    """Chromium 装没装。与 ui_server.chromium_ready 同一套判断（认官方环境变量）。
+
+    目录问 `platform_compat.ms_playwright_dir()`，不在这里自己抄一份平台表：
+    抄出来的那份不认 `PLAYWRIGHT_BROWSERS_PATH` 里的 `~`，于是浏览器明明装在展开后的
+    用户缓存目录里，这里却按字面量 `~` 去找、永远找不到，每点一次「我思故我在」就
+    重下一遍 368MB。壳里那份（shell/main.swift）是认 `~` 的，后端那份走
+    platform_compat 也是认的，只有这一处漏了。
+    """
+    base = pc.ms_playwright_dir()
     for pat in ("chromium-*", "chromium_headless_shell-*"):
         for d in glob.glob(os.path.join(base, pat)):
             if os.path.isdir(d):

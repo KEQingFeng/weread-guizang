@@ -53,6 +53,11 @@ run "内联 JS 引用体检" "$PY" tests/check_js_refs.py
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
+# 首次运行那一步（bootstrap.py）自己判断「Chromium 装没装」，答错一次就是重下 368MB。
+# 它原先自己抄了一份平台目录表，抄丢了官方环境变量的 `~` 写法（glob 不认 `~`，于是永远
+# 报没装）。这一条钉住「目录只有一处真相」（platform_compat）＋「~ 也认」＋「只认
+# chromium 目录、同名普通文件不算」，另加「裸系统 Python 也起得来」那条硬约束。
+run "首次运行环境判断（一把尺子 / ~ 写法 / 认哪些目录）" "$PY" tests/check_bootstrap.py
 # 这一条是 2026-10-04 那三条「后端没启动」工单留下来的镜子：界面从磁盘现读、路由表却是
 # 进程起来那一刻装进内存的，两边不是同一份时新功能一律 404。静态先对三样东西 ——
 # 版本号成对、界面和适配器打的每个 /api/ 后端都得有、那句「本机服务没在跑」不许再当字符串
