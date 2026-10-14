@@ -172,6 +172,14 @@ run "书库目录结构（分模块 / 归置 / 账本分格）" "$PY" tests/chec
 # 可接着的 meta.get(...) 会当场 AttributeError —— 首页 /api/state 整份 500，
 # 用户看到的是「书全没了」。这条把脏形状、好书不被连累、好形状不被误伤一起钉住。
 run "书架清单脏账本（meta / 进度不是对象时不整份抛）" "$PY" tests/check_shelf_dirty.py
+# 上一条只钉住书架清单这一条路，可 meta.json 不止它在读：合并稿 / 打包 / 导出 / 目录 /
+# 改书名 / 清残稿各自 json.load 一遍再 .get / .update，脏形状（`[]` / `"书名"` / `123` /
+# `null`）一处 AttributeError 就是「导出没反应 / 保存失败」。
+# 现在六条路统一走 ui_server._meta_dict()，而它只复用书库那边已有的
+# book_layout.read_meta() —— 同一条规矩只有一份实现，不给「抄两遍、日后只改一处」留机会。
+# 这一条把「脏形状当没 meta、好数据一个字不改、六条路一个都不抛」和一条「旧读法确实会抛」
+# 的对照一起钉住，纯函数 + 临时沙盒，不联网、不开浏览器，归 --fast 静态段。
+run "书目录 meta 脏形状（合并稿 / 打包 / 导出 / 目录 / 改书名 / 清残稿不抛）" "$PY" tests/check_meta_shape.py
 # 上一条管「干净的老账本折得对不对」，这一条管「脏的老账本会不会把整份书架打崩」。
 # cache/library.json 会被手工编辑、被云同步从别处落盘、旧版本也写过别的形状：顶层
 # `"assign": ["书号"]`、`"order": 5`、`"folders": 5`，或 modules 里 folders 的元素
