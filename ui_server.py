@@ -47,6 +47,7 @@ import feed as feed_mod
 import ffmpeg_tool
 import flomo_notes
 import mindmap
+import net_guard
 import anna_state
 import person
 import readplan
@@ -5250,6 +5251,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         n = int(self.headers.get("Content-Length") or 0)
+        # 第一道门：别的网页替用户点过来的写操作一律不收。只听回环挡不住这一手 ——
+        # 请求是从用户这台机器上发出去的，浏览器根本分不出「归藏自己那个页面」和
+        # 「随手打开的一个网页」，只有后端认 Origin / Sec-Fetch-Site 才分得清。
+        # 判定与边界都写在 net_guard.py，门禁 tests/check_csrf.py 逐条钉住。
+        if net_guard.cross_site("POST", self.headers, self.headers.get("Host")):
+            self.rfile.read(n)              # 读完再回，免得半截 body 把 keep-alive 弄乱
+            return self._json({"ok": False, "msg": "这个请求不是本机界面发来的，没有执行"}, 403)
         # 只收 JSON：挡掉跨站表单那种「顺手提交」（本机服务不该被网页悄悄调用）
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype not in ("application/json", ""):
