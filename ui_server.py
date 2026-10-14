@@ -38,6 +38,7 @@ import activity
 import ai_sum
 import board as board_mod
 import book_export
+import book_ids
 import book_import
 import book_layout
 import book_notes
@@ -1890,21 +1891,19 @@ def weread_call(api_name, params=None, timeout=25):
 
 # ---------- 加入书架（写操作） ----------
 
-SHELF_ADD_ID = re.compile(r"^\d{5,20}$")
+# 书城短 id 的判定不在这里，也不在 shelf_add.py 里各写一份 —— 那把尺子只有
+# book_ids.py 一处。原来这里放到 20 位、子进程却只到 12 位，13–20 位的书在界面上
+# 看着能加，点下去就被引擎判成「没有可用的书籍编号」。见 book_ids.py 顶部。
 _shelf_lock = threading.Lock()
 
 
-def shelf_add(book_ids):
+def shelf_add(raw_ids):
     """把书加进用户自己的微信读书书架。
 
     官方 Agent Gateway 是只读的（白名单里没有写接口），所以这一步复用导出用的
     登录 profile 去调网页端接口，契约见 shelf_add.py 顶部注释。
     """
-    ids = []
-    for x in book_ids or []:
-        x = str(x or "").strip()
-        if SHELF_ADD_ID.match(x) and x not in ids:
-            ids.append(x)
+    ids = book_ids.clean_store_book_ids(raw_ids)
     if not ids:
         return {"ok": False,
                 "msg": "这个结果没带可添加的书籍编号（阅读器长 id 不能直接加书架）"}

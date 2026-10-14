@@ -20,12 +20,12 @@ bookIds 必须是书城短 id（/store/search 里 bookInfo.bookId 那种），
 import asyncio
 import json
 import os
-import re
 import sys
 import time
 
 from playwright.async_api import async_playwright
 
+import book_ids
 import platform_compat as pc
 
 USER_DATA_DIR = os.path.join("cache", "browser_profile")
@@ -47,16 +47,6 @@ CHROME_ARGS = [
 def fail(msg, code=1):
     print(json.dumps({"ok": False, "msg": msg}, ensure_ascii=False), flush=True)
     sys.exit(code)
-
-
-def clean_ids(raw):
-    """只留得住书架格式的 id：纯数字短 id。顺手挡掉误传的阅读器长 id / 链接。"""
-    out = []
-    for s in raw:
-        s = (s or "").strip()
-        if re.fullmatch(r"\d{5,12}", s) and s not in out:
-            out.append(s)
-    return out
 
 
 def kill_stray_browsers(wait=0.8):
@@ -114,7 +104,9 @@ async def post_add(ctx, ids):
 
 
 async def main():
-    ids = clean_ids([a for a in sys.argv[1:] if not a.startswith("--")])
+    # 短 id 的尺子只在 book_ids.py 一处（原来这里只到 12 位，界面那层到 20 位，
+    # 13–20 位的书点下去就被这里悄悄丢掉）。
+    ids = book_ids.clean_store_book_ids([a for a in sys.argv[1:] if not a.startswith("--")])
     if not ids:
         fail("没有可用的书籍编号（需要书城短 id）")
 
