@@ -22,6 +22,7 @@ EXPORT_MAP = "mindmap.svg"
 SCHEMA = 1
 MAX_ENTRY_BODY = 60000       # 单条笔记正文上限：正常写不满，防的是把整本书粘进来
 MAX_ITEMS = 5000             # 划线 + 条目总条数上限
+MAX_CUSTOM_TEMPLATES = 200   # 自定义模板上限：满了顶最旧的，不许把刚存的这条切掉
 
 # 高亮分色 = 语义标签：颜色不是装饰，是「这句我打算怎么用它」
 TAGS = (
@@ -72,7 +73,10 @@ def load_notes(book_dir):
     doc.setdefault("marks", [])
     doc.setdefault("entries", [])
     for key in ("marks", "entries"):
-        doc[key] = [x for x in doc[key] if isinstance(x, dict) and x.get("id")]
+        # 手改过、或写到一半的档里可能是 `"marks": null` / 给成对象：setdefault 修不了
+        # 「键在但值是 None」，照原来的 `for x in doc[key]` 会当场抛 TypeError，界面
+        # 上就是这本书的笔记一打开就 500。形状不对一律当空，别有下文。
+        doc[key] = [x for x in _seq(doc[key]) if isinstance(x, dict) and x.get("id")]
     doc["schema"] = SCHEMA
     return doc
 
@@ -97,9 +101,10 @@ def save_notes(book_dir, doc):
 def _normalize(doc):
     """把前端传来的文档收敛成能安全落盘的样子：字段裁剪、时间戳补齐、条数封顶。"""
     out = empty_notes()
-    out["created_at"] = int(doc.get("created_at") or out["created_at"])
+    now = int(time.time())
+    out["created_at"] = _int(doc.get("created_at"), out["created_at"])
     marks, entries = [], []
-    for m in (doc.get("marks") or [])[:MAX_ITEMS]:
+    for m in _seq(doc.get("marks"))[:MAX_ITEMS]:
         if not isinstance(m, dict):
             continue
         text = _clip(m.get("text"), 4000)
@@ -122,15 +127,15 @@ def _normalize(doc):
             "color": _hex(m.get("color")) or (TAG_BY_KEY[tag]["color"] if tag else ""),
             "memo": _clip(m.get("memo"), 4000),
             "page": _clip(m.get("page"), 40),
-            "created_at": int(m.get("created_at") or time.time()),
-            "updated_at": int(m.get("updated_at") or time.time()),
+            "created_at": _int(m.get("created_at"), now),
+            "updated_at": _int(m.get("updated_at"), now),
         })
     rest = MAX_ITEMS - len(marks)
-    for e in (doc.get("entries") or [])[:max(rest, 0)]:
+    for e in _seq(doc.get("entries"))[:max(rest, 0)]:
         if not isinstance(e, dict):
             continue
         refs = []
-        for r in (e.get("refs") or [])[:40]:
+        for r in _seq(e.get("refs"))[:40]:
             if not isinstance(r, dict):
                 continue
             refs.append({"text": _clip(r.get("text"), 1200), "ch": _clip(r.get("ch"), 60),
@@ -143,8 +148,8 @@ def _normalize(doc):
             "tag": e.get("tag") if e.get("tag") in TAG_BY_KEY else "",
             "refs": refs,
             "tpl": _clip(e.get("tpl"), 60),
-            "created_at": int(e.get("created_at") or time.time()),
-            "updated_at": int(e.get("updated_at") or time.time()),
+            "created_at": _int(e.get("created_at"), now),
+            "updated_at": _int(e.get("updated_at"), now),
         })
     marks.sort(key=lambda x: (-x["updated_at"], x["ch"]))
     entries.sort(key=lambda x: (-x["updated_at"], x["title"]))
@@ -161,6 +166,35 @@ def _clip(v, n):
     return s[:n]
 
 
+def _seq(v):
+    """只认列表（元组也收）：给对象、字符串、None 一律当空。
+
+    这也是为了「一个坏字段不该把整次保存带走」：`marks` 给成 dict 时，
+    原来的 `[:MAX_ITEMS]` 抛 KeyError，界面看到的是「存不下」，用户这一轮改的
+    别的笔记一起丢。
+    """
+    return list(v) if isinstance(v, (list, tuple)) else []
+
+
+def _int(v, default=None):
+    """时间戳这类数字字段的收口：认得出就归成整数秒，认不出回默认，不抛。
+
+    `created_at: "1728-10-14"`（手改过 / 外部 Agent 写进来的）在上层走的是
+    `int(...)`，一个 ValueError 就被 /api/mynotes 兜成「存不下」—— 丢的是整份
+    笔记。纯数字串与小数都认，方便把旧档接回来。
+    """
+    if not v:
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(float(str(v).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
 def _hex(v):
     s = (v or "").strip()
     return s if re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", s) else ""
@@ -174,8 +208,11 @@ def counts(doc):
 # ─────────────────────────── 导出 ───────────────────────────
 
 def _ts(v):
+    n = _int(v, None)
+    if n is None:
+        return ""
     try:
-        return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(v)))
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(n))
     except Exception:
         return ""
 
@@ -344,13 +381,19 @@ def save_template(cache_dir, tpl):
     if hit:
         hit.update({"name": name, "desc": _clip(tpl.get("desc"), 200), "body": body,
                     "updated_at": int(time.time())})
+        msg = "模板已更新"
     else:
         items.append({"id": tid, "name": name, "desc": _clip(tpl.get("desc"), 200),
                       "body": body, "created_at": int(time.time()),
                       "updated_at": int(time.time())})
+        # 满了顶最旧的一条，而不是 `items[:200]` 把刚追加的这条切在门外 ——
+        # 那样接口回着「模板存好了」和它自己的 id，磁盘上却没有，是句假话。
+        dropped = max(0, len(items) - MAX_CUSTOM_TEMPLATES)
+        items = items[dropped:]
+        msg = "模板存好了" if not dropped else "模板存好了（最早的 %d 个已被顶掉）" % dropped
     os.makedirs(cache_dir, exist_ok=True)
-    _write_json(_custom_path(cache_dir), {"items": items[:200]})
-    return {"ok": True, "id": tid, "msg": "模板存好了" if not hit else "模板已更新"}
+    _write_json(_custom_path(cache_dir), {"items": items})
+    return {"ok": True, "id": tid, "msg": msg}
 
 
 def delete_template(cache_dir, tid):
