@@ -60,6 +60,25 @@ chk("renderPickView 里不再出现 viewHeader（标题 / 计数都让掉）",
 chk("冷启动骨架是 skelCards(6)（先看到的就是六张）",
     "skelCards(6)" in pickview, pickview[:200])
 
+# ── ③ 推荐的书能直接加进微信书架（1.2.1 · R4-9）────────────────
+# 卡片动作条上的「加入书架」不是另起一套：复用详情页那颗的 addToShelf，
+# 状态判据也复用 onOwnShelf（拿到过真书架就以它为准）。
+paint = fn_body("paintPick")
+chk("paintPick 铺完卡会补书架按钮（pickShelfButtons）",
+    "pickShelfButtons(grid)" in paint, paint[:220])
+psb = fn_body("pickShelfButtons")
+chk("找得到 pickShelfButtons（推荐卡的书架动作）", bool(psb))
+chk("推荐卡的书架按钮复用 addToShelf（与详情页同一套写回）",
+    "addToShelf(t.store, t.title, b)" in psb, psb[:240])
+chk("书架按钮认 cardIds 里的书城短 id（阅读器 id 加不了）",
+    "cardIds.get" in psb and "/^\\d{5,20}$/" in psb, psb[:240])
+chk("已在书架的显「已在书架」并禁用（不重复写）",
+    "onOwnShelf(t.store)" in psb and "b.disabled = own" in psb, psb[:240])
+chk("老节点复用时不重复补按钮（.tkadd 只一颗）",
+    "strip.querySelector('.tkadd')" in psb, psb[:240])
+chk("按钮挂在卡片动条 .strip 上（沿用摊开动作条那套交互）",
+    "querySelector('.strip')" in psb, psb[:240])
+
 bad = [c for c in checks if not c[0]]
 print("\n推荐页体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
 for _, n, x in bad:

@@ -1727,6 +1727,55 @@ def notes_for_book(any_id, title="", author=""):
     return [], (bid or any_id), ""
 
 
+# 本机书目录里的划线/笔记（取书时划的、自己记的）——形状与划线索引条目一致，
+# 这样随机漫步 / 卡片回顾 / 复制划线不必为「本地那一路」各写一遍。
+_LOCAL_NOTES = {"at": 0.0, "items": []}
+
+
+def local_note_items(max_age=20):
+    """扫一遍本机书目录，收上里面的划线（marks）与笔记（entries）。
+
+    微信读书索引只认官方网关那两路，取回来的书在本机划的线不在里面；
+    随机漫步要「本地读书笔记」也能抽到，就得把这份并进来。
+    按 mtime 感觉不出来、按时间缓存 20 秒：连点「换一批」不重复扫盘。
+    """
+    now = time.time()
+    if _LOCAL_NOTES["items"] and now - _LOCAL_NOTES["at"] < max_age:
+        return _LOCAL_NOTES["items"]
+    items = []
+    try:
+        books = list_books()
+    except Exception:
+        books = []
+    for b in books:
+        d = safe_book_dir(b.get("id"))
+        if not d:
+            continue
+        try:
+            doc = book_notes.load_notes(d)
+        except Exception:
+            continue
+        bid = b.get("id") or ""
+        title = b.get("title") or bid
+        author = b.get("author") or ""
+        for m in (doc.get("marks") or []):
+            t = "\n".join(x for x in ((m.get("text") or "").strip(),
+                                      (m.get("memo") or "").strip()) if x)
+            if t:
+                items.append({"bookId": bid, "title": title, "author": author,
+                              "kind": "取书" + book_notes._kind_label(m.get("kind")),
+                              "text": t, "at": m.get("created_at") or 0, "local": True})
+        for e in (doc.get("entries") or []):
+            t = "\n".join(x for x in ((e.get("title") or "").strip(),
+                                      (e.get("body") or "").strip()) if x)
+            if t:
+                items.append({"bookId": bid, "title": title, "author": author,
+                              "kind": "取书笔记", "text": t,
+                              "at": e.get("created_at") or 0, "local": True})
+    _LOCAL_NOTES.update({"at": now, "items": items})
+    return items
+
+
 # ---------- 知识卡片：导出 .apkg ----------
 
 def build_apkg(book_id, title):
@@ -4852,6 +4901,8 @@ class Handler(BaseHTTPRequestHandler):
             st["built_at"] = d.get("built_at") or st.get("built_at") or 0
             # 重建期间依然报旧索引的条数：否则搜索/随机漫步会以为"没索引"而用不了
             st["count"] = max(len(d.get("items") or []), st.get("count") or 0)
+            # 本机取书的划线/笔记：没建过微信索引时，随机漫步也有东西可抽。
+            st["local_count"] = len(local_note_items())
             return self._json({"ok": True, "data": st,
                                "books": d.get("books") or []})
 
@@ -4869,15 +4920,31 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/notes_random":
             n = max(1, min(int(q.get("n", ["6"])[0]), 30))
-            items = load_notes_index().get("items") or []
-            if not items:
-                return self._json({"ok": True, "data": []})
-            return self._json({"ok": True, "data": random.sample(items, min(n, len(items)))})
+            # src=wx 只抽微信读书索引；src=local 只抽本机取书那一路；默认两边都抽。
+            src = (q.get("src", ["all"])[0] or "all").strip().lower()
+            wx = load_notes_index().get("items") or []
+            lc = local_note_items()
+            pool = wx if src == "wx" else (lc if src == "local" else list(wx) + lc)
+            if not pool:
+                return self._json({"ok": True, "data": [],
+                                   "wx": len(wx), "local": len(lc)})
+            return self._json({"ok": True,
+                               "data": random.sample(pool, min(n, len(pool))),
+                               "wx": len(wx), "local": len(lc)})
 
         if path == "/api/notes_of":
             bid = q.get("book", [""])[0]
             # 索引里没有就现拉这一本，两套 id 都认（否则详情页会显示「没有划线」）
             items, _resolved, _src = notes_for_book(bid)
+            # 本机取书的划线 / 自己记的笔记也并进来：卡片回顾、复制划线都该看见它们。
+            ids = {x for x in (bid, _resolved) + tuple(book_id_pairs(bid)) if x}
+            seen = {(x.get("bookId"), x.get("text")) for x in items}
+            for x in local_note_items():
+                k = (x.get("bookId"), x.get("text"))
+                if x.get("bookId") in ids and k not in seen:
+                    seen.add(k)
+                    items.append(x)
+            items.sort(key=lambda x: -(x.get("at") or 0))
             return self._json({"ok": True, "data": items})
 
         if path == "/api/detail":

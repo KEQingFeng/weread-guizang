@@ -3142,6 +3142,9 @@
   .qcard .t{font-size:13px; line-height:1.78; white-space:pre-wrap}
   .qcard .m{font-size:11px; color:var(--ink-3); margin-top:9px; display:flex; gap:8px; flex-wrap:wrap}
   .qcard .m .k{color:var(--ink-2)}
+  .qcard .m .k.lc{color:#2c8f63}      /* 取书那一路的划线/笔记：和微信来源分色 */
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .qcard .m .k.lc{color:#7fd6a8} }
+  html[data-theme="dark"] .qcard .m .k.lc{color:#7fd6a8}
 
   /* ═══ 流畅度：少算一点、少画一点 ═══
 
@@ -15461,6 +15464,31 @@ function paintPick(body) {
     body.replaceChildren(grid);
   }
   fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
+  pickShelfButtons(grid);
+}
+
+/** 推荐卡片的动条上补一颗「加入书架」：推荐来的书多半还没进微信书架，
+ *  点一下就走 addToShelf（和详情页那颗同一套，写回微信读书并同步）。
+ *  fillGrid 会复用老节点，所以这里「补」而不是重建：已有那颗只刷状态。 */
+function pickShelfButtons(grid) {
+  for (const c of grid.children) {
+    const t = cardIds.get(c.dataset.id);
+    if (!t || !/^\d{5,20}$/.test(String(t.store || ''))) continue;
+    const strip = c.querySelector('.strip');
+    if (!strip) continue;
+    let b = strip.querySelector('.tkadd');
+    if (!b) {
+      b = document.createElement('button');
+      b.className = 'tkadd';
+      b.onclick = e => { e.stopPropagation(); addToShelf(t.store, t.title, b); };
+      strip.prepend(b);
+    }
+    const own = onOwnShelf(t.store);
+    b.textContent = own ? '已在书架' : '加入书架';
+    b.disabled = own;
+    b.title = own ? '微信读书书架里已经有这本了'
+                  : '加进你自己的微信读书书架（会真的动微信那边）';
+  }
 }
 
 /** 推荐这一路的数据：官方 /book/recommend 常常只回两三本，得再借一本种子
@@ -20538,29 +20566,48 @@ function paintReview() {
 
 /* ── 随机漫步 ─────────────────────────── */
 
+let rwSrc = 'all';            // all / wx / local：这一批从哪一路的笔记里抽
+
 async function renderRandomView() {
   const {p, body, fresh} = viewPane('random', viewHeader('随机漫步',
-    '<button class="deed" id="rwMore" style="height:30px">换一批</button>'));
+    `<span class="seg txt" id="rwSeg">
+       <button data-s="all">全部</button><button data-s="wx">微信</button>
+       <button data-s="local">取书</button></span>`
+    + '<button class="deed" id="rwMore" style="height:30px">换一批</button>'));
 
   const draw = async () => {
     const btn = p.querySelector('#rwMore');
     if (btn) btn.disabled = true;
     let items = [];
-    try { items = ((await (await fetch('/api/notes_random?n=9')).json()).data) || []; }
-    catch (e) { items = []; }
+    try {
+      items = ((await (await fetch('/api/notes_random?n=9&src=' + encodeURIComponent(rwSrc))).json()).data) || [];
+    } catch (e) { items = []; }
     if (btn) btn.disabled = false;
     if (!items.length) { setHtml(body, '<div class="emptyline">还没有卡片</div>'); return; }
     paintRandomWall(body, items);
   };
-  if (fresh) p.querySelector('#rwMore').onclick = draw;
+  if (fresh) {
+    p.querySelector('#rwMore').onclick = draw;
+    [...p.querySelectorAll('#rwSeg button')].forEach(b => {
+      b.onclick = () => {
+        rwSrc = b.dataset.s;
+        [...p.querySelectorAll('#rwSeg button')].forEach(x => x.classList.toggle('on', x === b));
+        body.replaceChildren();      // 换了一路就重抽，别留着上一路的卡看串
+        draw();
+      };
+    });
+  }
+  // 这一屏常驻：切回来时高亮要停在当前档位上，不能还指着刚点过的那颗。
+  [...p.querySelectorAll('#rwSeg button')].forEach(b => b.classList.toggle('on', b.dataset.s === rwSrc));
 
   const st = await loadIdxState();
-  if (!st.count) {
+  const wxN = st.count || 0, lcN = st.local_count || 0;
+  if (!wxN && !lcN) {
     body.replaceChildren(indexPrompt(
       '随机漫步要从你的划线与想法里抽，先建一次索引（一次性，之后很快）。'));
     return;
   }
-  setNote('random', `从 ${st.count} 条里随机抽`);
+  setNote('random', `微信 ${wxN} · 取书 ${lcN}`);
   // 已经抽过一批就留着不动 —— 每次进这一屏都重抽，正是「点一下闪一下」的老毛病。
   // 想换内容点「换一批」。
   if (!body.firstElementChild || body.querySelector('[data-idx-go], .emptyline')) draw();
@@ -20578,7 +20625,7 @@ async function paintRandomWall(body, items) {
     const m = document.createElement('div');
     m.className = 'm';
     const k = document.createElement('span');
-    k.className = 'k';
+    k.className = 'k' + (x.local ? ' lc' : '');   // 取书那一路换个色，一眼分得出来源
     k.textContent = x.kind;
     m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
     c.append(t, m);
