@@ -568,6 +568,14 @@ run "请求体长度脏值（abc / 负数不再断连或挂住，脏值回 400�
 # 这一条给每本账做「干净 → 加 BOM → 再读」的往返：夹具本身得先读得出（不许两边都是空
 # 蒙过去），加 BOM 后必须与干净那份逐字段相同。纯临时目录，不 import 服务，归静态段。
 run "账本 BOM（带 BOM 的手改账本不再被当成空账）" "$PY" tests/check_ledger_bom.py
+# 请求体里「本该是字符串」的字段还有一档没收：`((body or {}).get("state") or "").strip()`
+# 里那句 `or ""` 只换得掉假值，数字 / 列表 / 对象照样穿过去、在 `.strip()` 当场抛
+# AttributeError。这几个口（book_state 的 state、agent/chat 的 q、agent/quick 的 mode、
+# config 的两个地址）都没有兜底 try/except，异常穿出 do_POST 后连接被直接关掉，前端
+# 收到 RemoteDisconnected，表现又是「按下去没反应」。收口是 ui_server._body_str：只放行
+# 真字符串，认不出当没写。纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，
+# 不联网、不碰真实数据，归静态段。
+run "请求体字符串字段脏形状（state / q / mode / Key 写脏不再断连）" "$PY" tests/check_post_body_str.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
