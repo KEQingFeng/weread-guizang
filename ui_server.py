@@ -47,6 +47,7 @@ import clip_article
 import feed as feed_mod
 import ffmpeg_tool
 import flomo_notes
+import login
 import mindmap
 import net_guard
 import anna_state
@@ -247,11 +248,15 @@ def chromium_ready():
 
 
 def read_login_state():
-    try:
-        with open(LOGIN_STATE, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    """登录态账本怎么解，交给 login.normalize_state 一处说了算。
+
+    这里是 `/api/state` 里 `login` 那一格，读它的有设置页与 MCP 适配器，
+    两边都按 `{logged_in: bool, checked_at: 秒}` 直接算时间。原来这里把
+    json.load 的结果原样递出去 —— 文件被手改过 / 半截 / 老形状时，那两处
+    算出来的就是「未连接 NaN月NaN日 NaN:NaN」。脏形状现在在门口就洗掉，
+    洗不出来回 None（界面显示「未检测」），不再把看不懂的东西往下游传。
+    """
+    return login.read_state(LOGIN_STATE)
 
 
 def safe_book_dir(book_id):

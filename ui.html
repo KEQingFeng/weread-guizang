@@ -5274,9 +5274,14 @@ async function drawState(force) {
   const acc = $('#v-account');
   if (s.login) {
     acc.textContent = s.login.logged_in ? '已连接' : '未连接';
-    const em = document.createElement('em');
-    em.textContent = when(s.login.checked_at);
-    acc.append(em);
+    // 时间只在真拿得到秒数时才印：后端已经把脏形状洗成 null 了，这里再兜一道
+    // —— 半句「NaN月NaN日 NaN:NaN」比不印时间更像后端坏了。
+    const ts = Number(s.login.checked_at);
+    if (Number.isFinite(ts) && ts > 0) {
+      const em = document.createElement('em');
+      em.textContent = when(ts);
+      acc.append(em);
+    }
   } else {
     acc.textContent = '未检测';
   }

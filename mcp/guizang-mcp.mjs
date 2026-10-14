@@ -225,8 +225,13 @@ function fmtChars(n) {
   return n >= 10000 ? (n / 10000).toFixed(1) + " 万字" : n + " 字";
 }
 function fmtWhen(ts) {
-  const d = new Date(ts * 1000);
-  const p = n => String(n).padStart(2, "0");
+  // 秒数认不出时给「—」，不要算 —— `new Date(undefined * 1000)` 是 NaN，
+  // 印出来就是「NaN-NaN-NaN NaN:NaN」，看着像后端坏了。后端已经把登录态
+  // 洗过一道（login.normalize_state），这里再兜一道，别的字段也一起受益。
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  const d = new Date(n * 1000);
+  const p = x => String(x).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function fmtLog(lines) {
