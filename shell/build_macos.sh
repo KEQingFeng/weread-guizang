@@ -62,6 +62,7 @@ APP_FILES=(
   sync.py
   board.py
   mindmap.py
+  net_guard.py
   requirements.txt
 )
 APP_DIRS=(
