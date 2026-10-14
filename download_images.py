@@ -10,7 +10,7 @@
 一张裂图就此钉死到用户手动去删。所以除了原子改名，这里还顺着文件头认一眼
 是不是真图片，老版本留下的坏文件也能重下。
 """
-import json, glob, os, socket, sys, time, urllib.request
+import json, glob, os, re, socket, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import platform_compat as pc
@@ -66,13 +66,17 @@ def is_complete(fpath, min_bytes=SKIP_BYTES):
 
     只看大小不够：老版本的非原子写留下的半截图只要过了 1KB 就会被永远跳过。
     所以大小达标之后再看一眼文件头，认不出就当没下好、重下。
+
+    连 `os.path.getsize` 抛的东西一起收：路径里有 NUL 时它抛的是 ValueError，
+    有落单的代理码点时是 UnicodeEncodeError —— 都不是 OSError，只认 OSError 的话
+    这一条会把异常甩给调用方。getsize 都算不出来的路径，答案本来就是「没下好」。
     """
     try:
         if os.path.getsize(fpath) < min_bytes:
             return False
         with open(fpath, "rb") as fh:
             return head_is_image(fh.read(12))
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
@@ -104,11 +108,20 @@ def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
         finally:
             try:
                 os.unlink(tmp)
-            except OSError:
+            except (OSError, ValueError):
+                # 清理残件顺带失败（含路径本身不合法）不该把这一张的失败升级成整批
                 pass
         if attempt < retries - 1:
             time.sleep(1.5)
     return last
+
+
+# 写不出合法路径的文件名：NUL 与 C0/DEL 控制字符，以及落单的代理码点
+# （U+D800–U+DFFF，JSON 里塞进来的半个字符）。它们不是「下不下来这一张」的小事：
+# os.path.getsize / open 对这样的路径抛的是 ValueError / UnicodeEncodeError（不是
+# OSError），会穿出 is_complete，也会穿出 download_one 的 finally 清理，最后在
+# main 的 fut.result() 当场抛掉 —— 一条脏记录带走整批图。与 `../` 同一档：不合法。
+_BAD_NAME = re.compile("[\x00-\x1f\x7f\ud800-\udfff]")
 
 
 def safe_target(img_dir, name):
@@ -116,11 +129,13 @@ def safe_target(img_dir, name):
 
     `file` 名义上是 export_precise 生成的 ch0001_img01.jpg，但 raw/*.json 整份
     都是从网页上扒下来的数据，不该假定它一定乖。带路径分隔符 / 绝对路径 /
-    `..` 一律不收，越出 images/ 的落点也不收。
+    `..` / 控制字符 / 落单的代理码点一律不收，越出 images/ 的落点也不收。
     """
     if not isinstance(name, str) or not name.strip():
         return None
     name = name.strip()
+    if _BAD_NAME.search(name):
+        return None
     if os.path.isabs(name) or "/" in name or "\\" in name or name in (".", ".."):
         return None
     target = os.path.normpath(os.path.join(img_dir, name))

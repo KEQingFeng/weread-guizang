@@ -357,6 +357,14 @@ run "个人资料里的坏字符（半个代理码点不许把保存打成失败
 # 700 字节的小图每补一次图就被重新敲一遍微信图床。网络层用记账的假 urlopen 顶掉，全离线。
 # 同理导入本模块不该再改全局 socket（force_ipv4 挪进 main()），raw/*.json 的坏记录只跳过不炸。
 run "插图并发下载（坏清单 / 防穿越 / 原子落盘 / 判重口径 / 接线）" "$PY" tests/check_download_images.py
+# 上面那条钉住了「../ 穿越」，但脏文件名还有第二类：NUL / 别的控制字符 / 半个代理码点
+# （raw/*.json 是扒来的外部数据，`file` 字段什么都可能是）。文件系统对这三种名字抛的是
+# ValueError / UnicodeEncodeError，不是 OSError —— 而 is_complete 只 except OSError、
+# download_one 又在 try 之外调它，主流程再在 fut.result() 把异常取回来，于是**一条**脏
+# 记录带走整批图。这一条把 safe_target 的收窄、is_complete 的兜底、collect_tasks 的
+# 「只跳一条」和 download_one 的「坏路径只回 fail」一起钉住，含「这些名字确实过不了
+# 文件系统」的对照，防护栏空转。全离线，假 urlopen 顶掉网络。
+run "插图文件名脏值（NUL / 控制符 / 半个代理码点只跳一条，不带走整批）" "$PY" tests/check_download_dirty.py
 # 加书架（shelf_add.py）是少数几个真去改微信那边状态的动作，此前也没有测试。这一条
 # 不联网、不开浏览器，钉的是两件离线也验得实的事：书号尺子四个入口必须是同一把
 # （界面 / 本地服务 / MCP 都写 5–20 位，shelf_add.py 原来写 5–12，且 Python 的 \d 连
