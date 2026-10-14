@@ -20,6 +20,8 @@ import json
 import os
 import re
 
+from md_fence import prose_lines
+
 # 两种总结模式（界面上的两枚芯片，键名同时是缓存文件名的一部分）
 STYLES = (("learn", "学习理解"), ("brief", "归纳"))
 STYLE_KEYS = [k for k, _ in STYLES]
@@ -261,10 +263,15 @@ def _clean_node(raw, depth):
 
 def head_tree(title, text, limit=24):
     """材料本身的结构 → 一棵树：Markdown 标题当分支，标题下的段落首句当叶子。
-    模型没答、答得不像树时就用它 —— 这张图至少是原文的目录，不是空框。"""
+    模型没答、答得不像树时就用它 —— 这张图至少是原文的目录，不是空框。
+
+    只数围栏代码块**外面**的行：块里的 `# 注解 / pip install` 是程序，不是章节。
+    这本是导出渲染早就守着的口径（book_export.md_to_html），兜底图得跟它对齐，
+    否则「导出的目录」与「导图里的目录」是两份。跳块的尺子在 md_fence。
+    """
     root = {"label": (title or "这篇内容")[:MAP_LABEL], "kids": []}
     current = None
-    for ln in str(text or "").splitlines():
+    for _i, ln in prose_lines(text):
         line = ln.strip()
         if not line:
             continue
