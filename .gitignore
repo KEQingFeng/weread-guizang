@@ -1,4 +1,7 @@
 __pycache__/
+# README 那一套装法就是在仓库根建 .venv（python3 -m venv .venv）；它是本机运行环境，
+# 几百 MB 的解释器与依赖不该跟着源码走，所以和 cache/ 一样排除在版本库外。
+.venv/
 *.pyc
 cache/
 output/
