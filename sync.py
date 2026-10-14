@@ -169,11 +169,18 @@ def _dav_headers(c):
 
 
 def _dav_mkdir(c, path):
-    """逐级建目录。目录已存在会回 405，不是错，直接过。"""
+    """逐级建目录。目录已存在会回 405，不是错，直接过。
+
+    `cur` 不许带前导斜杠：地址本来就要在 base 后面补一个 `/`，再拼
+    `/guizang` 就成了 `…/files/u//guizang`。双斜杠多数服务器会当另一个
+    路径（404 / 409），而不是当同一个目录 —— 于是「测一下」第一下就报
+    「建目录失败」，而按同一份配置 PUT 上来的文件落在 `…/files/u/guizang/…`
+    （`_dav_put` 拼的是没有前导斜杠的完整路径），两边根本不是同一个位置。
+    """
     parts = [p for p in path.split("/") if p]
     cur = ""
     for p in parts:
-        cur = cur + "/" + p
+        cur = p if not cur else cur + "/" + p
         url = c["webdav"]["url"] + "/" + urllib.parse.quote(cur)
         try:
             _http("MKCOL", url, headers=_dav_headers(c), timeout=30).read()
