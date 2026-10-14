@@ -592,7 +592,10 @@ def stuck_bump(stuck_path, catalog_len, idx):
 def match_heading(line, titles, used):
     """这一行是不是某个目录标题（可能后面直接粘了正文，或被换行截断）。"""
     nline = norm_title(line)
-    if len(nline) < 3:
+    # 门槛必须与下面那条候选过滤（len(nt) < 2）对齐：「序言」「前言」「后记」这类
+    # 两字章名在中文书里极常见。这里卡在 3 字时，目录里认它是候选、正文里却永远
+    # 比不中，标题被当正文并进上一章，整章静默消失（导出少一章、阅读器归错章）。
+    if len(nline) < 2:
         return None
     for nt, orig in titles:
         if not nt or nt in used or len(nt) < 2:
@@ -743,7 +746,7 @@ class ChapterSplitter:
         「旧内容并进当前章」——与本轮改动前的行为一致，不会更糟。
         """
         b = bare(line)
-        if len(b) < 3:
+        if len(b) < 2:                 # 与 match_heading 同一把尺子：两字旧章名也认
             return False
         n = norm_title(line)
         for bt, _orig, nt in self.used_pairs:

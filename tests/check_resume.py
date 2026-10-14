@@ -243,6 +243,37 @@ gap = E.ChapterSplitter(T(CAT), {E.norm_title("第二节 汗")}, gapfill=True)
 chk("anchor：已经写过的标题钉不进去（避免同一章切两次）",
     gap.anchor("第二节 汗", E.norm_title("第二节 汗")) is False and gap.cuts == 0)
 
+# ── E. 两字章名（序言 / 前言 / 后记）：正文行门槛必须与候选过滤同一把尺子 ──
+# match_heading 原来把「洗干净后不足 3 字」的正文行直接判死，而候选过滤却从 2 字起收。
+# 于是目录里的两字章名成了永远比不中的死候选：那一行被当正文并进上一章，整章在导出
+# 的 Markdown / EPUB / PDF 里静默消失（阅读器里也归错章）。这一节把单行切章与 gapfill
+# 的旧章边界各钉一条。
+SHORT = ["版权信息", "序言", "第一章 起点", "结语"]
+sp = E.ChapterSplitter(T(SHORT), set())
+sp.push([tx("版权信息"), tx("版权归作者所有。"),
+         tx("序言"), tx("这是一本讲思维的书。"),
+         tx("第一章 起点"), tx("正文一。"),
+         tx("结语"), tx("后记内容。")])
+done = chapters(sp)
+titles = [t for t, _ in done]
+chk("两字章名：序言 / 结语都切出来了（不再并进上一章）",
+    titles == ["版权信息", "序言", "第一章 起点", "结语"], titles)
+chk("两字章名：各自的正文落在自己那一章，标题行不被塞进上一章",
+    dict(done).get("序言", "").startswith("这是一本讲思维的书"),
+    done)
+
+short_gap = E.ChapterSplitter(T(SHORT), {E.norm_title("序言")}, gapfill=True)
+short_gap.anchor("版权信息", E.norm_title("版权信息"))
+short_gap.push([tx("版权信息"), tx("版权正文")])
+short_gap.push([tx("序言"), tx("旧的序言正文"), tx("这段旧内容不该重抄")])
+short_gap.push([tx("第一章 起点"), tx("新的正文")])
+done_gap = chapters(short_gap)
+seen = "".join(body for _t, body in done_gap)
+chk("两字章名：gapfill 也把它当旧章边界，旧正文一个字都不重抄",
+    "旧的序言正文" not in seen and "这段旧内容不该重抄" not in seen, done_gap)
+chk("两字章名：gapfill 之后仍能在下一个标题处正常开新章",
+    "第一章 起点" in [t for t, _ in done_gap] and "新的正文" in seen, done_gap)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("续传锚点取证：" + ("全部通过" if not FAIL else "%d 项未过：%s" % (len(FAIL), FAIL)))
