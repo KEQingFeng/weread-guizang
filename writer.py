@@ -101,6 +101,32 @@ def _sparks(v):
     return out
 
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：浏览器的 JS 字符串被拦腰
+# 截断时会留下它，JSON 那边 `json.loads` 收得下（形如 "\ud83d"），于是它一路走到
+# 落盘那一步 —— 正文按 utf-8 写、账本按 ensure_ascii=False 写，两处都当场
+# UnicodeEncodeError，用户看到的是「写了一大段，一存就没了」，书目录里还留一个
+# 半截 .tmp。它是坏输入不是内容，洗掉比让整篇稿子存不下去强。成对的代理码点不必管：
+# json 解码时已经合成一个真字符，这里只会摘到落单的那个。
+# 与 mindmap / board / person / anna_state 那几处同一口径，写作这一格此前没有。
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _drop_surrogates(v):
+    """把要落盘（或要回给界面）的东西里落单的半个代理码点摘干净，dict / list 逐层走。
+
+    只摘落单的那半个，真 emoji、ZWJ 连字（🧑‍💻）一个字不动 —— 洗过头就把一个
+    表情拆成两个乱码。返回的是新对象（原对象不就地改），免得同一份账本在两处
+    看见不同的值。
+    """
+    if isinstance(v, str):
+        return _SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {k: _drop_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_drop_surrogates(x) for x in v]
+    return v
+
+
 # ---------- 路径与 id ----------
 
 def new_id():
@@ -257,13 +283,16 @@ def load_meta(draft_dir):
     m["updated"] = _int(m.get("updated"), m["created"])
     m["sparks"] = _sparks(m.get("sparks"))
     m["title"] = str(m.get("title") or "")[:80]
-    return m
+    # 手改过的 meta.json 里也可能留着落单的半个代理码点（json.load 收得下它）：
+    # 读出来就洗掉，否则它会跟着 read() / brief() 回给界面，而那条回包同样是
+    # ensure_ascii=False 编码的，留着一个坏字符连响应都发不出去。
+    return _drop_surrogates(m)
 
 
 def read_text(draft_dir):
     try:
         with open(draft_path(draft_dir), encoding="utf-8") as f:
-            return f.read()
+            return _drop_surrogates(f.read())
     except OSError:
         return ""
 
@@ -289,12 +318,12 @@ def create(books_root, title="", text=""):
         return None
     os.makedirs(versions_dir(d), exist_ok=True)
     meta = blank_meta(book_id, title or title_from(text))
-    body = text if text else ""
+    body = _drop_surrogates(text) if isinstance(text, str) else ""
     with open(draft_path(d), "w", encoding="utf-8") as f:
         f.write(body)
     meta["rev"] = 1
     meta["words"] = words(body)["total"]
-    _write_meta(d, meta)
+    meta = _write_meta(d, meta)
     return book_id, meta
 
 
@@ -319,13 +348,13 @@ def save(books_root, book_id, text, title=None, rev=None):
         if client != server:
             conflict = {"rev": server, "text": read_text(d), "updated": meta.get("updated")}
             return False, {"msg": "这份稿子在别处被改过", "conflict": conflict}
-    body = text if isinstance(text, str) else ""
+    body = _drop_surrogates(text) if isinstance(text, str) else ""
     old = read_text(d)
     if body != old:
         snapshot(d, meta)                 # 只在真有改动前留一份旧的
         meta["rev"] = server + 1
     if title is not None and str(title).strip()[:80] != str(meta.get("title") or ""):
-        meta["title"] = str(title).strip()[:80] or title_from(body)
+        meta["title"] = _drop_surrogates(str(title)).strip()[:80] or title_from(body)
     elif not meta.get("title"):
         meta["title"] = title_from(body)
     meta["words"] = words(body)["total"]
@@ -337,16 +366,23 @@ def save(books_root, book_id, text, title=None, rev=None):
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(body)
     os.replace(tmp, draft_path(d))
-    _write_meta(d, meta)
+    meta = _write_meta(d, meta)
     return True, meta
 
 
 def _write_meta(draft_dir, meta):
+    """把 meta 落盘，回**真正写下去的那一份**（落单的坏字符已经摘掉）。
+
+    调用方拿这份回执去回界面，而回包也是 ensure_ascii=False 编码的 —— 所以不能
+    只洗要写盘的副本：留在手里那一份带着坏字符，下一步就是发响应时 UnicodeEncodeError。
+    """
+    meta = _drop_surrogates(dict(meta or {}))
     tmp = meta_path(draft_dir) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         import json
         json.dump(meta, f, ensure_ascii=False, indent=2)
     os.replace(tmp, meta_path(draft_dir))
+    return meta
 
 
 def snapshot(draft_dir, meta):
@@ -521,7 +557,7 @@ def new_book_id():
 
 def blank_book(title):
     now = int(time.time())
-    return {"id": new_book_id(), "title": str(title or "").strip()[:60],
+    return {"id": new_book_id(), "title": _drop_surrogates(str(title or "")).strip()[:60],
             "chapters": [], "created": now, "updated": now}
 
 
@@ -551,7 +587,7 @@ def load_books(books_root):
                 continue
             seen.add(did)
             keep.append(did)
-        out.append({"id": str(b["id"]), "title": str(b.get("title") or ""),
+        out.append({"id": str(b["id"]), "title": _drop_surrogates(str(b.get("title") or "")),
                     "chapters": keep,
                     "created": _int(b.get("created"), 0),
                     "updated": _int(b.get("updated"), 0)})
@@ -562,7 +598,10 @@ def save_books(books_root, books):
     p = books_path(books_root)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"v": 1, "books": list(books or [])}, f, ensure_ascii=False, indent=2)
+        # 册账同样是 ensure_ascii=False 写的：一处落单的半个代理码点就能让整本册账
+        # 写不出去（写作屏的书树跟着一起空），落盘前统一摘干净。
+        json.dump(_drop_surrogates({"v": 1, "books": list(books or [])}),
+                  f, ensure_ascii=False, indent=2)
     os.replace(tmp, p)
     return True
 
@@ -597,7 +636,7 @@ def rename_book(books_root, book_id, title):
     book = find_book(books, book_id)
     if not book:
         return False, {"msg": "这本书不在了"}
-    name = str(title or "").strip()[:60]
+    name = _drop_surrogates(str(title or "")).strip()[:60]
     if not name:
         return False, {"msg": "书名不能是空的"}
     book["title"] = name
