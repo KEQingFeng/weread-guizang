@@ -68,6 +68,18 @@ def _esc(s):
     return html.escape(str(s if s is not None else ""), quote=False)
 
 
+def _attrq(s):
+    """属性值里的双引号。
+
+    `_esc` 只转 & < >（quote=False），双引号原样留着 —— 正文里这样正好，可图片
+    地址、链接地址与图片 alt 都是**外部内容**（别人网页里的图片 URL、导入书里
+    写的链接），直接塞进 `src="…"` / `alt="…"` 就是一个逃逸口：一个引号就能关掉
+    属性、再往标签上挂一个 onerror=… ，导出的 HTML 与交给铬内核打印的 PDF 里
+    就是能执行的脚本。凡是往属性里塞的，都必须再过这一道。
+    """
+    return str(s if s is not None else "").replace('"', "&quot;")
+
+
 def _inline(text):
     """行内语法。先转义再替换 —— 转义只动 &<>，不管是 * ` [] 还是括号，
     所以标记符号原样在，替换后插进去的 HTML 也不会被二次转义。"""
@@ -82,8 +94,10 @@ def _inline(text):
     # 白名单放在抽出行内码之后：`<span style="color:#000">` 这种「把标记当例子写」
     # 的句子该照原样出现在 <code> 里，不该真的染上颜色。
     text = _rich(text)
-    text = _IMG.sub(lambda m: '<img src="%s" alt="%s"/>' % (m.group(2), m.group(1)), text)
-    text = _LINK.sub(lambda m: '<a href="%s">%s</a>' % (m.group(2), m.group(1)), text)
+    text = _IMG.sub(lambda m: '<img src="%s" alt="%s"/>'
+                    % (_attrq(m.group(2)), _attrq(m.group(1))), text)
+    text = _LINK.sub(lambda m: '<a href="%s">%s</a>'
+                     % (_attrq(m.group(2)), m.group(1)), text)
     text = _BOLD.sub(lambda m: "<strong>%s</strong>" % m.group(1), text)
     text = _STRIKE.sub(lambda m: "<s>%s</s>" % m.group(1), text)
     text = _ITAL.sub(lambda m: "<em>%s</em>" % m.group(1), text)
