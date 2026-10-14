@@ -49,15 +49,19 @@ def pages_at(chapters, at, frac=0.0):
 
     还没动（第一章、章内 0）算 0 页 —— 否则「翻开一本书」就记了 1 页，今日的账会虚。
     at 越界（读到尾声时前端可能报越界值）一律当读完全书，返回总页数。
+    at 认不出（不是数、NaN、半个对象）当第 0 章 —— 见下面收口那几行的说明。
     """
     chapters = chapters or []
     if not chapters:
         return 0
-    at = int(at or 0)
+    # 章序号先按同一把尺子收口再比大小：它来自界面按心跳上报的读数，可能是
+    # 字符串、NaN、半个对象。这里若直接 int() 会抛，路由那一层没兜（`frac`
+    # 早就用 try 包住了，`record_pos` 存 `at` 时也用的是 `_int`），于是一发脏
+    # 读数的表现是「连接被甩、计划停在原地」，而不是进度不退。认不出的值一律
+    # 当第 0 章：宁可把这一跳当成没前进，也不能当成「读完了」。
+    at = _int(at, 0, 1000000)
     if at >= len(chapters):
         return total_pages(chapters)
-    if at < 0:
-        at = 0
     try:
         frac = float(frac or 0.0)
     except Exception:
