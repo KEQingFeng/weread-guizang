@@ -76,6 +76,11 @@ run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
 run "安娜的档案（账本 / 防穿越 / 去重 / 入库 / 域名）" "$PY" tests/check_anna.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
+# 上面那一套走的是正常输入（章节起点递增、每段都带 id）。这一条专门打两种「归属」错：
+# LLM 漏给章节起点（清洗层把每章都填成 0）时正文会全堆进最后一章、前几章只剩空标题；
+# 编辑器新插的段落带着新 id，却按位置认领了旧段落的说话人 / 置信度。两条都在纯函数与
+# 临时沙盒里当场钉住，不联网、不起浏览器。
+run "视频转笔记归属（章节起点不可用 / 新段不继承旧段字段）" "$PY" tests/check_video_chapters.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
