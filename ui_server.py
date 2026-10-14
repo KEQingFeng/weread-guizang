@@ -2847,6 +2847,11 @@ def list_books(module=None):
                 meta = json.load(open(mp, encoding="utf-8"))
             except Exception:
                 meta = {}
+        # 读得开不等于是个对象：meta.json 被手改成 `[]` / `"书名"` 也照样是合法 JSON，
+        # 而下面每一处都是 meta.get(...)，一处 AttributeError 就让整份书架清单抛出去
+        # （书架是「一本书脏、全部书看不见」）。book_meta 早就是这么兜的，这里对齐口径。
+        if not isinstance(meta, dict):
+            meta = {}
         # 导入的本地书没有 raw/，字数落在 meta.chars 上（取回来的书才有 raw/）
         if not chars:
             try:
@@ -2872,6 +2877,10 @@ def list_books(module=None):
                 progress = json.load(open(pp, encoding="utf-8"))
             except Exception:
                 progress = {}
+        # 同 meta.json 那道：`_progress.json` 里是个数组 / 字符串时也要当「没有进度」，
+        # 不能让 progress.get(...) 把整份清单带崩。
+        if not isinstance(progress, dict):
+            progress = {}
         # 「谁在跑」只有一个真源：进程还在不在。引擎被强制结束时，_progress.json 里会
         # 留下一个 running:true，界面据此把这本书永远标成「正在取」，卡片上的按钮一个都不出
         # —— 用户报的「中止之后不能再取书」有一半是这里来的。
