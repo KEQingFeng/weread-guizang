@@ -3842,7 +3842,10 @@ def anna_do(body):
     mode = str(b.get("mode") or "").strip()
 
     if mode == "search":
-        term = str(b.get("q") or b.get("term") or "").strip()
+        # 关键词来自界面输入框，可能夹着落单的半个代理码点（JS 字符串被拦腰截断时
+        # 留下的）：口令条、状态账、回话三处都用洗过的那一份，否则 json.dump /
+        # 回包序列化一碰到它就抛，用户看到的是「点了搜索没反应」。
+        term = anna_state.clean_term(b.get("q") or b.get("term"))
         if not term:
             return {"ok": False, "msg": "先写个书名或关键词"}
         anna_state.write_cmd(DATA_DIR, term)
