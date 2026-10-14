@@ -603,17 +603,57 @@ def notes_csv_name(title):
 _READSTAT_LOCK = threading.RLock()
 
 
+def _ledger_int(v):
+    """账本里的一个整数读数：认数字与数字字符串，其余当 0；负数归 0。"""
+    try:
+        n = int(v)
+    except Exception:
+        try:
+            n = int(float(v))
+        except Exception:
+            return 0
+    return max(0, n)
+
+
 def load_readstat():
+    """读本机阅读时长账本；坏数据按空账处理，不抛。
+
+    这份 json 不只这个进程在写：云同步会把远端那一份原样落盘，用户也可能手工编辑，
+    旧版本写下的形状更没人保证。activity.load 早就按这个口径洗过一遍，本机阅读时长
+    这本老账一直没洗 —— 一个 "abc" 就能让 /api/readstat 与阅读时每十几秒一次的
+    /api/readstat/tick 抛异常（读数取不到，心跳还一直报错）。所以这里与 activity
+    同一口径：按形状收干净，认不出的丢掉。
+    """
     try:
         with open(READSTAT_PATH, encoding="utf-8") as f:
-            d = json.load(f)
+            raw = json.load(f)
     except Exception:
-        d = {}
-    if not isinstance(d, dict):
-        d = {}
-    d.setdefault("total", 0)
-    d.setdefault("days", {})
-    d.setdefault("books", {})
+        raw = {}
+    src = raw if isinstance(raw, dict) else {}
+    d = {"total": _ledger_int(src.get("total")), "days": {}, "books": {}}
+    days = src.get("days")
+    if isinstance(days, dict):
+        for k, v in days.items():
+            if not isinstance(k, str) or not activity.is_day(k):
+                continue
+            n = _ledger_int(v)
+            if n > 0:                 # 0 秒的那天不携带信息，留着只是噪声
+                d["days"][k] = n
+    books = src.get("books")
+    if isinstance(books, dict):
+        for bid, b in books.items():
+            if not isinstance(bid, str) or not bid.strip() or not isinstance(b, dict):
+                continue
+            title = b.get("title")
+            d["books"][bid.strip()] = {
+                "title": title.strip()[:120] if isinstance(title, str) else "",
+                "seconds": _ledger_int(b.get("seconds")),
+                "last": _ledger_int(b.get("last")),
+            }
+    # 与写入侧同一口径：只留最近 400 天（多了说明是脏账或换过机器）
+    if len(d["days"]) > 400:
+        for k in sorted(d["days"])[:len(d["days"]) - 400]:
+            d["days"].pop(k, None)
     return d
 
 
