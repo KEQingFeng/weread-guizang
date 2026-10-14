@@ -22,6 +22,8 @@ import os
 import signal
 import time
 
+import platform_compat as pc  # noqa: F401  —— 导入即抹掉 XPC_FLAGS 的 0x2 位（见该模块说明）
+
 import anna_state as anna
 
 PROFILE_DIR = os.path.join("cache", "anna_profile")
@@ -182,6 +184,9 @@ def run():
         + ("" if not proxy else " 走本机代理 %s。" % proxy.split("//")[-1].split("@")[-1]))
 
     queue = []
+    # 开窗口之前收尾一次环境：抹掉宿主留下的 XPC_FLAGS 0x2 位、把指向空目录的
+    # PLAYWRIGHT_BROWSERS_PATH 纠回默认位置（详见 platform_compat 里那两个函数）。
+    pc.ensure_browser_env()
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:

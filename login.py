@@ -18,6 +18,8 @@ import math
 import os
 import time
 
+import platform_compat as pc  # noqa: F401  —— 导入即抹掉 XPC_FLAGS 的 0x2 位（见该模块说明）
+
 USER_DATA_DIR = os.path.join("cache", "browser_profile")
 STATE_PATH = os.path.join("cache", "login_state.json")
 SHELF_URL = "https://weread.qq.com/web/shelf"
@@ -104,6 +106,10 @@ async def main():
     # 在首次运行、虚拟环境还没建好的时候就要能起来。顶层 import 会让
     # `import login` 连带把 playwright 拉进来 —— 那一步在装好依赖之前是 ImportError。
     from playwright.async_api import async_playwright
+
+    # 开浏览器之前收尾一次环境：抹掉宿主留下的 XPC_FLAGS 0x2 位、把指向空目录的
+    # PLAYWRIGHT_BROWSERS_PATH 纠回默认位置（详见 platform_compat 里那两个函数）。
+    pc.ensure_browser_env()
 
     os.makedirs(USER_DATA_DIR, exist_ok=True)
     async with async_playwright() as p:

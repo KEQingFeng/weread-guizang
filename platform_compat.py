@@ -26,6 +26,83 @@ IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 
 
+def sanitize_browser_env(env=None):
+    """把会让 Chromium 一启动就被收走的 macOS 标记抹掉，返回改好的那份环境。
+
+    症状（2026-10-15 报的「微信读书连不上 / 浏览器窗口不弹 / 一堆功能失效」）：
+    从某些 XPC 宿主里启动的归藏（Cursor、被 launchd 托管的 .app 等）会继承
+    `XPC_FLAGS` 的 `0x2` 位 —— 那是「本进程由 launchd/XPC 代管」的标记。带着它
+    `fork` 出来的 Chromium 会立刻被系统收走，Playwright 只报一句
+    `Target page, context or browser has been closed`，看不出跟这个标记有关。
+
+    实测（macOS 26，Playwright + Chromium 143）：`XPC_FLAGS` 带 `0x2` 时必失败，
+    `0x0` / `0x1` / `0x4` / 不设该变量都正常。所以只清 `0x2` 这一位，别的位原样保留
+    （它们可能是宿主故意设的，不该被我们抹平）。
+
+    不是 macOS、或环境里没有这个变量时原样返回，不做任何改动。
+    """
+    env = os.environ if env is None else env
+    if not IS_MAC:
+        return env
+    raw = (env.get("XPC_FLAGS") or "").strip()
+    if not raw:
+        return env
+    try:
+        flags = int(raw, 16) if raw.lower().startswith("0x") else int(raw, 0)
+    except ValueError:
+        return env
+    if not (flags & 0x2):
+        return env
+    env["XPC_FLAGS"] = "0x%x" % (flags & ~0x2)
+    return env
+
+
+# 导进来就地生效：这一条只写一次，宿主留下的 `0x2` 从此只活到本模块被 import 之前。
+# 之后本进程自己开的浏览器、以及它 spawn 出去的子进程（登录/安娜/导出），拿到的都是
+# 干净的环境 —— 不必让每个启动点各自记得清一遍。
+sanitize_browser_env()
+
+
+def repair_browser_env(env=None):
+    """把外部注入、却指向空目录的 `PLAYWRIGHT_BROWSERS_PATH` 纠回平台默认位置。
+
+    和 sanitize_browser_env 是同一类「宿主留下的雷」：IDE 沙箱 / 临时目录被回收后，
+    这个变量仍指着一条早已没有浏览器的路径。Playwright 是**直接读环境变量**去找
+    可执行文件的，光在 ms_playwright_dir 里回退不作数（实测：目录换了，`launch` 还是
+    去老地方找、照样失败）。所以这里直接把变量改掉，且只在两件事同时成立时改：
+
+      · 注入的目录里确实没有 Chromium；
+      · 平台默认位置里确实有。
+
+    两条都满足才动。像 `.app` 壳那样把浏览器真放在包里的情形不会被误改（那个目录里
+    有浏览器，第一条就不成立）。不是这个变量的问题时原样返回。
+    """
+    env = os.environ if env is None else env
+    raw = (env.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
+    if not raw or raw == "0":
+        return env
+    cur = os.path.expanduser(raw)
+    if os.path.isdir(cur) and _has_chromium(cur):
+        return env
+    default = _platform_default_playwright_dir()
+    if _has_chromium(default):
+        env["PLAYWRIGHT_BROWSERS_PATH"] = default
+    return env
+
+
+def ensure_browser_env():
+    """开浏览器之前该做的一次环境收尾：先消毒 XPC，再修坏掉的浏览器路径。
+
+    为什么不让它俩在 import 时自动跑：`os.environ` 是全局的，import 时机常常早于
+    调用方铺好自己的沙盒（测试先设 `PLAYWRIGHT_BROWSERS_PATH`、后建目录，就是这个
+    顺序）。在 import 时改会把人家还没建好的目录顶掉。所以真正要开浏览器的入口显式
+    调一次这个函数 —— ui_server 起任务前、以及 login / anna_browser 单跑时。
+    纯读的 ms_playwright_dir() 保持无副作用，既有调用方与测试的契约都不动。
+    """
+    sanitize_browser_env()
+    repair_browser_env()
+
+
 def data_dir(repo):
     """数据（导出的书、缓存、虚拟环境）该放哪。
 
@@ -109,17 +186,37 @@ def venv_python(repo):
     return venv_python_only(repo) or sys.executable
 
 
-def ms_playwright_dir():
-    """Playwright 浏览器的缓存目录（各平台默认位置不同，也认官方环境变量）。"""
-    env = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
-    if env and env != "0":
-        return os.path.expanduser(env)
+def _platform_default_playwright_dir():
+    """各平台 Playwright 浏览器的默认缓存目录（不含环境变量那一层）。"""
     if IS_WIN:
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
         return os.path.join(base, "ms-playwright")
     if IS_MAC:
         return os.path.expanduser("~/Library/Caches/ms-playwright")
     return os.path.expanduser("~/.cache/ms-playwright")
+
+
+def _has_chromium(base):
+    """这个目录底下有没有装好的 Chromium（和 ui_server.chromium_ready 同一把尺子）。"""
+    import glob
+    for pat in ("chromium-*", "chromium_headless_shell-*"):
+        for d in glob.glob(os.path.join(base, pat)):
+            if os.path.isdir(d):
+                return True
+    return False
+
+
+def ms_playwright_dir():
+    """Playwright 浏览器的缓存目录（各平台默认位置不同，也认官方环境变量）。
+
+    环境变量最优先（`.app` 壳就是靠它把浏览器指到应用包里）。这里**只读不判**，
+    保持纯函数语义 —— 「注入的路径指向空目录」那类外部污染由 repair_browser_env
+    在真要开浏览器的入口处修，不在这个 getter 里做副作用。
+    """
+    env = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
+    if env and env != "0":
+        return os.path.expanduser(env)
+    return _platform_default_playwright_dir()
 
 
 def _proxy_alive(url, timeout=0.7):

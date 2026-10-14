@@ -192,8 +192,9 @@ def extract_book_id(raw):
     cands = _ID_ANY.findall(s)
     return max(cands, key=len) if cands else ""
 
-# 浏览器缓存目录各平台不同（Windows 在 %LOCALAPPDATA%，Linux 在 ~/.cache）
-MS_PLAYWRIGHT = pc.ms_playwright_dir()
+# 浏览器缓存目录不再在模块级缓存成常量：那个值会在 import 时定死，而 main() 里的
+# ensure_browser_env 之后可能把 PLAYWRIGHT_BROWSERS_PATH 纠回默认位置。要问就现问
+# pc.ms_playwright_dir()（见 chromium_ready 与启动横幅）。
 
 _lock = threading.Lock()
 LOG = []
@@ -240,8 +241,12 @@ def clear_log():
 
 
 def chromium_ready():
+    # 现问现答，不认模块级快照：那个值会在 import 时定死，而 ensure_browser_env（main 里）
+    # 可能在那之后把 PLAYWRIGHT_BROWSERS_PATH 纠回默认位置。用快照会让「浏览器明明装好了」
+    # 却报没装（或反过来）。
+    base = pc.ms_playwright_dir()
     for pat in ("chromium-*", "chromium_headless_shell-*"):
-        for d in glob.glob(os.path.join(MS_PLAYWRIGHT, pat)):
+        for d in glob.glob(os.path.join(base, pat)):
             if os.path.isdir(d):
                 return True
     return False
@@ -6268,6 +6273,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global LISTEN_PORT
+    # 进程级环境收尾：抹掉宿主留下的 XPC_FLAGS 0x2 位、把指向空目录的
+    # PLAYWRIGHT_BROWSERS_PATH 纠回默认位置。必须在这儿做（越早越好）：本进程 spawn
+    # 出去的所有任务子进程（login / anna / 导出）都继承这份环境，修一次就全覆盖，
+    # 不必让每个启动点各自记得清。
+    pc.ensure_browser_env()
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8770)
     # --takeover：端口上要是挂着「别的代码」写的归藏后端，停掉它、自己接管。
@@ -6295,8 +6305,9 @@ def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     ensure_books_dir()
     # 先把这几行打出来：平台不对时，一眼就能看出用的是哪个解释器、浏览器装在哪
+    # （浏览器那行现问一次：ensure_browser_env 可能刚把它纠回默认位置）
     print(f"  解释器  : {py()}", flush=True)
-    print(f"  浏览器  : {MS_PLAYWRIGHT}", flush=True)
+    print(f"  浏览器  : {pc.ms_playwright_dir()}", flush=True)
     print(f"  书库    : {OUT_DIR}", flush=True)
     for p in range(args.port, args.port + 20):
         try:
