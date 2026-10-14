@@ -20,6 +20,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -116,6 +117,70 @@ def host_blocked(host):
     if legacy is not None:
         return _ip_blocked(ipaddress.ip_address(legacy))
     return False
+
+
+def url_block_reason(u):
+    """这个地址为什么不能替用户去访问（能访问回空串）。
+
+    「发出请求之前」那道闸与「跳转目标」那道闸共用这一处判据：以后加一条拒绝规则，
+    只改这里。urlparse 自己也会对半个 IPv6 方括号之类抛 ValueError，一并收成拒绝。
+    """
+    try:
+        p = urllib.parse.urlparse((u or "").strip())
+        scheme = p.scheme.lower()
+        host = (p.hostname or "").lower()
+    except ValueError:
+        return "这个地址解不出来"
+    if scheme not in ALLOWED_SCHEMES:
+        return "只认 http/https 链接（现在这个是 %s）" % (scheme or "空")
+    if not host:
+        return "这个链接没有主机名"
+    if host_blocked(host):
+        return "这是本机或内网地址，归藏不替你访问"
+    return ""
+
+
+def url_allowed(u):
+    """这个地址能不能替用户去访问。"""
+    return not url_block_reason(u)
+
+
+class RedirectGuard(urllib.request.HTTPRedirectHandler):
+    """跳转目标也要过同一道闸：外站 302 到 192.168.x.x 一样是在替人敲内网的门。
+
+    原先只有内置浏览器那一份自带这道检查（`web_browse._RedirectGuard`）。剪藏的 fetch、
+    平台解析的 fetch_json、订阅的 _http、插图与封面下载都直接用
+    `urllib.request.urlopen` —— 默认 opener 会自己跟着 `Location` 走，而且**不会再问
+    一次**那个地址能不能去。实测拿一个放行的站点 302 到 `http://127.0.0.2/`：正文就是
+    内网那一页，内网服务真被敲到了。
+
+    所以把「每一跳都过闸」做成一份共用的 handler，由 `ensure_redirect_guard()` 装进
+    默认 opener —— 谁走 urlopen 谁就过闸，不必每处各抄一份。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        why = url_block_reason(newurl)
+        if why:
+            raise urllib.error.HTTPError(newurl, code, "跳转被拦下：%s" % why,
+                                         headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_GUARD_INSTALLED = False
+
+
+def ensure_redirect_guard():
+    """把默认 opener 换成带跳转闸门的那个（一个进程只装一次）。
+
+    装在「默认」这一处而不是每次自己 build_opener：要管的不是某一次请求，而是本进程里
+    所有替用户发出的请求 —— 几处取页路都用 `urllib.request.urlopen`，各写一份 opener
+    就等于各留一道「将来可能忘了加」的门。
+    """
+    global _GUARD_INSTALLED
+    if _GUARD_INSTALLED:
+        return
+    urllib.request.install_opener(urllib.request.build_opener(RedirectGuard))
+    _GUARD_INSTALLED = True
 
 
 # 站点反爬/要客户端的几种典型页面，认出来了直接说人话，别把提示页当正文剪进书库
@@ -356,11 +421,9 @@ def safe_image_url(u):
     封面地址是从别人写的页面里读出来的（og:image、正文首图、视频缩略图），
     不像用户粘进来的链接那样有人脑把关。不拦的话，一个恶意页面写个
     og:image="http://192.168.1.1/admin" 就能让归藏替用户去敲内网的门。
+    判据与 fetch / 跳转那道闸是同一处（url_allowed）。
     """
-    p = urllib.parse.urlparse((u or "").strip())
-    host = (p.hostname or "").lower()
-    return (p.scheme.lower() in ALLOWED_SCHEMES and bool(host)
-            and not host_blocked(host))
+    return url_allowed(u)
 
 
 def pick_cover(og_url, markdown, base):
@@ -662,6 +725,9 @@ def fetch(url):
         raise ValueError("这个链接没有主机名，打不开")
     if host_blocked(host):
         raise ValueError("这是本机或内网地址，归藏不替你访问")
+    # 上面挡的是「粘进来的这个地址」，挡不住站点把我们 302 到内网去 —— 那一跳由默认
+    # opener 上的 RedirectGuard 逐一核对（见 ensure_redirect_guard）。
+    ensure_redirect_guard()
     req = urllib.request.Request(u, headers={
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
