@@ -400,6 +400,17 @@ def device_poll(cfg, device_code):
 
 # ---------------------------------------------------------------- 需要同步的文件
 
+# 「还在写」的中间后缀。书库目录里会出现两种半截文件：别的模块正在写
+# （写作稿 / 画板 / 导图一律先写 .tmp 再改名，插图下载先写 .part），
+# 以及同步自己上一次取回断线留下的。两种都不是成品，一个字节都不该上云。
+PART_SUFFIXES = (".part", ".tmp")
+
+
+def _finished_file(name):
+    """这个文件名算不算已经写完 —— 中间产物（.part / .tmp）不算。"""
+    return not (name or "").lower().endswith(PART_SUFFIXES)
+
+
 def _collect(cache_dir, books_dir, what):
     """按勾选，把「本地这边有哪些文件要同步」列出来：[(远端相对路径, 本地绝对路径)]。
 
@@ -416,10 +427,37 @@ def _collect(cache_dir, books_dir, what):
     if what.get("books") and os.path.isdir(books_dir):
         for root, _dirs, files in os.walk(books_dir):
             for fn in files:
+                if not _finished_file(fn):
+                    continue
                 fp = os.path.join(root, fn)
                 rel = os.path.relpath(fp, books_dir)
                 pairs.append((REMOTE_ROOT + "/books/" + rel.replace(os.sep, "/"), fp))
     return pairs
+
+
+def _write_atomic(path, blob):
+    """取回来的字节先写同目录 .part，写完再一次性改名到目标位置。
+
+    为什么非这样不可：本地没有这份文件时同步才去远端取。若直接
+    `open(path, "wb")` 写一半就断了（网卡、盘满、进程被杀），目标位置会留下一个
+    长度不对却「存在」的文件；下一次同步的规则是「本地有就上传」，于是这个半截件
+    被传回云端，把好的那份盖掉 —— 一次断线变成永久损坏。中间文件先落在目标旁边，
+    改名是同一文件系统上的原子操作：要么旧内容完整、要么新内容完整，没有第三种。
+    """
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".part"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(blob)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _remote_dir(path):
@@ -470,9 +508,7 @@ def run(cfg, cache_dir, books_dir, log=None):
                 got = _ms_get(c, remote)
             # 走到这儿＝本地没有、只能从远端拉
             if got is not None:
-                os.makedirs(os.path.dirname(local), exist_ok=True)
-                with open(local, "wb") as f:
-                    f.write(got)
+                _write_atomic(local, got)
                 down += 1
         except Exception as e:
             fail += 1
