@@ -571,7 +571,7 @@ def load_stuck(stuck_path, catalog_len):
     for k, v in strikes.items():
         try:
             out[int(k)] = int(v)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
     return out
 

@@ -132,7 +132,7 @@ def _sec(value):
     """
     try:
         out = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0.0
     if not math.isfinite(out) or out <= 0:      # <= 0 顺手把 -0.0 也归零
         return 0.0
@@ -145,7 +145,7 @@ def _maybe_sec(value):
         return None
     try:
         float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return _sec(value)
 
@@ -544,7 +544,7 @@ def _page_url(url, page):
 def _as_int(value):
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -1107,7 +1107,7 @@ def _normalize_nodes(nodes):
         anchor = item.get("time_anchor")
         try:
             anchor = float(anchor) if anchor is not None else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             anchor = None
         out.append({"id": nid[:60], "label": label[:120], "type": kind,
                     "summary": str(item.get("summary") or "").strip()[:800],
@@ -1170,7 +1170,7 @@ def _flatten_tree(blob, title):
                 kids.append(cid)
         try:
             anchor = float(item.get("time_anchor")) if item.get("time_anchor") is not None else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             anchor = None
         flat.append({"id": nid[:60], "label": str(item.get("label") or title)[:120],
                      "type": kind,

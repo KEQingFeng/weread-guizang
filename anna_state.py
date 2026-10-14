@@ -100,9 +100,12 @@ def clean_term(term):
 
 
 def _as_int(v):
+    """账里那些计数的收口。越界值（`Infinity` / `1e400`，`json` 认）走 OverflowError，
+    和形状不对一样都当 0 —— 漏掉它 `read_state` 会整份退回空账，界面上看就是
+    「安娜这一栏的记录全没了」。"""
     try:
         n = int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
     return n if n >= 0 else 0
 
