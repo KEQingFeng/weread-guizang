@@ -19,6 +19,7 @@ from collections import deque
 
 from playwright.async_api import async_playwright
 
+import book_layout
 import download_images
 import platform_compat as pc
 
@@ -102,6 +103,11 @@ def write_progress(book_dir, **fields):
             data = json.load(open(path, encoding="utf-8"))
     except Exception:
         data = {}
+    # 读得开不等于是个对象：_progress.json 被手改成 `[]` / `"书名"` / `123` 也是合法
+    # JSON，而旧读法只兜住了 json.load 那一下，data.update 在 try 之外 —— 一个脏形状
+    # 就让 write_progress 抛 AttributeError，取书在开头（running=True）或收尾时整趟垮掉。
+    # 与界面那边 list_books 同一条口径：不是对象就当「没有进度」，从头记。
+    data = data if isinstance(data, dict) else {}
     data.update(fields)
     data["updated_at"] = time.time()
     tmp = path + ".tmp"
@@ -111,6 +117,39 @@ def write_progress(book_dir, **fields):
         os.replace(tmp, path)
     except Exception:
         pass
+
+
+def _seen_image_urls(raw_dir):
+    """续传开头清点「已经抓过的图」：raw/*.json 里的 images[].url。
+
+    raw/ 是逐页扒下来的外部数据：整份可能是 `[]` / 字符串 / 数字，images 里也可能
+    混进不是对象的项、或没有 url 的项。旧读法直接 `json.load(...).get("images")` +
+    `img["url"]` —— 它在取书开头无条件跑一遍，**一条脏记录就让这本书再也取不动**
+    （报的还是看不懂的 AttributeError / TypeError），与 collect_tasks「坏记录只跳过
+    不牵连」的约定正好相反。只收「是对象且 url 是非空字符串」的项，读不开的文件
+    整份跳过；认得出的一个字不改。
+    """
+    seen = set()
+    try:
+        names = sorted(os.listdir(raw_dir))
+    except OSError:
+        return seen
+    for jf in names:
+        if not jf.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(raw_dir, jf), encoding="utf-8") as f:
+                doc = json.load(f)
+        except Exception:
+            continue
+        images = doc.get("images") if isinstance(doc, dict) else None
+        if not isinstance(images, list):
+            continue
+        for im in images:
+            url = im.get("url") if isinstance(im, dict) else None
+            if isinstance(url, str) and url:
+                seen.add(url)
+    return seen
 
 
 async def run_bounded(coro, timeout, what):
@@ -1542,20 +1581,13 @@ async def main(book_id):
     for d in (md_dir, raw_dir, img_dir):
         os.makedirs(d, exist_ok=True)
 
-    seen_imgs = set()
-    for jf in os.listdir(raw_dir):
-        if jf.endswith(".json"):
-            for img in json.load(open(os.path.join(raw_dir, jf), encoding="utf-8")).get("images", []):
-                seen_imgs.add(img["url"])
+    seen_imgs = _seen_image_urls(raw_dir)
 
     catalog_path = os.path.join(book_dir, "_catalog.json")
-    meta_path = os.path.join(book_dir, "meta.json")
-    meta = {}
-    if os.path.exists(meta_path):
-        try:
-            meta = json.load(open(meta_path, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    # meta.json 只认对象：与界面、书库那边共用 book_layout.read_meta 这把尺子。
+    # 旧读法 meta = json.load(...) 之后直接 meta.get(...)，手改成 `[]` / `"书名"`
+    # 就 AttributeError —— 取书还没翻第一页就带着「书名读不出来」垮掉。
+    meta = book_layout.read_meta(book_dir)
     book_title = book_author = ""
     # 书名要能认出来：界面取书时写的 meta.json 有标题，第一轮会话抛异常没返回也不能丢，
     # 否则合并出的 md 会用书号当文件名（看着就像「导出了一堆没名字的东西」）。
@@ -1732,12 +1764,9 @@ async def main(book_id):
 
     # 由引擎自己落完成标记：无论这次是界面跑的、命令行跑的，还是 MCP 触发的，
     # 前端的百分比与「导出成功」都以此为据（之前只在 ui_server 侧写，命令行跑的就漏了）。
-    meta_path = os.path.join(book_dir, "meta.json")
-    if os.path.exists(meta_path):
-        try:
-            meta = json.load(open(meta_path, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    # 读口跟开头同一把尺子：meta.json 是脏形状时当没有 meta，收尾这一步不许把
+    # 一趟明明取成功的书判成失败（done 写不进去，界面就一直显示没取完）。
+    meta = book_layout.read_meta(book_dir)
     meta.update({
         "title": book_title if book_title != book_id else (meta.get("title") or book_id),
         "author": book_author or meta.get("author") or "",
@@ -1751,7 +1780,7 @@ async def main(book_id):
         meta.pop("stopped_reason", None)
     else:
         meta["stopped_reason"] = stop_reason or "中途结束"
-    with open(meta_path, "w", encoding="utf-8") as f:
+    with open(os.path.join(book_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
