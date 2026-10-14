@@ -13,9 +13,19 @@
 符处理干净**比指望每个调用点都记得转义要可靠得多（前端同样会转义，两层都要有）。
 """
 
+import re
+
 NAME_MAX = 40
 BIO_MAX = 200
 AVATAR_MAX = 8 * 1024 * 1024
+
+# 半个代理码点（U+D800–U+DFFF 单独出现，不成对）：浏览器的 JS 字符串被拦腰截断时
+# 会留下它，JSON 那边 `json.loads` 收得下（形如 "\ud83d"），于是它一路走到
+# config.json 落盘那一步 —— 而那份文件是 ensure_ascii=False 写的，`json.dump`
+# 碰到它就抛 UnicodeEncodeError，用户看到的是「改个名字没保存上」，cache/ 里还
+# 留一个半截 .tmp。它是坏输入不是内容，洗掉比让整份资料存不下去强。
+# 成对的代理码点不必管：json 解码时已经合成一个真字符，这里只会摘到落单的那个。
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 # 只认这四种魔数：声明的类型不可信，扩展名更不可信，看字节头
 _MAGIC = (
@@ -59,8 +69,9 @@ def sniff_image(raw):
 
 
 def clean_text(s, limit):
-    """去控制字符（含零宽与双向控制符）+ 夹长度。"""
+    """去控制字符（含零宽、双向控制符与落单的半个代理码点）+ 夹长度。"""
     s = str(s if s is not None else "")
+    s = _SURROGATE.sub("", s)
     s = "".join(ch for ch in s
                 if ch == "\n" or (not _is_control(ch) and ch not in _INVISIBLE))
     s = s.replace("\n", " ").strip()
