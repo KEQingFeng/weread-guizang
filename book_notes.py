@@ -16,6 +16,8 @@ import re
 import time
 import uuid
 
+from md_fence import prose_lines
+
 NOTES_FILE = "notes.json"
 EXPORT_MD = "notes.md"
 EXPORT_MAP = "mindmap.svg"
@@ -420,9 +422,14 @@ def _node(label, kids=None, color=None):
 
 
 def _headings(body):
-    """条目正文里的标题行 → 子分支（一到三级，去掉 Markdown 记号）。"""
+    """条目正文里的标题行 → 子分支（一到三级，去掉 Markdown 记号）。
+
+    正文里贴一段带 `# 注释` 的代码是常事，块里的井号不是小标题：跳块走 md_fence
+    那一把尺子，跟写作大纲、导出渲染同一个口径。否则导图会凭空多出一串
+    `pip install` 这样的「小节」，而这错误不报错、只是把结构讲错。
+    """
     out = []
-    for ln in (body or "").split("\n"):
+    for _i, ln in prose_lines(body):
         m = re.match(r"^\s{0,3}(#{1,3})\s+(.+?)\s*$", ln)
         if m:
             out.append(_clip(m.group(2), 40))

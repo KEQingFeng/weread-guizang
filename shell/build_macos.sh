@@ -63,6 +63,7 @@ APP_FILES=(
   board.py
   mindmap.py
   net_guard.py
+  md_fence.py
   requirements.txt
 )
 APP_DIRS=(
