@@ -27,7 +27,13 @@ import re
 # （ui.html / mcp 适配器）写的是不是同一个数。
 STORE_BOOK_ID_MIN = 5
 STORE_BOOK_ID_MAX = 20
-STORE_BOOK_ID_RE = re.compile(r"\d{%d,%d}" % (STORE_BOOK_ID_MIN, STORE_BOOK_ID_MAX))
+# `re.ASCII` 不能省：Python 的 `\d` 默认连全角数字（１２３４５）与阿拉伯-印度数字
+# （١٢٣٤٥）都算「数字」，而界面上那几处是 JS 的 /^\d{5,20}$/ —— 按 ECMAScript 的定义，
+# `\d` 只认 0–9。少了这个旗子，Python 这把尺子就比界面那把宽一档：全角数字组成的串
+# 在界面上被拒、从这个口进来却被当成书城短 id，一路发给加书架接口换一个 succ:0 回来
+# （用户看到的是「点了没反应」）。书城短 id 本来就只是 0–9，两处必须是同一把尺子。
+STORE_BOOK_ID_RE = re.compile(r"\d{%d,%d}" % (STORE_BOOK_ID_MIN, STORE_BOOK_ID_MAX),
+                              re.ASCII)
 
 
 def is_store_book_id(value):
