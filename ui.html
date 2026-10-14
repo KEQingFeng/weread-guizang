@@ -1767,6 +1767,40 @@
   .nitem .mt{font-size:11px; color:var(--ink-3); margin-top:5px}
   .nitem .mt .src{color:var(--ink-2)}
 
+  /* 划线笔记列表改成「书籍卡片式瀑布流」：一列一列往下排，卡片按书名长短自然错落。
+     微信读书的划线 + 取书时在本机划的线并成同一面墙，同一本书只出一张卡。 */
+  .nbwall{columns:3; column-gap:14px; padding:15px}
+  @media (max-width:1000px){ .nbwall{columns:2} }
+  @media (max-width:560px){ .nbwall{columns:1} }
+  .nbcard{
+    break-inside:avoid; margin-bottom:14px; border-radius:var(--r-sm); cursor:pointer;
+    background:var(--glass-2); border:1px solid var(--line); overflow:hidden;
+    animation:soften .4s var(--spring) backwards;
+    transition:transform .26s var(--spring), box-shadow .22s ease,
+               border-color .2s ease, background .2s ease;
+  }
+  .nbcard:hover{transform:translateY(-3px); box-shadow:var(--shadow); border-color:var(--line-2); background:var(--glass)}
+  .nbcard .cv{position:relative; aspect-ratio:2/3; overflow:hidden; display:grid; place-items:center;
+    background:linear-gradient(150deg,#e7eefb,#d9e5f7)}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .nbcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)} }
+  html[data-theme="dark"] .nbcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)}
+  .nbcard .cv img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block}
+  .nbcard .cv .ph{font-size:30px; font-weight:600; opacity:.2; user-select:none}
+  .nbcard .bd{padding:10px 12px 12px}
+  .nbcard .n{font-size:13px; font-weight:600; line-height:1.4;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .nbcard .a{font-size:11px; color:var(--ink-3); margin-top:3px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .nbcard .cn{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .nbcard .cn span{font-size:10.5px; padding:2px 8px; border-radius:999px;
+    background:var(--surface-2); border:1px solid var(--line); color:var(--ink-2);
+    transition:border-color .2s ease, color .2s ease}
+  /* 来源徽章：微信读书那几支笔是官方的、取书的是本机划的，颜色分开一眼能认。 */
+  .nbcard .cn span.wx{color:var(--accent); border-color:var(--accent-soft); background:var(--accent-soft)}
+  .nbcard .cn span.lc{color:#2c8f63; border-color:rgba(44,143,99,.24); background:rgba(44,143,99,.11)}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .nbcard .cn span.lc{color:#7fd6a8; background:rgba(127,214,168,.13)} }
+  html[data-theme="dark"] .nbcard .cn span.lc{color:#7fd6a8; background:rgba(127,214,168,.13)}
+
   @keyframes arrive{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:none}}
   /* 羊皮卷：书架卡滚进视口才从上往下摊开，同批内错开几十毫秒 */
   @keyframes unfurl{
@@ -14937,9 +14971,85 @@ function paintAnna(a) {
 
 let nbBooks = [], nbItems = [], nbSel = new Set(), nbOpen = null, nbTitle = '';
 
+/** 一张书卡上到底有多少条：微信读书的划线/想法/书签 + 取书时在本机划的线。 */
+function nbCount(b) {
+  const n = (b.local || {}).notes || {};
+  return (b.noteCount || 0) + (b.reviewCount || 0) + (b.bookmarkCount || 0)
+       + (n.marks || 0) + (n.entries || 0);
+}
+
+/** 一本笔记书 → 瀑布流里的一张卡片。微信读书与取书两个来源各占一枚徽章，
+ *  同一本书两边都有也只出一张卡（点进去两边的条目并排列出）。 */
+function nbCard(b) {
+  const info = b.book || {};
+  const lb = b.local || {};
+  const title = info.title || lb.title || b.bookId || lb.id || '';
+  const card = document.createElement('div');
+  card.className = 'nbcard';
+  card.style.cursor = 'pointer';
+  const cv = document.createElement('div');
+  cv.className = 'cv';
+  const ph = () => {
+    const d = document.createElement('div');
+    d.className = 'ph';
+    d.textContent = (title || '书').slice(0, 1);
+    cv.replaceChildren(d);
+  };
+  // 封面按「官方图 → 本地缓存」顺次退：官方图床有时拒外链，第一张挂了就换下一张，
+  // 全挂才露首字底纹，不留破图。
+  const alts = [];
+  if (info.cover) alts.push(info.cover);
+  if (keySet && b.bookId) alts.push('/api/cover?book=' + encodeURIComponent(b.bookId));
+  if (lb.cover && lb.id) alts.push('/api/cover?book=' + encodeURIComponent(lb.id));
+  if (alts.length) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    let i = 0;
+    img.onerror = () => { if (i < alts.length) img.src = alts[i++]; else ph(); };
+    img.src = alts[i++];
+    cv.append(img);
+  } else ph();
+  const bd = document.createElement('div');
+  bd.className = 'bd';
+  const nm = document.createElement('div');
+  nm.className = 'n';
+  nm.textContent = title;
+  bd.append(nm);
+  if (info.author || lb.author) {
+    const au = document.createElement('div');
+    au.className = 'a';
+    au.textContent = info.author || lb.author;
+    bd.append(au);
+  }
+  const cn = document.createElement('div');
+  cn.className = 'cn';
+  const wn = (b.noteCount || 0) + (b.reviewCount || 0);
+  const ln = (((lb.notes || {}).marks) || 0) + (((lb.notes || {}).entries) || 0);
+  if (wn) {
+    const s = document.createElement('span');
+    s.className = 'wx';
+    s.textContent = `微信 ${wn} 条`;
+    cn.append(s);
+  }
+  if (ln) {
+    const s = document.createElement('span');
+    s.className = 'lc';
+    s.textContent = `取书 ${ln} 条`;
+    cn.append(s);
+  }
+  if (cn.childElementCount) bd.append(cn);
+  card.append(cv, bd);
+  card.onclick = () => openNotebook(b);
+  return card;
+}
+
 async function renderNotebooks() {
   const {p, body} = viewPane('notes', viewHeader('划线笔记'));
-  if (!keySet) { body.innerHTML = notReady(); return; }
+  // 没填微信读书 Key 时，本地取书的划线照样能看 —— 这一屏不是只有官方那一路。
+  const hasLocal = Object.values(local).some(b => b && b.notes
+    && ((b.notes.marks || 0) + (b.notes.entries || 0)) > 0);
+  if (!keySet && !hasLocal) { body.innerHTML = notReady(); return; }
   // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白。
   // 空手进来时铺的是同形状骨架（7 行 ≈ 一屏），数据到位再淡着换上去。
   const cold = !nbBooks.length;
@@ -14947,34 +15057,42 @@ async function renderNotebooks() {
   try {
     // 侧边栏悬停时预取的那份就在手边（见 wireNavAhead）：已经落地的直接用，
     // 还在飞的搭上它那一趟，只有压根没预判过才自己发。
-    const hot = await preAwait('notebooks');
-    const d = hot != null ? hot : await wcall('/user/notebooks', {count: 100});
-    nbBooks = d.books || [];
-    setNote('notes', nbBooks.length
-      ? `${d.totalBookCount || nbBooks.length} 本 · 共 ${d.totalNoteCount || 0} 条` : '');
-    if (!nbBooks.length) { setHtml(body, '<div class="emptyline">还没有笔记</div>'); return; }
-    // 数字一个没变就别动 DOM —— 反复进这一屏时列表稳稳地留在那儿
-    const sig = nbBooks.map(b => `${(b.book || {}).title || b.bookId}|${b.noteCount || 0}`
-      + `/${b.reviewCount || 0}/${b.bookmarkCount || 0}`).join(',');
+    const hot = keySet ? await preAwait('notebooks') : null;
+    const d = keySet
+      ? (hot != null ? hot : await wcall('/user/notebooks', {count: 100}))
+      : {books: []};
+    // 两个来源并成一面墙：微信读书的官方划线（/user/notebooks）+ 取回来存在
+    // 本机的书里自己划的线（/api/state 的 books[].notes，正文走 /api/mynotes）。
+    // 同一本书两边都有就并成一张卡，书名去空白与书名号后比对。
+    const norm = s => String(s || '').replace(/\s+/g, '')
+      .replace(/[《》〈〉()（）\[\]【】·:：\-—_]/g, '').toLowerCase();
+    const merged = (d.books || []).map(b => ({...b, key: 'w:' + b.bookId}));
+    const byTitle = new Map();
+    for (const b of merged) byTitle.set(norm((b.book || {}).title), b);
+    for (const lb of Object.values(local)) {
+      const n = (lb && lb.notes) || {};
+      if (!((n.marks || 0) + (n.entries || 0))) continue;
+      const k = norm(lb.title);
+      const hit = k && byTitle.get(k);
+      if (hit) { hit.local = lb; continue; }
+      const card = {bookId: '', local: lb, key: 'l:' + lb.id};
+      merged.push(card);
+      if (k) byTitle.set(k, card);
+    }
+    nbBooks = merged;
+    const totalN = merged.reduce((n, b) => n + nbCount(b), 0);
+    setNote('notes', merged.length ? `${merged.length} 本 · 共 ${totalN} 条` : '');
+    if (!merged.length) { setHtml(body, '<div class="emptyline">还没有笔记</div>'); return; }
+    // 数字一个没变就别动 DOM —— 反复进这一屏时那一墙卡片稳稳地留在那儿
+    const sig = merged.map(b => `${b.key}|${nbCount(b)}`).join(',');
     if (p.dataset.sig === sig && body.firstElementChild
-        && body.firstElementChild.className === 'wrrow') return;
+        && body.firstElementChild.className === 'nbwall') return;
     p.dataset.sig = sig;
-    body.replaceChildren(...nbBooks.map(b => {
-      const info = b.book || {};
-      const row = document.createElement('div');
-      row.className = 'wrrow';
-      row.style.cursor = 'pointer';
-      const nm = document.createElement('span');
-      nm.className = 'nm';
-      nm.textContent = info.title || b.bookId;
-      const ct = document.createElement('span');
-      ct.className = 'ct';
-      ct.textContent = `划线 ${b.noteCount || 0} · 想法 ${b.reviewCount || 0} · 书签 ${b.bookmarkCount || 0}`;
-      row.append(nm, ct);
-      row.onclick = () => openNotebook(b);
-      return row;
-    }));
-    if (cold) fadeIn(body);
+    const wall = document.createElement('div');
+    wall.className = 'nbwall';
+    merged.forEach(b => wall.append(nbCard(b)));
+    body.replaceChildren(wall);
+    if (cold) fadeIn(wall);
   } catch (e) {
     body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
   }
@@ -14982,11 +15100,13 @@ async function renderNotebooks() {
 
 async function openNotebook(b) {
   const info = b.book || {};
-  const title = info.title || b.bookId;
+  const lb = b.local || {};
+  const title = info.title || lb.title || b.bookId || lb.id || '';
+  const key = b.key || ('w:' + (b.bookId || ''));
   // 还是同一本、列表也已经读出来了：直接把它显示出来就行 —— 不重画、不再打接口，
   // 连之前勾了哪些条目都还在原地。
   const old = PANES.notebook;
-  if (old && old.dataset.book === String(b.bookId || '') && nbItems.length) {
+  if (old && old.dataset.book === key && nbItems.length) {
     paneEl('notebook');
     return;
   }
@@ -15019,22 +15139,43 @@ async function openNotebook(b) {
     const c = p.querySelector('#nbCnt');
     if (c) c.textContent = '读取中…';
   }
-  p.dataset.book = b.bookId || '';
+  p.dataset.book = key;
 
   try {
-    const [mk, rv] = await Promise.all([
+    const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
+    // 微信读书那两路只在有 bookId 时打；取书笔记（本机 notes.json）走 /api/mynotes，
+    // 两边的请求一起发，回来按时间倒序混排 —— 一本书的划线本来就该按时间线看。
+    const wjobs = b.bookId ? [
       wcall('/book/bookmarklist', {bookId: b.bookId}).catch(() => ({})),
       wcall('/review/list/mine', {bookid: b.bookId}).catch(() => ({})),
-    ]);
-    const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
-    for (const x of (mk.updated || [])) {
-      if (x.markText) nbItems.push({text: x.markText, src: '划线', when: when(x.createTime), at: x.createTime || 0});
+    ] : [null, null];
+    const ljob = lb.id
+      ? fetch('/api/mynotes?book=' + encodeURIComponent(lb.id))
+          .then(r => r.json()).catch(() => ({}))
+      : Promise.resolve({});
+    const [[mk, rv], loc] = await Promise.all([Promise.all(wjobs), ljob]);
+    if (b.bookId) {
+      for (const x of ((mk || {}).updated || [])) {
+        if (x.markText) nbItems.push({text: x.markText, src: '微信划线', when: when(x.createTime), at: x.createTime || 0});
+      }
+      for (const x of ((rv || {}).reviews || [])) {
+        const r = x.review || x;
+        const t = r.content || r.abstract || '';
+        if (t) nbItems.push({text: t, src: '微信想法', when: when(r.createTime), at: r.createTime || 0});
+      }
     }
-    for (const x of (rv.reviews || [])) {
-      const r = x.review || x;
-      const t = r.content || r.abstract || '';
-      if (t) nbItems.push({text: t, src: '想法', when: when(r.createTime), at: r.createTime || 0});
+    const doc = (loc && loc.doc) || {};
+    const KIND = {highlight: '取书划线', bold: '取书加粗', underline: '取书下划线',
+                  strike: '取书删除线', note: '取书批注'};
+    for (const m of (doc.marks || [])) {
+      const t = [m.text, m.memo].filter(Boolean).join('\n');
+      if (t) nbItems.push({text: t, src: KIND[m.kind] || '取书划线', when: when(m.created_at), at: m.created_at || 0});
     }
+    for (const e of (doc.entries || [])) {
+      const t = [e.title, e.body].filter(Boolean).join('\n');
+      if (t) nbItems.push({text: t, src: '取书笔记', when: when(e.created_at), at: e.created_at || 0});
+    }
+    nbItems.sort((x, y) => (y.at || 0) - (x.at || 0));
   } catch (e) {
     list.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
     return;
