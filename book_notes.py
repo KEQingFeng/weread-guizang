@@ -184,16 +184,19 @@ def _int(v, default=None):
     `created_at: "1728-10-14"`（手改过 / 外部 Agent 写进来的）在上层走的是
     `int(...)`，一个 ValueError 就被 /api/mynotes 兜成「存不下」—— 丢的是整份
     笔记。纯数字串与小数都认，方便把旧档接回来。
+
+    越界值（`Infinity` / `1e400`，`json` 照样解析得动）`int()` 抛的是 OverflowError
+    而不是 ValueError，所以两处都要接住 —— 否则「认不出回默认」这句承诺是假的。
     """
     if not v:
         return default
     try:
         return int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         pass
     try:
         return int(float(str(v).strip()))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 

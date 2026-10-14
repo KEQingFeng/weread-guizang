@@ -203,7 +203,9 @@ def _fmt_epoch(ts):
     """秒/毫秒时间戳 → 本地时间文本。两家的字段单位不一样，靠量级自己判。"""
     try:
         n = float(ts)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError 是「整数大到 float 装不下」（外站 JSON 里一个 400 位的数），
+        # 和 inf / 坏串一样都算认不出：回空串，不让一个时间字段带走整篇解析。
         return ""
     if n > 1e11:                       # 十一位以上是毫秒（小红书给的就是毫秒）
         n /= 1000.0

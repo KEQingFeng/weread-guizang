@@ -332,16 +332,20 @@ CSV_TIME_FMT = "%Y-%m-%d %H:%M:%S"
 def csv_time(ts):
     """Unix 秒 → flomo 导入要求的 `YYYY-MM-DD HH:MM:SS`（本机时区）。
 
-    拿不到时间（空、0、负数）就回空串 —— flomo 收到空列会把它记成导入当时，
-    比硬塞一个「1970-01-01」强。
+    拿不到时间（空、0、负数、越界到平台 time_t 装不下）就回空串 —— flomo 收到空列
+    会把它记成导入当时，比硬塞一个「1970-01-01」强；也比一条坏时间戳把整份导出
+    写不出来强（`json` 认 `Infinity` / `1e400`，落进账本再原样传回来就是这种值）。
     """
     try:
         n = int(ts or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         n = 0
     if n <= 0:
         return ""
-    return time.strftime(CSV_TIME_FMT, time.localtime(n))
+    try:
+        return time.strftime(CSV_TIME_FMT, time.localtime(n))
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _crlf(text):
@@ -375,10 +379,15 @@ def path_in(flomo_dir):
 
 
 def _as_int(value, default=0):
-    """脏账里的数字：能认的照认（"42" 也是 42），认不出的回 default，绝不抛。"""
+    """脏账里的数字：能认的照认（"42" 也是 42），认不出的回 default，绝不抛。
+
+    除了形状不对（TypeError / ValueError），还要接住**越界**：`json` 认 `Infinity`
+    与 `1e400`，这些值 `int()` 抛的是 OverflowError —— 漏掉它，一条坏 `ts` 就让
+    `load()` 整份抛穿，便签那屏从「一条坏」变成「一条都看不到」。
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 

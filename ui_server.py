@@ -4137,12 +4137,19 @@ def feed_do(body):
 
 
 def _vnum(v):
-    """meta 里的数字收成 int，脏值当 0 —— 清单只是展示用，不该因为一个怪值就整栏崩掉。"""
+    """meta 里的数字收成 int，脏值当 0 —— 清单只是展示用，不该因为一个怪值就整栏崩掉。
+
+    「脏」包括越界：`json` 认 `Infinity` / `1e400`，`float("1e400")` 回 inf，
+    `int(inf)` 抛的是 OverflowError 而不是 ValueError；原先只写了 NaN 那一半，
+    于是视频栏一本 meta 里带个越界时长就能让 `video_books()` 整份 500。
+    """
     try:
         n = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
-    return int(n) if n == n else 0
+    if not (-1e308 < n < 1e308):        # NaN 与 ±inf 都落这儿
+        return 0
+    return int(n)
 
 
 def _video_exports(book_dir):
@@ -4191,7 +4198,7 @@ def video_books():
             continue
         try:
             upd = float(m.get("updated_at") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             upd = 0.0
         out.append({
             "id": name,
