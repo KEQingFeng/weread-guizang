@@ -427,13 +427,29 @@ def get_last_chapter_title(md_dir):
     return title, idx
 
 
-def load_last_catalog_title(catalog_path):
+def _catalog_items(catalog_path):
+    """目录账本只认「一串字符串」；半截档或手改成别的形状一律当没目录。
+
+    _catalog.json 是 dump_catalog_titles 写出去的，但用户会手工编辑，旧版本也落
+    过别的形状。旧读法把「读得出来」当成了「形状对」：`[1,2]` 让 re.split 抛
+    TypeError、`null` / 数字让 for 抛 TypeError —— 整个取书任务就带着「读取目录」
+    这句话垮掉；`"abc"` / 字典更阴，不报错，却把单个字符或 key 当成目录项，续传
+    锚点钉到错的位置。认不出的项丢掉（与「标题为空的那一项」同一档），能认的
+    原样保留，顺序不动。
+    """
     try:
         with open(catalog_path, encoding="utf-8") as f:
-            titles = json.load(f)
-        return titles[-1] if titles else ""
+            raw = json.load(f)
     except Exception:
-        return ""
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [t for t in raw if isinstance(t, str)]
+
+
+def load_last_catalog_title(catalog_path):
+    titles = _catalog_items(catalog_path)
+    return titles[-1] if titles else ""
 
 
 # ---------- 分章：认正文里的标题，不认会跳动的顶栏 ----------
@@ -451,14 +467,9 @@ def norm_title(s):
 
 def load_catalog_titles(catalog_path):
     """目录标题，去掉「当前读到 xx%」后缀，按长度降序（长标题优先匹配）。"""
-    try:
-        with open(catalog_path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except Exception:
-        return []
     out = []
-    for t in raw:
-        t = re.split(r"当前读到", t or "")[0].strip()
+    for t in _catalog_items(catalog_path):
+        t = re.split(r"当前读到", t)[0].strip()
         if t:
             out.append((norm_title(t), t))
     out.sort(key=lambda x: -len(x[0]))
@@ -491,14 +502,9 @@ def load_catalog_ordered(catalog_path):
     用来把阅读器的位置用目录钉到「第一个还没写出来的章节」。两者都从同一份
     _catalog.json 来，dump_catalog_titles 存的就是 DOM 顺序，所以下标是对得上的。
     """
-    try:
-        with open(catalog_path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except Exception:
-        return []
     out = []
-    for t in raw:
-        t = re.split(r"当前读到", t or "")[0].strip()
+    for t in _catalog_items(catalog_path):
+        t = re.split(r"当前读到", t)[0].strip()
         if t:
             out.append((norm_title(t), t))
     return out
@@ -554,10 +560,15 @@ def load_stuck(stuck_path, catalog_len):
             data = json.load(f)
     except Exception:
         return {}
+    if not isinstance(data, dict):
+        return {}
     if data.get("catalog") != catalog_len:
         return {}
+    strikes = data.get("strikes")
+    if not isinstance(strikes, dict):
+        return {}
     out = {}
-    for k, v in (data.get("strikes") or {}).items():
+    for k, v in strikes.items():
         try:
             out[int(k)] = int(v)
         except (TypeError, ValueError):
@@ -1014,11 +1025,8 @@ async def hook_blocks(page, seen_imgs):
 
 def first_catalog_title(catalog_path):
     """目录首项（丢掉「当前读到 xx%」这类尾巴）。"""
-    try:
-        with open(catalog_path, encoding="utf-8") as f:
-            return re.split(r"当前读到", (json.load(f) or [""])[0])[0].strip()
-    except Exception:
-        return ""
+    items = _catalog_items(catalog_path)
+    return re.split(r"当前读到", items[0])[0].strip() if items else ""
 
 
 def front_title_index(blocks, want):
