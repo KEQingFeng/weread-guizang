@@ -80,6 +80,18 @@ def _attrq(s):
     return str(s if s is not None else "").replace('"', "&quot;")
 
 
+def _attr(s):
+    """双引号属性值里的一整段字符串：先按文本转义 &<>，再把双引号收成 &quot;。
+
+    `_attrq` 只做后一半 —— 正文那条路的调用点（`_inline`）自己先 `_esc` 过一遍，
+    所以只补引号就够。可 images/ 目录里的文件名是直接读出来的（下载器只挡住了
+    路径分隔符与控制符，`& < > "` 都留着），没有「先 `_esc`」那一道，
+    这里一次到位才不会漏：漏一个引号，`href="img/…"` 就会提前收尾，
+    整份 content.opf / cover.xhtml 不再是合法 XML。
+    """
+    return _attrq(_esc(s))
+
+
 def _inline(text):
     """行内语法。先转义再替换 —— 转义只动 &<>，不管是 * ` [] 还是括号，
     所以标记符号原样在，替换后插进去的 HTML 也不会被二次转义。"""
@@ -437,7 +449,6 @@ def build_epub(book_dir, dest, title="", author="", cover=None):
     uid = "urn:uuid:" + str(uuid.uuid4())
 
     imgs = _book_images(book_dir)
-    img_names = {f: "img/%s" % f for f in imgs}
 
     secs = []
     for i, (_fn, md) in enumerate(chapters):
@@ -452,7 +463,7 @@ def build_epub(book_dir, dest, title="", author="", cover=None):
     # 封面页：有封面图就显示图，没有就排一个文字封面（EPUB 允许）。
     if cover_file:
         cover_body = ('<div class="cover"><img src="img/%s" alt="封面"/></div>'
-                      % _esc(cover_file))
+                      % _attr(cover_file))
     else:
         cover_body = ('<div class="cover"><h1>%s</h1>%s</div>'
                       % (_esc(title), ('<div class="author">%s</div>' % _esc(author)) if author else ""))
@@ -467,14 +478,17 @@ def build_epub(book_dir, dest, title="", author="", cover=None):
                 '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>']
     if cover_file:
         manifest.append('<item id="cover-img" href="img/%s" media-type="%s" properties="cover-image"/>'
-                        % (_esc(cover_file), _MIME_BY_EXT.get(
+                        % (_attr(cover_file), _MIME_BY_EXT.get(
                             os.path.splitext(cover_file)[1].lower(), "image/jpeg")))
     for s in secs:
         manifest.append('<item id="%s" href="%s" media-type="application/xhtml+xml"/>'
                         % (s["id"], s["href"]))
-    for f in imgs:
-        manifest.append('<item id="img-%s" href="img/%s" media-type="%s"/>'
-                        % (_esc(f), _esc(f),
+    for i, f in enumerate(imgs):
+        # id 用序号而不是文件名：文件名来自 images/ 目录，空格 / 引号 / 点号
+        # 都不是合法 XML ID 字符，拼进去就算转义过了也只是「没报错的不合法」。
+        # 这个 id 谁都不引用（spine 只引 chapter），序号既稳定又合规。
+        manifest.append('<item id="img%04d" href="img/%s" media-type="%s"/>'
+                        % (i, _attr(f),
                            _MIME_BY_EXT.get(os.path.splitext(f)[1].lower(),
                                             "application/octet-stream")))
 
@@ -578,9 +592,17 @@ li.task.done::before { border-color: #0a6cff; background: #0a6cff; }
 
 def _abs_images(html_str, img_dir):
     """把 <img src="images/x"> 换成绝对 file:// —— 铬内核在 file:// 页面上
-    加载同协议资源是允许的，图片才不会全空。"""
+    加载同协议资源是允许的，图片才不会全空。
+
+    `md_to_html` 交出来的属性值是**实体编码过**的（`a&b.png` 写成 `a&amp;b.png`，
+    `a"b.png` 写成 `a&quot;b.png`），所以先 `html.unescape` 还原成磁盘上真正的
+    文件名再去找 —— 少了这一步，带 `& < > "` 的图名一律「文件不存在」，PDF 里
+    那张图就静默不见了（EPUB 那条路不走这里，用的是原始文件名）。
+    换出来的 `file://` URI 由 `as_uri()` 自己按百分号编码，不会再带裸引号。
+    """
     def rep(m):
-        p = os.path.join(img_dir, os.path.basename(m.group(1)))
+        name = html.unescape(m.group(1))
+        p = os.path.join(img_dir, os.path.basename(name))
         if os.path.isfile(p):
             return 'src="%s"' % Path(p).resolve().as_uri()
         return m.group(0)

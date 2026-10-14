@@ -256,6 +256,14 @@ run "导出口径的属性逃逸（图 / 链接 / alt 不许注出事件属性�
 # 就能从属性里逃出去挂 onmouseover=…。这里把「语言串带引号 / 尖括号 / &」三种写法
 # 各钉一条，并真打一个 EPUB 解析包内那页，确认成品里也没有多出来的事件属性。
 run "导出口径的属性逃逸（围栏语言串不许注出事件属性）" "$PY" tests/check_export_fence.py
+# 上面两条管的是「正文里的地址带引号会不会从属性里逃出去」，都在 md_to_html 那一层。
+# 成品里还有另一处属性值直接来自磁盘：images/ 下的文件名（下载器只挡路径分隔符与
+# 控制符，`& < > "` 都留着）。EPUB 把文件名拼进 `href="img/…"` 时用的是 `_esc`
+# （不动双引号），一个 `a"b.jpg` 就让 content.opf / cover.xhtml 不再是合法 XML；
+# PDF 的 `_abs_images` 又拿实体编码过的属性值去磁盘上找文件（`c&amp;d.jpg`），
+# 不解码就永远「文件不存在」、那张图在 PDF 里静默消失。这里真打一个脏名字的 EPUB
+# 逐份解析、再把 `_abs_images` 的替换结果还原成路径核对。纯离线、不起浏览器。
+run "成品图片文件名（带引号 / & / < 不把 EPUB 打坏、也不从 PDF 里消失）" "$PY" tests/check_export_names.py
 # 跟上面那条并排：那条管「进成品的内容能不能逃出去」，这条管「成品本身是什么字节」。
 # export_precise 写出去的章节 md / raw json / 合并稿原来不写 encoding，靠系统默认编码 ——
 # macOS 恰好是 UTF-8 所以一直没露馅，Windows 的 GBK 代码页上就变成写 GBK、读 UTF-8，
