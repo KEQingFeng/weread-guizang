@@ -1523,6 +1523,57 @@ def download_all_images(raw_dir, img_dir):
     return ok
 
 
+def read_meta_dict(book_dir):
+    """读书目录里的 meta.json：缺文件 / 读坏了 / 不是对象，一律回空表。
+
+    取书主循环开跑之前要拿它认书名（认不出就用书号当文件名）。旧写法只 try 了
+    json.load 那一下 —— `[]` / `"书名"` / `123` / `null` 全是合法 JSON，读得开，
+    紧接着的 `meta.get("title")` 就 AttributeError，整趟取书在还没开浏览器之前垮掉。
+    脏形状当没有 meta，好数据一个字不改。
+    """
+    try:
+        with open(os.path.join(book_dir, "meta.json"), encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+def collect_seen_images(raw_dir):
+    """把 raw/*.json 里已经见过的图地址收成一个集合（跳过坏记录）。
+
+    这份目录是引擎自己写的，但用户会手工编辑、云同步也会落半截。旧写法对每个
+    `*.json` 直接 `json.load(...)` 之后取 `images`、再取 `im["url"]`：
+    半截 JSON 抛 JSONDecodeError、文件是 `[]` / `"x"` 抛 AttributeError、
+    条目缺 url 抛 KeyError —— 每一样都能让整趟取书在开浏览器之前当场垮掉。
+    口径跟 download_images.collect_tasks 一致：一条坏记录只跳过它自己，
+    好记录照收，且不改变「集合里是 url 字符串」的原语义。
+    """
+    seen = set()
+    try:
+        names = os.listdir(raw_dir)
+    except OSError:
+        return seen
+    for jf in names:
+        if not jf.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(raw_dir, jf), encoding="utf-8") as f:
+                doc = json.load(f)
+        except Exception:
+            continue
+        images = doc.get("images") if isinstance(doc, dict) else None
+        if not isinstance(images, list):
+            continue
+        for im in images:
+            if not isinstance(im, dict):
+                continue
+            url = im.get("url")
+            if isinstance(url, str) and url:
+                seen.add(url)
+    return seen
+
+
 async def main(book_id):
     print("=" * 60)
     print("  weread-exporter — 精确图文导出 v3")
@@ -1542,20 +1593,10 @@ async def main(book_id):
     for d in (md_dir, raw_dir, img_dir):
         os.makedirs(d, exist_ok=True)
 
-    seen_imgs = set()
-    for jf in os.listdir(raw_dir):
-        if jf.endswith(".json"):
-            for img in json.load(open(os.path.join(raw_dir, jf), encoding="utf-8")).get("images", []):
-                seen_imgs.add(img["url"])
+    seen_imgs = collect_seen_images(raw_dir)
 
     catalog_path = os.path.join(book_dir, "_catalog.json")
-    meta_path = os.path.join(book_dir, "meta.json")
-    meta = {}
-    if os.path.exists(meta_path):
-        try:
-            meta = json.load(open(meta_path, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    meta = read_meta_dict(book_dir)
     book_title = book_author = ""
     # 书名要能认出来：界面取书时写的 meta.json 有标题，第一轮会话抛异常没返回也不能丢，
     # 否则合并出的 md 会用书号当文件名（看着就像「导出了一堆没名字的东西」）。
@@ -1732,12 +1773,9 @@ async def main(book_id):
 
     # 由引擎自己落完成标记：无论这次是界面跑的、命令行跑的，还是 MCP 触发的，
     # 前端的百分比与「导出成功」都以此为据（之前只在 ui_server 侧写，命令行跑的就漏了）。
+    # 重新读一遍（中途可能有别的进程写过），脏形状当没有 meta，别让 .update 抛在这。
     meta_path = os.path.join(book_dir, "meta.json")
-    if os.path.exists(meta_path):
-        try:
-            meta = json.load(open(meta_path, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    meta = read_meta_dict(book_dir)
     meta.update({
         "title": book_title if book_title != book_id else (meta.get("title") or book_id),
         "author": book_author or meta.get("author") or "",
