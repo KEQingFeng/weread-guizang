@@ -393,30 +393,49 @@ def normalize_lib(d):
             elif not isinstance(s.get(k), dict):
                 s[k] = {}
         mods[m] = s
+    # 每格里的 folders 是给「新建 / 改名 / 删除文件夹」直接按 id 用的列表，而那些接口
+    # 是 `f["id"]` / `f.get("id")` 直接取 —— 元素形状同样没人保证（手改过、旧版本写过
+    # 别的样子都是合法 JSON）。这里先收成「只留认得出的夹子」，后面所有按 id 查夹子的
+    # 地方就不必各自防一遍。
+    for m in book_layout.ORDER:
+        mods[m]["folders"] = [f for f in mods[m]["folders"]
+                              if isinstance(f, dict) and isinstance(f.get("id"), str)
+                              and f["id"]]
     if legacy:
-        for bid, fid in (legacy.get("assign") or {}).items():
+        # 顶层这五样是老格式摊在地板上的，形状同样没人保证：`"assign": ["书号"]`、
+        # `"order": 5` 都是合法 JSON，而直接 `.items()` / 直接迭代会当场抛 ——
+        # load_lib 是 /api/state 的必经之路，一个脏字段就让整份书架 500，
+        # 用户看到的是「我的书全没了」。逐样先验形状，认不出的当空。
+        assign = legacy.get("assign") if isinstance(legacy.get("assign"), dict) else {}
+        for bid, fid in assign.items():
             if isinstance(fid, str):
-                mods[book_layout.module_of(bid)]["assign"].setdefault(str(bid), fid)
-        for bid in (legacy.get("order") or []):
-            s = mods[book_layout.module_of(str(bid))]
+                mods[book_layout.module_of(str(bid))]["assign"].setdefault(str(bid), fid)
+        order = legacy.get("order") if isinstance(legacy.get("order"), list) else []
+        for bid in order:
+            if not isinstance(bid, str) or not bid:
+                continue
+            s = mods[book_layout.module_of(bid)]
             if bid not in s["order"]:
                 s["order"].append(bid)
-        for bid, st in (legacy.get("state") or {}).items():
+        state = legacy.get("state") if isinstance(legacy.get("state"), dict) else {}
+        for bid, st in state.items():
             if isinstance(st, str):
-                mods[book_layout.module_of(bid)]["state"].setdefault(str(bid), st)
-        for bid, tg in (legacy.get("tags") or {}).items():
+                mods[book_layout.module_of(str(bid))]["state"].setdefault(str(bid), st)
+        tags = legacy.get("tags") if isinstance(legacy.get("tags"), dict) else {}
+        for bid, tg in tags.items():
             if isinstance(tg, list):
-                mods[book_layout.module_of(bid)]["tags"].setdefault(str(bid), tg)
+                mods[book_layout.module_of(str(bid))]["tags"].setdefault(str(bid), tg)
         # 顶层那套夹子是「所有模块共用」的：被谁引用就抄给谁；一个都没被引用的
         # （刚建好还没放书）留在微信读书那格，别让它凭空消失。
-        defs = [f for f in (legacy.get("folders") or [])
-                if isinstance(f, dict) and f.get("id")]
+        folders = legacy.get("folders") if isinstance(legacy.get("folders"), list) else []
+        defs = [f for f in folders
+                if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"]]
         used_by = {fid: {m for m in book_layout.ORDER if fid in mods[m]["assign"].values()}
                    for fid in [f["id"] for f in defs]}
         for f in defs:
             takers = used_by.get(f["id"]) or {"weread"}
             for m in takers:
-                have = {x.get("id") for x in mods[m]["folders"]}
+                have = {x["id"] for x in mods[m]["folders"]}
                 if f["id"] not in have:
                     mods[m]["folders"].append(dict(f))
     d["modules"] = mods
