@@ -89,6 +89,31 @@ class PageStalled(Exception):
     """页面在超时内没有响应，判定渲染进程卡死。"""
 
 
+def _dump_json(path, obj, indent=None):
+    """账本落盘唯一入口：先写同目录 .tmp，写完再一次性改名。
+
+    为什么非这样不可：取书是**会被中止**的长任务（界面有停止键，进程被强杀是常事），
+    而 `open(path, "w")` 一进去就把旧内容截断了 —— 恰好在改名之前被杀，`meta.json`
+    就只剩半截 JSON，`book_layout.read_meta()` 只能当没有 meta，于是这本书的书名 /
+    作者 / done / 章节数一起变回默认，界面显示成「没取完」。改成「旧档全程完整、
+    新档要么完整要么不出现」，读侧那些兜底仍然留着（手工编辑 / 云同步照样会写脏）。
+
+    `BaseException`：中止信号走的是 `SystemExit` / `KeyboardInterrupt` 这一类，
+    它们不继承 `Exception`，只兜 `Exception` 会在退出路径上留下 .tmp。
+    """
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=indent)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_progress(book_dir, **fields):
     """把「现在翻到第几页、写了多少章多少字」落盘，供界面画进度条。
 
@@ -110,11 +135,10 @@ def write_progress(book_dir, **fields):
     data = data if isinstance(data, dict) else {}
     data.update(fields)
     data["updated_at"] = time.time()
-    tmp = path + ".tmp"
+    # 进度写不动不算致命的（下一轮还会再写），所以这里照旧吞掉异常；
+    # 真正的原子落盘只有 _dump_json 一份实现。
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, path)
+        _dump_json(path, data)
     except Exception:
         pass
 
@@ -630,10 +654,8 @@ def stuck_bump(stuck_path, catalog_len, idx):
     strikes = load_stuck(stuck_path, catalog_len)
     strikes[idx] = strikes.get(idx, 0) + 1
     try:
-        with open(stuck_path, "w", encoding="utf-8") as f:
-            json.dump({"catalog": catalog_len,
-                       "strikes": {str(k): v for k, v in strikes.items()}},
-                      f, ensure_ascii=False)
+        _dump_json(stuck_path, {"catalog": catalog_len,
+                                "strikes": {str(k): v for k, v in strikes.items()}})
     except OSError:
         pass                      # 记不上就不跳，下一轮重新钉同一处（老行为）
     return strikes[idx] >= STUCK_LIMIT
@@ -1102,8 +1124,7 @@ async def dump_catalog_titles(page, catalog_path):
         titles = await page.evaluate("""() => Array.from(
             document.querySelectorAll('.readerCatalog_list_item')).map(el => el.textContent.trim())""")
         if titles and catalog_path:
-            with open(catalog_path, "w", encoding="utf-8") as f:
-                json.dump(titles, f, ensure_ascii=False)
+            _dump_json(catalog_path, titles)
         try:
             await page.click("button.readerControls_item.catalog", timeout=2000)
         except Exception:
@@ -1780,8 +1801,7 @@ async def main(book_id):
         meta.pop("stopped_reason", None)
     else:
         meta["stopped_reason"] = stop_reason or "中途结束"
-    with open(os.path.join(book_dir, "meta.json"), "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    _dump_json(os.path.join(book_dir, "meta.json"), meta, indent=2)
 
 
 if __name__ == "__main__":
