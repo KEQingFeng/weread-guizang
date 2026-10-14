@@ -101,10 +101,17 @@ def normalize(raw):
     # 会被补成 `https://javascript:alert(1)`，把一段脚本当成主机名放行。
     if not _SCHEME.match(u):
         u = "https://" + u
-    p = urllib.parse.urlparse(u)
+    # urlparse 自己会对半个 IPv6 方括号（`http://[::1`、`https://[`）当场抛 ValueError。
+    # 它不是 Blocked，`browse()` 只接 Blocked —— 异常会一路穿出 /api/browse，客户端拿到
+    # 的是一条空响应（连接被掐），而不是 error_page 铺的那页人话。地址解不出来就是拒绝，
+    # 与剪藏 clip_article.url_block_reason 同一口径：不往外抛。
+    try:
+        p = urllib.parse.urlparse(u)
+        host = (p.hostname or "").lower()
+    except ValueError:
+        raise Blocked("这个地址解不出来")
     if p.scheme.lower() not in ALLOWED_SCHEMES:
         raise Blocked("只认 http/https 链接（现在这个是 %s）" % (p.scheme or "空"))
-    host = (p.hostname or "").lower()
     if not host:
         raise Blocked("这个链接没有主机名，打不开")
     if clip_article.host_blocked(host):
