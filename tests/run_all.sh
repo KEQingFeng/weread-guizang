@@ -152,6 +152,13 @@ run "书库目录结构（分模块 / 归置 / 账本分格）" "$PY" tests/chec
 # 可接着的 meta.get(...) 会当场 AttributeError —— 首页 /api/state 整份 500，
 # 用户看到的是「书全没了」。这条把脏形状、好书不被连累、好形状不被误伤一起钉住。
 run "书架清单脏账本（meta / 进度不是对象时不整份抛）" "$PY" tests/check_shelf_dirty.py
+# 上一条管「干净的老账本折得对不对」，这一条管「脏的老账本会不会把整份书架打崩」。
+# cache/library.json 会被手工编辑、被云同步从别处落盘、旧版本也写过别的形状：顶层
+# `"assign": ["书号"]`、`"order": 5`、`"folders": 5`，或 modules 里 folders 的元素
+# 是数字 / 缺 id —— 这些全是合法 JSON，旧代码直接 .items() / 直接迭代就抛，
+# load_lib 是 /api/state 的必经之路，用户看到的是「我的书全没了」。逐样喂一遍，
+# 要求不抛、合法的那部分不连带丢、文件夹接口那几行仍能跑。纯逻辑 + 临时沙盒。
+run "书架账本脏形状（顶层五样 / folders 元素 / 不连带丢数据）" "$PY" tests/check_shelf_ledger.py
 # 导入书（Markdown / TXT / EPUB / PDF）第一关是「这份字节是什么编码」。
 # 「编码认错」与「格式认错」都钉住，再走一遍 GBK TXT 真落盘，看章标题与目录是不是原字。
 # 另半段守 PDF 那趟硬换行：抽出来的每一行都是独立一行，拼回一段时拉丁词之间要补空格
