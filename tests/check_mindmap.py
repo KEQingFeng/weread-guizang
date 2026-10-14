@@ -490,13 +490,17 @@ chk("间距：括号图里任意两个框都不重叠",
 chk("间距：括号图同列相邻框至少留 20px 的缝（1.2.0 放宽前的 12px 会贴着）",
     bool(_same_col_gaps(_tree)) and min(_same_col_gaps(_tree)) >= 20.0 - 0.01,
     _same_col_gaps(_tree))
-# 长句子也不该被压成一条竖线：折行上限之内，宽度要真的用起来。
-_long = mm.layout(mm.normalize({"nodes": [
-    node("这一条节点的文字特别特别长，长到不折行就会顶出画布外面去", id="long")]}))
+# 1.2.1：小框不许再挤掉文字 —— 每一行都要装得进框里，且一个字都不许被截断。
+_LONG_TEXT = "这一条节点的文字特别特别长，长到不折行就会顶出画布外面去 ABC def 123"
+_long = mm.layout(mm.normalize({"nodes": [node(_LONG_TEXT, id="long")]}))
 _lb = boxes_by_id(_long)["long"]
-chk("间距：长文字折行不超过三行，且框宽没超过上限、没被挤成一条线",
-    len(_lb["lines"]) <= mm._MAX_LINES
-    and _lb["w"] <= mm._BOX_MAX_W + 0.01
+chk("自适应：长文字一行都没超出框宽（按同一把像素尺量）",
+    all(mm._text_w(x) <= _lb["w"] - mm._PAD_X * 2 + 0.01 for x in _lb["lines"]), _lb)
+chk("自适应：长文字一个字都没被截断（折行拼回来等于原文）",
+    "".join(_lb["lines"]) == _LONG_TEXT, _lb["lines"])
+chk("间距：长文字框宽没超过上限、没被挤成一条线，且框高随行数长",
+    _lb["w"] <= mm._BOX_MAX_W + 0.01
+    and _lb["h"] >= mm._PAD_Y * 2 + mm._ROW * len(_lb["lines"]) - 0.01
     and _lb["x"] > 0 and _lb["y"] > 0, _lb)
 
 
