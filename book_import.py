@@ -184,6 +184,34 @@ def _decode_text(data):
     return data.decode("utf-8", "replace")
 
 
+# 中日韩文字、假名、全角标点：这些字之间本来就不写空格，拼回去时也不能补。
+_CJK_CH = re.compile(r"[\u2e80-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
+                     r"\uf900-\ufaff\uff00-\uffef]")
+# 上一行以这些字符收尾时，下一行不该空一格接上去（左括号、上引号、连字符）。
+_OPEN_TAIL = set("([{<\u2018\u201c\u3008\u300a\u300c\u300e\u3010\u3014\u3016"
+                 "-\u2010\u2011\u2012\u2013\u2014")
+# 下一行以这些字符开头时，前面不能多出一个空格（右括号、收尾标点、下引号）。
+_CLOSE_HEAD = set(")]}>.,;:!?\u2019\u201d\u3009\u300b\u300d\u300f\u3011\u3015\u3017"
+                  "\uff0c\u3002\uff01\uff1f\uff1b\uff1a\u2014\u2026")
+
+
+def _join_wrapped(prev, nxt):
+    """把被 PDF 硬换行劈开的两行拼回一行：拉丁词之间补一个空格，中文之间不补。
+
+    为什么不能一律直接相加：英文 PDF 每一行都抽成独立一行，`quick brown` /
+    `fox jumps` 直接相加会拼出 `brownfox`，整本书的词都粘在一起。中文反过来，
+    字与字之间没有词距，补空格反而是错的。所以只看接缝两侧那一个字符。
+    """
+    if not prev or not nxt:
+        return prev + nxt
+    a, b = prev[-1], nxt[0]
+    if _CJK_CH.match(a) or _CJK_CH.match(b):
+        return prev + nxt
+    if a in _OPEN_TAIL or b in _CLOSE_HEAD:
+        return prev + nxt
+    return prev + " " + nxt
+
+
 def _normalize_lines(text):
     """PDF 抽出来的文字一行一断：把不成段的单换行并回同一段。"""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -194,7 +222,7 @@ def _normalize_lines(text):
         if not s:
             out.append("")
         elif out and out[-1] and not out[-1].endswith(enders):
-            out[-1] = out[-1] + s
+            out[-1] = _join_wrapped(out[-1], s)
         else:
             out.append(s)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
