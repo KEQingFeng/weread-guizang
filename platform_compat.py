@@ -340,6 +340,29 @@ def hard_kill(proc):
         pass
 
 
+# POSIX 扩展正则里有特殊含义的那几个字符。`pkill -f` 的 pattern 是拿去做正则编译
+# 的，不是普通子串，所以路径里出现的这些字符必须逐个转义，匹配的才是这条路径本身。
+_ERE_SPECIAL = frozenset("\\.^$*+?()[]{}|")
+
+
+def pkill_pattern(path):
+    """把一条 profile 路径转成 `pkill -f` 只认它自己的正则。
+
+    `pkill -f` 把 pattern 当**扩展正则**编译，不是照字面找子串：
+
+      · 路径里带 `(2)`（用户把「归藏」复制了一份、文件夹叫「归藏 (2)」）时，`(2)`
+        在正则里是分组，等价于在找 `归藏 2/...` —— 而子进程真实的 cmdline 是
+        `归藏 (2)/...`，谁也匹配不上。残留浏览器照旧活着、profile 锁照旧被占，
+        下一轮启动报的还是「浏览器起不来」，症状和没修过一模一样。
+      · 带 `|` 时更糟：pattern 变成「或」，可能匹配到无关进程、误杀别人的程序。
+
+    Windows 那半段早就按**字面**匹配（PowerShell 的 `.Contains`，还专门为了路径里的
+    `[ ]` 不用 `-like`），POSIX 这半段漏了同一条口径。转义之后 pattern 只含字面量，
+    匹配范围既不漏（该杀的杀掉）也不多（不该杀的不碰）。
+    """
+    return "".join("\\" + ch if ch in _ERE_SPECIAL else ch for ch in str(path))
+
+
 def kill_stray_browsers(profile_dir, wait=1.0):
     """清掉仍占着本项目 profile 的残留浏览器。
 
@@ -362,7 +385,10 @@ def kill_stray_browsers(profile_dir, wait=1.0):
             subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                            capture_output=True, timeout=25)
         else:
-            subprocess.run(["pkill", "-f", target], capture_output=True, timeout=10)
+            # 先转义再交给 pkill：路径里的正则元字符（`(2)` / `[1]` / `+` …）否则会让
+            # 这条 pattern 匹配的不是它自己，见 pkill_pattern 的说明。
+            subprocess.run(["pkill", "-f", pkill_pattern(target)],
+                           capture_output=True, timeout=10)
     except Exception:
         pass
     if wait:
