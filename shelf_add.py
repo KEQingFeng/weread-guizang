@@ -49,14 +49,44 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+# 书城短 id 的尺子：5–20 位 ASCII 数字。必须和另外三个入口（界面 ui.html、
+# 本地服务 ui_server.py、MCP 适配器）完全同尺 —— 那把尺子写的是 `\d{5,20}`，
+# 而 JS 的 \d 本来就只认 0-9。Python 的 \d 连全角「１２３」和阿拉伯-印度数字
+# 「٥٥٥」都算数字，同一个正则换到这边就漏了；长度原来也比别人短一截
+# （5,12），13–20 位的短 id 会被界面收下、到这里又判成「没有可用编号」。
+SHELF_ID = re.compile(r"^[0-9]{5,20}$")
+
+
 def clean_ids(raw):
-    """只留得住书架格式的 id：纯数字短 id。顺手挡掉误传的阅读器长 id / 链接。"""
+    """只留得住书架格式的 id：5–20 位 ASCII 数字。顺手挡掉误传的阅读器长 id / 链接。"""
     out = []
     for s in raw:
         s = (s or "").strip()
-        if re.fullmatch(r"\d{5,12}", s) and s not in out:
+        if SHELF_ID.match(s) and s not in out:
             out.append(s)
     return out
+
+
+def added_count(succ, total):
+    """把接口回的成败数翻译成「真加进去几本」，看不懂回 None。
+
+    succ 有几种面孔：布尔 true 表示整批都成，数字表示成了几条。这里不能写
+    `succ in (True, total)` —— Python 里 1 == True，于是三本书只成了 1 本时，
+    那句会判成「整批都成」、界面报 3/3，把没加上的书也当成已加。
+    """
+    if succ is True:
+        return total
+    if succ is None or succ is False:
+        return 0
+    if isinstance(succ, int):
+        n = succ
+    elif isinstance(succ, float) and succ.is_integer():
+        n = int(succ)
+    elif isinstance(succ, str) and re.fullmatch(r"[0-9]+", succ.strip()):
+        n = int(succ.strip())
+    else:
+        return None
+    return max(0, min(n, total))
 
 
 def kill_stray_browsers(wait=0.8):
@@ -162,9 +192,12 @@ async def main():
             if status != 200 or not succ:
                 fail(f"没能加进书架（HTTP {status}，成功 {succ}/{len(ids)}）")
 
-            done = len(ids) if succ in (True, len(ids)) else int(succ or 0) or len(ids)
+            done = added_count(succ, len(ids))
+            if done is None:
+                fail(f"接口回的成功数看不懂（succ={succ!r}）")
             print(json.dumps({"ok": True,
                               "msg": f"已加入书架（{done}/{len(ids)}）",
+                              "count": done, "total": len(ids),
                               "added": ids, "at": int(time.time())},
                              ensure_ascii=False), flush=True)
         finally:
