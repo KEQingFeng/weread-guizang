@@ -397,11 +397,27 @@ def _fetch_bytes(url, headers=None):
 
 # ── 解析 ────────────────────────────────────────────────────────────
 
-_SCRIPT_STYLE = re.compile(r"(?is)<(script|style|iframe)\b[^>]*>.*?</\1>")
+_SCRIPT_STYLE = re.compile(r"(?is)<(script|style|iframe)\b[^>]*>.*?</\1\s*>")
+# 只开到一半的那种：订阅源常把正文截断，`<script>alert(1)` 根本没有闭合标签。
+# 浏览器会把没闭合的 <script>/<style>/<iframe> 后面的整段都当成它的内容，所以这里
+# 也照同样的规矩，从开口一直清到结尾 —— 留着它，等于把可执行内容原样递出去。
+_SCRIPT_STYLE_OPEN = re.compile(r"(?is)<(script|style|iframe)\b[^>]*>.*\Z")
 _ON_ATTR = re.compile(r"(?i)\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)")
-_URL_ATTR = re.compile(r"""(?i)\s(href|src|xlink:href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
-_BAD_SCHEME = re.compile(r"(?i)^\s*(javascript|vbscript|livescript):")
-_DATA_IMG = re.compile(r"(?i)^\s*data:image/")
+_URL_ATTR = re.compile(r"""(?i)\s(href|src|xlink:href|formaction)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
+_BAD_SCHEME = re.compile(r"(?i)^(javascript|vbscript|livescript):")
+_DATA_IMG = re.compile(r"(?i)^data:image/")
+# 浏览器解析地址时：先解一层 HTML 实体，再把 URL 里的 TAB / 换行整个删掉，首尾的
+# 空白与控制符也去掉。于是 `&#106;avascript:alert(1)`、`java\tscript:alert(1)` 在浏览器
+# 眼里都是 javascript: —— 过滤若只看原始那几个字节，等于没滤。
+_CTRL_IN_URL = re.compile(r"[\t\n\r]")
+
+
+def _url_in_browser(s):
+    """这个地址到了浏览器手里会被还原成什么（只用它判协议，绝不用它输出）。"""
+    try:
+        return _CTRL_IN_URL.sub("", html.unescape(s)).strip()
+    except Exception:
+        return str(s or "").strip()
 
 
 def sanitize_html(raw, base=""):
@@ -414,6 +430,7 @@ def sanitize_html(raw, base=""):
     if not raw:
         return ""
     txt = _SCRIPT_STYLE.sub("", raw)
+    txt = _SCRIPT_STYLE_OPEN.sub("", txt)
     txt = _ON_ATTR.sub("", txt)
 
     def fix(m):
@@ -421,9 +438,10 @@ def sanitize_html(raw, base=""):
         quote = val[0] if val[:1] in ("\"", "'") else ""
         inner = val[1:-1] if quote else val
         s = inner.strip()
-        if _BAD_SCHEME.match(s):
+        probe = _url_in_browser(s)
+        if _BAD_SCHEME.match(probe):
             return ' %s="#"' % attr
-        if s.lower().startswith("data:") and not _DATA_IMG.match(s):
+        if probe.lower().startswith("data:") and not _DATA_IMG.match(probe):
             return ' %s="#"' % attr
         if base and not re.match(r"(?i)^[a-z][a-z0-9+.-]*:", s) and not s.startswith("#"):
             try:
