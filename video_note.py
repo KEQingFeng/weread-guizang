@@ -1318,17 +1318,27 @@ def _chapter_bodies(transcript, segments, chapters):
     text = (transcript or "").strip()
     if not chapters:
         return [("全文转写", text)]
-    if segments:
+    segs = [seg for seg in (segments or []) if isinstance(seg, dict)]
+    starts = [_sec(chapter.get("start")) for chapter in chapters]
+    # 按时间切的唯一前提是章节起点严格递增。LLM 漏给 start 时 _clean_summary 会把每一章
+    # 都填成 0，这时「最后一个 start <= 段的 start 的章」永远是最后一章，整篇正文会堆进
+    # 末章、前几章只剩空标题 —— 看着就像内容丢了。起点不可用就退回按字数均分。
+    if segs and all(b > a for a, b in zip(starts, starts[1:])):
         pieces = [""] * len(chapters)
-        for seg in segments:
-            start = float(seg.get("start") or 0.0)
+        for seg in segs:
+            start = _sec(seg.get("start"))
             index = 0
-            for i, chapter in enumerate(chapters):
-                if start >= float(chapter.get("start") or 0):
+            for i, chapter_start in enumerate(starts):
+                if start >= chapter_start:
                     index = i
+                else:
+                    break
             pieces[index] += (seg.get("text") or "") + " "
         return [(chapters[i]["title"], pieces[i].strip()) for i in range(len(chapters))]
-    # 没有分段：按章节条数均分字数，并给每章标上它自己的标题
+    if segs:
+        # 起点不可用：把各段文字接起来当整篇，至少不丢内容、不制造空章
+        text = " ".join((seg.get("text") or "").strip() for seg in segs).strip() or text
+    # 没有分段 / 起点不可用：按章节条数均分字数，并给每章标上它自己的标题
     body, step = [], max(1, len(text) // max(len(chapters), 1))
     for i, chapter in enumerate(chapters):
         chunk = text[i * step:(i + 1) * step] if i < len(chapters) - 1 else text[i * step:]
@@ -1922,8 +1932,9 @@ def save_transcript(book_dir, segments, engine=None, language=None, duration=Non
     path = os.path.join(book_dir, TRANS_FILE)
     doc = _read_json(path)
     doc = doc if isinstance(doc, dict) else {}
-    # 旧段落按 id 找得着就认 id，找不到就按位置对：拆段合段之后位置是会挪，
-    # 所以只在来段没写 id 时才退回位置对齐 —— 前端给每段带上 id 就不会串。
+    # 旧段落按 id 找：id 是前端给的稳定标识。带 id 的新段（编辑器插进来那一段）在旧档里
+    # 找不到就是找不到，绝不许按位置去认领旧段落的说话人 / 置信度 —— 那会把新句错标成
+    # 别人说的。只有来段根本没写 id（更老的前端）才退回位置对齐。
     old = [s for s in (doc.get("segments") or []) if isinstance(s, dict)]
     by_id = {}
     for item in old:
@@ -1935,7 +1946,10 @@ def save_transcript(book_dir, segments, engine=None, language=None, duration=Non
         if not isinstance(seg, dict):
             continue
         sid = str(seg.get("id") or "")
-        base = by_id.get(sid) or (old[index] if index < len(old) else {})
+        if sid:
+            base = by_id.get(sid) or {}
+        else:
+            base = old[index] if index < len(old) else {}
         merged = {**base, **seg}
         # after 是编辑器「这一新段插在哪一段后面」的内部锚点，插完就没用了。它得吃掉：
         # 别处都原样留字段是为了不丢用户的字，而这个字段留在 transcript.json 里，
