@@ -37,6 +37,10 @@ ID_LEN = 40
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+# 半个代理对（\ud800-\udfff 单独出现）：浏览器的 JS 字符串拦腰截断时会留下它，
+# Python 的 json 收得下、却写不进 utf-8 文件（UnicodeEncodeError）。它是坏输入，
+# 不是内容，洗掉比让整块画板存不下去强。
+SURROGATE = re.compile("[\ud800-\udfff]")
 # SVG 允许前面有 XML 声明、注释、空白；判完前缀再决定收不收（见 _strip_svg_head）。
 # XML 声明、注释、DOCTYPE 都在 <svg 前面：fabric.js 导出的每一份 SVG 都带 DOCTYPE，
 # 早先这里只跳得过前两种，结果「存 SVG」按钮被自己的校验挡在外面（画板 Gate 抓到过）。
@@ -91,10 +95,15 @@ def _now() -> str:
 
 
 def _text(v, limit) -> str:
-    """文本字段收敛：非字符串先 str，去首尾空白，按字符数裁到上限。"""
+    """文本字段收敛：非字符串先 str，去首尾空白，摘掉半个代理字符，按字符数裁到上限。
+
+    摘代理字符是因为它过不了 utf-8 这一关：留着它，json.dump 会抛 UnicodeEncodeError，
+    整块画板（连同用户画的画）都存不下去。真字符（表情符号那种成对的）不受影响 ——
+    json 解码时已经把成对的合成一个字符了，这里只会摘到落单的那个坏码。
+    """
     if v is None:
         return ""
-    return str(v).strip()[:limit]
+    return SURROGATE.sub("", str(v).strip())[:limit]
 
 
 def _human_size(n) -> str:
@@ -189,10 +198,22 @@ def _write_json(path, obj):
 
     与 book_notes._write_json 同一路子，覆盖前留一份 .prev —— 画板是用户画出来的东西，
     存坏了比笔记更心疼。（.prev 结尾不是 .json，不进列表、不占 MAX_BOARDS 的名额。）
+
+    序列化/写盘这一步失败（写不进 utf-8、塞了不该塞的东西）时自己把 .tmp 收掉：
+    留着它既没用，又会让 boards/ 里多一个只有磁盘看得见的垃圾。**只在写这一步失败时
+    收** —— 后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，
+    删掉才是真的丢东西。
     """
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2, allow_nan=False)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2, allow_nan=False)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     if os.path.exists(path):
         try:
             os.replace(path, path + ".prev")
@@ -366,6 +387,12 @@ def save_board(book_dir, doc) -> dict:
     except OSError:
         return {"ok": False, "path": "", "id": env["id"], "bytes": size,
                 "msg": "画板没存进去，磁盘或权限出问题了"}
+    except (TypeError, ValueError):
+        # 信封里的内容过不了 json / utf-8 这一关（标题里有落单的半个代理字符等）。
+        # 上面 _text 已经洗过一遍，这里是最后一道兜底：宁可说一句人话，也不许
+        # 让一个坏字符把请求打成 500、还留一个 .tmp 在 boards/ 里。
+        return {"ok": False, "path": "", "id": env["id"], "bytes": size,
+                "msg": "画板里有存不进文件的内容，没存"}
     return {"ok": True, "path": path, "id": env["id"], "bytes": size,
             "msg": "画板已存好（%s）" % _human_size(size)}
 
@@ -373,13 +400,19 @@ def save_board(book_dir, doc) -> dict:
 def delete_board(book_dir, board_id, purge=True) -> dict:
     """删一块板：purge=True 连它的 SVG / PNG 导出物一起清；False 只收画板、留图。
 
+    purge 连 `.json.prev` / `.json.tmp` 这两个「只有磁盘看得见」的副产物一起收：
+    `.prev` 是覆盖保存时留的上一版，_board_files() 故意不认它（不然它会占 MAX_BOARDS
+    的名额），所以列表里看不见、数不着、界面上永远删不掉 —— 删板时不清就是个吃盘的
+    隐形洞（一块板最多 6 MB）。`.tmp` 是旧版本写崩时可能留下的半截文件，同样收掉。
+
     文件本来就不存在不算失败 —— 界面点两次删除、或者板早已被清掉，都不该看到红字。
     """
     sid = slug(board_id)
     folder = dir_of(book_dir)
     names = ["%s%s" % (sid, BOARD_FILE_EXT)]
     if purge:
-        names += ["%s%s" % (sid, SVG_EXT), "%s%s" % (sid, PNG_EXT)]
+        names += ["%s%s" % (sid, SVG_EXT), "%s%s" % (sid, PNG_EXT),
+                  "%s%s.prev" % (sid, BOARD_FILE_EXT), "%s%s.tmp" % (sid, BOARD_FILE_EXT)]
     removed, failed = [], []
     for name in names:
         path = os.path.join(folder, name)
