@@ -6,11 +6,11 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
 用户真实的书库与仓库 cache 一个字节都不碰。素材全部来自 tests/seed.py 铺的假书
 （书名是编的，不是真书），安娜的档案那一屏走前端桩，也不碰网络、不开真窗口。
 
-拍十一张，落到 docs/shots/：
+拍十四张，落到 docs/shots/：
   home     我的书架（默认那一屏的瀑布铺法）
   reader   阅读器（左目录 / 中正文 / 右这套笔记）
   search   搜书（微信读书书城：搜到 → 加入书架 → 整本取回）
-  anna     安娜的档案（工具自己开一个浏览器窗口，这一屏是它接住了什么）
+  anna     安娜的档案（写书名 → 搜索或回车，窗口自动跳过去）
   plan     每本书的阅读计划（详情页定完之后的读数）
   mindmap  笔记脑图（从笔记按标签生成一张图）
   feed     订阅阅读器（订上源、点开一篇）
@@ -18,9 +18,12 @@ README 上挂着的那几张图，得是「界面上真能点出来的样子」�
   flomo    便签（导入一份假导出包）
   clip     剪藏（手指圆钮解析完，弹「解析已完成」，文章在下方列表）
   clip-ring 剪藏的手指圆钮在解析中外圈那条环形进度（1.2.0 新交互动效）
+  notes    划线笔记（书籍卡片瀑布流，微信读书 + 取书两路并在一面墙上，1.2.1）
+  random   随机漫步（切到「取书」档，抽本机读书笔记，1.2.1）
+  pick     为我推荐（六本书，每张动条上多一颗「加入书架」，1.2.1）
 
 用法：
-    .venv/bin/python tools/shot_pages.py            # 十一张全拍
+    .venv/bin/python tools/shot_pages.py            # 十四张全拍
     .venv/bin/python tools/shot_pages.py home feed  # 只重拍某几张
 """
 import atexit
@@ -296,32 +299,15 @@ def shot_search(page):
 def shot_anna(page):
     """「安娜的档案」这一屏。
 
-    拍这张不真的开浏览器窗口 —— 展示图要说的是「这一栏会告诉你窗口接住了什么」，
-    窗口里装的是别人家的网页，不是归藏的界面。所以只往沙盒的账本里铺一份样例：
-    两本进了书架、一份格式不认、下载夹里留着一份 EPUB 和一份 Mobi。
-    书名全是编的，文件写在临时沙盒里，跑完连目录一起删。
+    1.2.1 起这一屏只剩一行搜索框加一颗搜索键：拍这张不真的开浏览器窗口 ——
+    窗口里装的是别人家的网页，不是归藏的界面；只在账本里放一个「上一次搜过的词」，
+    让输入框的占位有内容可看。
     """
     data = os.environ["GUIZANG_DATA"]
-    incoming = anna_state.incoming_dir(data, create=True)
-    for name, size in (("示范这本.epub", 240 * 1024), ("旧格式样本.mobi", 96 * 1024)):
-        with open(os.path.join(incoming, name), "wb") as f:
-            f.write(b"%PDF-ish" + b"0" * (size - 8))
-    now = int(time.time())
-    anna_state.write_state(data, {
-        "domain": "annas-archive.is", "window": "closed", "keyword": "示范",
-        "caught": 3, "imported": 2, "skipped": 1,
-        "note": "窗口关掉了，接住的三份都处理完了",
-        "books": [{"name": "示范这本.epub", "title": TITLE, "author": "张三",
-                   "book": BOOK, "bytes": 240 * 1024, "chapters": 12, "at": now},
-                  {"name": "长夜读本.epub", "title": "长夜读本", "author": "王五",
-                   "book": "", "bytes": 318 * 1024, "chapters": 8, "at": now - 60}],
-        "pending": [{"name": "旧格式样本.mobi",
-                     "reason": "格式不认（现在只收 EPUB / PDF / TXT / Markdown），原文件留着没动",
-                     "bytes": 96 * 1024, "at": now - 30}],
-    })
+    anna_state.write_state(data, {"domain": "annas-archive.is", "keyword": "长夜读本"})
     page.click('#nav button[data-v="anna"]')
-    page.wait_for_selector("#anWinDot", timeout=8000)
-    page.wait_for_timeout(1400)          # 那一格下载夹要等 listing 回来才有内容
+    page.wait_for_selector("#anQ", timeout=8000)
+    page.wait_for_timeout(600)
     wait_toast_gone(page)
     shot(page, "anna")
 
@@ -468,18 +454,96 @@ def shot_clip_ring(page):
     page.wait_for_timeout(1400)
 
 
+def wn_route(route):
+    """微信读书那一路的桩：只认我们要的那两个 api_name，其余原样放行。
+    书名、书籍编号全是编的，不碰真账号也不碰网络。"""
+    try:
+        req = json.loads(route.request.post_data or "{}")
+    except Exception:
+        req = {}
+    name = req.get("api_name")
+    if name == "/user/notebooks":
+        books = [
+            {"bookId": "123450001", "book": {"title": "样书甲", "author": "张三"},
+             "noteCount": 12, "reviewCount": 3, "bookmarkCount": 1},
+            {"bookId": "123450002", "book": {"title": "示范集", "author": "李四"},
+             "noteCount": 7, "reviewCount": 1, "bookmarkCount": 0},
+        ]
+        payload = {"ok": True, "data": {"books": books}}
+    elif name == "/book/recommend":
+        books = [{"bookInfo": {"bookId": "12345000%d" % i, "title": "样书%s" % "甲乙丙丁戊己"[i],
+                               "author": "作者" + "一二三四五六"[i], "cover": ""}} for i in range(6)]
+        payload = {"ok": True, "data": {"books": books}}
+    elif name == "/book/similar":
+        payload = {"ok": True, "data": {"booksimilar": {"books": []}}}
+    else:
+        route.continue_()
+        return
+    route.fulfill(status=200, content_type="application/json",
+                  body=json.dumps(payload, ensure_ascii=False))
+
+
+def seed_local_notes(page):
+    """取书划线的来源：真往沙盒那本书里落一份 notes.json，再让界面把状态重拉一遍。
+    这样「本机笔记」那条线在图上才是真的，不是 P 出来的。"""
+    post("/api/mynotes", {"book": BOOK, "doc": NOTES})
+    page.evaluate("() => drawState(true)")
+    page.wait_for_timeout(500)
+
+
+def shot_notes(page):
+    """划线笔记那一屏：卡片瀑布流，微信读书与取书两路并成一面墙（1.2.1 · R4-6）。"""
+    seed_local_notes(page)
+    page.route("**/api/weread", wn_route)
+    page.evaluate("() => { keySet = true; }")
+    page.click('#nav button[data-v="notes"]')
+    page.wait_for_selector(".nbwall .nbcard", timeout=20000)
+    page.wait_for_timeout(1200)
+    wait_toast_gone(page)
+    shot(page, "notes")
+    page.unroute("**/api/weread")
+
+
+def shot_random(page):
+    """随机漫步切到「取书」档：抽的是本机读书笔记，不是微信读书索引（1.2.1 · R4-7）。"""
+    seed_local_notes(page)
+    page.click('#nav button[data-v="random"]')
+    page.wait_for_selector("#rwSeg", timeout=10000)
+    page.click('#rwSeg button[data-s="local"]')
+    page.wait_for_selector(".qwall .qcard", timeout=20000)
+    page.wait_for_timeout(1000)
+    wait_toast_gone(page)
+    shot(page, "random")
+
+
+def shot_pick(page):
+    """为我推荐：六本书，每张动条上多一颗「加入书架」（1.2.1 · R4-9）。"""
+    page.route("**/api/weread", wn_route)
+    page.evaluate("() => { keySet = true; }")
+    page.click('#nav button[data-v="pick"]')
+    page.wait_for_selector(".sgrid .tkadd", timeout=20000)
+    page.wait_for_timeout(1200)
+    wait_toast_gone(page)
+    shot(page, "pick")
+    page.unroute("**/api/weread")
+
+
 SHOTS = {
     "home": shot_home, "reader": shot_reader, "search": shot_search, "anna": shot_anna,
     "plan": shot_plan,
     "mindmap": shot_mindmap, "feed": shot_feed, "video": shot_video, "flomo": shot_flomo,
     "clip": shot_clip, "clip-ring": shot_clip_ring,
+    "notes": shot_notes, "random": shot_random, "pick": shot_pick,
 }
 ORDER = ["home", "reader", "search", "anna", "plan", "mindmap", "feed", "video", "flomo",
-         "clip", "clip-ring"]
+         "clip", "clip-ring", "notes", "random", "pick"]
 
 
 def main():
     want = [a for a in sys.argv[1:] if a in SHOTS] or ORDER
+    # 本机（取书）划线要在界面第一次问 /api/notes_index 之前就落好：后端那份本机笔记
+    # 缓存连空结果都压 20 秒，等进了页面再写，随机漫步这一屏就会一直读到「还没有卡片」。
+    post("/api/mynotes", {"book": BOOK, "doc": NOTES})
     with sync_playwright() as pw:
         br = pw.chromium.launch()
         page = new_page(br)

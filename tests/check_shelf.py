@@ -295,6 +295,34 @@ with sync_playwright() as pw:
     page.keyboard.press("Escape")
     page.wait_for_timeout(260)
 
+    # ── 4b. 快速连翻：状态要收敛，不许卡在半截（1.2.1 · R4-4）────────
+    # 用户报「叠卡交互快速切书卡顿闪烁」。这里不量帧率（headless 的时钟不推进，
+    # 量出来的是假的），只钉连翻之后状态仍然收敛：一步步往前推、恰好一张正面、
+    # 每张卡只落在一个档位上（不会同时挂两个状态类，也不会哪张一个类都没有）。
+    rv0 = front_idx()
+    rvn = page.locator(".sstage > .wcard").count()
+    for _ in range(8):
+        page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(120)
+    rv_want = min(rv0 + 8, rvn - 1)
+    chk("快速连翻 8 下：一步一步推到位（没丢键、没翻过头）",
+        front_idx() == rv_want, (rv0, rvn, front_idx(), rv_want))
+    rv_st = page.evaluate("""() => {
+      const CL = ['s0','s1','s2','s3','b1','b2','b3','sgone','saway'];
+      const cs = [...document.querySelectorAll('.sstage > .wcard')];
+      let multi = 0, zero = 0, s0 = 0;
+      for (const c of cs) {
+        const hit = CL.filter(k => c.classList.contains(k)).length;
+        if (hit > 1) multi++;
+        if (hit === 0) zero++;
+        if (c.classList.contains('s0')) s0++;
+      }
+      return {multi, zero, s0};
+    }""")
+    chk("快速连翻后：每张卡只落在一个档位（没有半截状态）",
+        rv_st["multi"] == 0 and rv_st["zero"] == 0, rv_st)
+    chk("快速连翻后：恰好一张正面", rv_st["s0"] == 1, rv_st)
+
     # ── 5. 切回瀑布：结构换得干净，不留叠卡的壳 ───────────────
     page.click("#sMode button[data-m='grid']")
     page.wait_for_timeout(600)

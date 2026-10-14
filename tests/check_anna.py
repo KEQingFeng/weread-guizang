@@ -504,6 +504,22 @@ chk("名册里有这一栏、归在工具组", '("anna", "安娜的档案", "too
 chk("它排在名册最末（用户要的就是「最底部新增一栏」）",
     nav_block.rstrip().rstrip(",").rstrip().endswith('("anna", "安娜的档案", "tool")'),
     nav_block.rstrip()[-60:])
+# 1.2.1：用户要「砍掉繁杂界面，只留搜索框与搜索按钮」，且点搜索/回车直接自动跳。
+_rv = html.split("function renderAnnaView()", 1)[1].split("function wireAnna", 1)[0]
+_rv_gone = [i for i in ("anWinDot", "anOpen", "anStop", "anCollect", "anClear",
+                        "anDom", "anDomSave", "anBooks", "anFiles", "anPending")
+            if i in _rv]
+chk("安娜这一屏只剩搜索框与搜索键（窗口状态 / 镜像域名 / 补收 / 清空 / 三份记录都砍了）",
+    'id="anQ"' in _rv and 'id="anGo"' in _rv and not _rv_gone, _rv_gone)
+_wr = html.split("function wireAnna(p)", 1)[1].split("/* ── 内置浏览器", 1)[0]
+chk("点搜索或按回车，前端都走 mode=search 这一条（用户要的「直接自动跳转」）",
+    "e.key === 'Enter'" in _wr and "mode: 'search'" in _wr, _wr[:160])
+chk("后端 search 分支在窗口没开时自动把 anna_browser 任务领起来（不必先点开窗）",
+    re.search(r'mode == "search"[\s\S]{0,1800}?start_task\("anna_browser"', srv) is not None)
+chk("门禁开关在：GUIZANG_ANNA_NO_WINDOW 时只写口令不起窗口",
+    "GUIZANG_ANNA_NO_WINDOW" in srv
+    and "GUIZANG_ANNA_NO_WINDOW" in
+    (REPO / "tests" / "run_all.sh").read_text(encoding="utf-8"))
 brs = (REPO / "anna_browser.py").read_text(encoding="utf-8")
 chk("开窗口那条动作把任务 kinds 写对（界面据此判断窗口真假）",
     'start_task("anna_browser"' in srv and 'script("anna_browser.py")' in srv)

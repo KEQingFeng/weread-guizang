@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import random
 import re
 import shutil
@@ -60,7 +61,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -1726,6 +1727,57 @@ def notes_for_book(any_id, title="", author=""):
     return [], (bid or any_id), ""
 
 
+# 本机书目录里的划线/笔记（取书时划的、自己记的）——形状与划线索引条目一致，
+# 这样随机漫步 / 卡片回顾 / 复制划线不必为「本地那一路」各写一遍。
+_LOCAL_NOTES = {"at": 0.0, "items": []}
+
+
+def local_note_items(max_age=20):
+    """扫一遍本机书目录，收上里面的划线（marks）与笔记（entries）。
+
+    微信读书索引只认官方网关那两路，取回来的书在本机划的线不在里面；
+    随机漫步要「本地读书笔记」也能抽到，就得把这份并进来。
+    按 mtime 感觉不出来、按时间缓存 20 秒：连点「换一批」不重复扫盘。
+    """
+    now = time.time()
+    # 空结果也缓存：建索引时 /api/notes_index 每 2.5s 被问一次，没本机划线时
+    # 不能每次都把整座书库扫一遍（at 从 0 起，第一次必扫）。
+    if now - _LOCAL_NOTES["at"] < max_age:
+        return _LOCAL_NOTES["items"]
+    items = []
+    try:
+        books = list_books()
+    except Exception:
+        books = []
+    for b in books:
+        d = safe_book_dir(b.get("id"))
+        if not d:
+            continue
+        try:
+            doc = book_notes.load_notes(d)
+        except Exception:
+            continue
+        bid = b.get("id") or ""
+        title = b.get("title") or bid
+        author = b.get("author") or ""
+        for m in (doc.get("marks") or []):
+            t = "\n".join(x for x in ((m.get("text") or "").strip(),
+                                      (m.get("memo") or "").strip()) if x)
+            if t:
+                items.append({"bookId": bid, "title": title, "author": author,
+                              "kind": "取书" + book_notes._kind_label(m.get("kind")),
+                              "text": t, "at": m.get("created_at") or 0, "local": True})
+        for e in (doc.get("entries") or []):
+            t = "\n".join(x for x in ((e.get("title") or "").strip(),
+                                      (e.get("body") or "").strip()) if x)
+            if t:
+                items.append({"bookId": bid, "title": title, "author": author,
+                              "kind": "取书笔记", "text": t,
+                              "at": e.get("created_at") or 0, "local": True})
+    _LOCAL_NOTES.update({"at": now, "items": items})
+    return items
+
+
 # ---------- 知识卡片：导出 .apkg ----------
 
 def build_apkg(book_id, title):
@@ -3206,35 +3258,89 @@ def reset_book_output(book_id):
 
 # ---------- task runner ----------
 
+# 引擎进程退出后，最多再等这么久把管道里剩的几行读干净，然后无条件收尾。
+# 为什么需要它：引擎会拉起浏览器 / playwright 驱动等子进程，它们可能继承并攥住
+# stdout 的写端。引擎自己退了、孙子进程还活着时 `for line in proc.stdout` 永远等不到
+# EOF —— TASK["running"] 卡在 True，界面一直「正在取」，再点取书被「已有任务在运行」
+# 顶回来，用户看到的就是「取书卡住」。真正的收尾依据是「进程退了没」+ 一小段排水窗口。
+PIPE_DRAIN_GRACE = 2.0
+
+
+def _iter_lines(proc):
+    """逐行产出子进程输出，同时盯着进程退没退（不让管道 EOF 决定生死）。
+
+    读放在一条 daemon 线上（readline 是阻塞的），主循环只等队列：队列空就回头看
+    进程还在不在，退了就再给 PIPE_DRAIN_GRACE 秒收干净最后几行，然后结束。
+    """
+    q = queue.Queue()
+    poll = getattr(proc, "poll", None)
+
+    def pump():
+        try:
+            for raw in iter(proc.stdout.readline, ""):
+                q.put(raw)
+        except Exception:
+            pass                    # 管道被并发关掉之类：pump 安静退场，收尾由下面兜
+        finally:
+            q.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    idle_deadline = None
+    while True:
+        try:
+            raw = q.get(timeout=0.5)
+        except queue.Empty:
+            if poll is None:
+                continue            # 测试里的假进程没有 poll：照旧等管道 EOF
+            if poll() is not None:
+                if idle_deadline is None:
+                    idle_deadline = time.time() + PIPE_DRAIN_GRACE
+                elif time.time() >= idle_deadline:
+                    return
+            continue
+        if raw is None:
+            return
+        yield raw
+
+
 def _reader(proc):
     title, author = None, None
     done = False
-    for raw in iter(proc.stdout.readline, ""):
-        line = raw.rstrip("\n")
-        if not line.strip():
-            continue
-        m = re.search(r"📖\s*(.+?)\s*—\s*(.*)$", line)
-        # 「未知」是引擎读不到书名时的占位，不能拿它覆盖 meta 里已有的真书名。
-        if m and not title and m.group(1).strip() != "未知":
-            title = m.group(1).strip()
-            author = m.group(2).strip()
-        if "全书导出完成" in line:
-            done = True
-        # 子进程要交回结构化结果（比如视频那条线：书 id、字数、AI 缺席原因），
-        # 就走这一行约定：`##GUIZANG## {json}`。日志照旧原样记，前端也能看到。
-        # 之所以不用退出码带信息：退出码只能是 0-255 的一个数，装不下一个 json。
-        if line.startswith(RESULT_MARK):
-            try:
-                with _lock:
-                    TASK["result"] = json.loads(line[len(RESULT_MARK):])
-            except Exception:
-                pass
-        log(line)
-    proc.wait()
-    with _lock:
-        TASK["exit_code"] = proc.returncode
-        TASK["running"] = False
-        book = TASK["book"]
+    try:
+        for raw in _iter_lines(proc):
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            m = re.search(r"📖\s*(.+?)\s*—\s*(.*)$", line)
+            # 「未知」是引擎读不到书名时的占位，不能拿它覆盖 meta 里已有的真书名。
+            if m and not title and m.group(1).strip() != "未知":
+                title = m.group(1).strip()
+                author = m.group(2).strip()
+            if "全书导出完成" in line:
+                done = True
+            # 子进程要交回结构化结果（比如视频那条线：书 id、字数、AI 缺席原因），
+            # 就走这一行约定：`##GUIZANG## {json}`。日志照旧原样记，前端也能看到。
+            # 之所以不用退出码带信息：退出码只能是 0-255 的一个数，装不下一个 json。
+            if line.startswith(RESULT_MARK):
+                try:
+                    with _lock:
+                        TASK["result"] = json.loads(line[len(RESULT_MARK):])
+                except Exception:
+                    pass
+            log(line)
+    except Exception as e:
+        # 读输出本身出错（管道断了、解码坏了）也必须往下走收尾：原来异常一出，
+        # 下面那段「running=False」根本轮不到执行，任务就永远钉在运行中。
+        log(f"--- 读任务输出出错（{type(e).__name__}: {e}），任务照样收尾 ---")
+    finally:
+        try:
+            proc.wait()
+        except Exception:
+            pass
+        with _lock:
+            TASK["exit_code"] = proc.returncode
+            TASK["running"] = False
+            book = TASK["book"]
     if TASK.get("kind") in ("export",) and book:
         write_meta(book, title, author, done)
     if TASK.get("kind") == "video":
@@ -3689,13 +3795,29 @@ def anna_do(body):
         term = str(b.get("q") or b.get("term") or "").strip()
         if not term:
             return {"ok": False, "msg": "先写个书名或关键词"}
-        st = anna_state.read_state(DATA_DIR)
         anna_state.write_cmd(DATA_DIR, term)
-        # 窗口没开时口令条照样写：界面会告诉他「点了打开窗口就会搜这个」。
-        return {"ok": st.get("window") == "open",
-                "msg": "已经让窗口去搜：%s" % term if st.get("window") == "open"
-                       else "口令记下了，打开窗口就会搜：%s" % term,
-                "anna": anna_state.write_state(DATA_DIR, {"keyword": term})}
+        # 1.2.1：输入书名点搜索（或回车）就直接跳 —— 窗口没开就顺手把它领起来，用户
+        # 不必先去点「打开窗口」再回来敲字。判「窗口是不是真活着」用任务槽，不用账本：
+        # 账本里的 window=open 可能是上一次被强杀留下的谎（进程早没了），任务槽才是真源。
+        with _lock:
+            live = bool(TASK["running"] and TASK.get("kind") == "anna_browser")
+        # 门禁里不许弹真窗口（会占住任务槽、还会在用户屏幕上乱开页面），所以留一个开关：
+        # GUIZANG_ANNA_NO_WINDOW=1 时只写口令、不起窗口。界面上手动点的路径默认不受影响。
+        auto = os.environ.get("GUIZANG_ANNA_NO_WINDOW") != "1"
+        started, why = False, ""
+        if auto and not live:
+            started, why = start_task("anna_browser", [py(), script("anna_browser.py")],
+                                      env_extra=task_env("local"))
+        st = anna_state.write_state(DATA_DIR, {"keyword": term})
+        if live:
+            msg = "已经让窗口去搜：%s" % term
+        elif started:
+            msg = "正在打开窗口去搜：%s" % term
+        elif not auto:
+            msg = "口令记下了，打开窗口就去搜：%s" % term
+        else:
+            msg = "口令记下了，但没能起窗口：%s" % (why or "任务槽正忙")
+        return {"ok": bool(started or live), "started": started, "msg": msg, "anna": st}
 
     if mode == "domain":
         dom = anna_state.clean_domain(b.get("domain"))
@@ -4781,6 +4903,8 @@ class Handler(BaseHTTPRequestHandler):
             st["built_at"] = d.get("built_at") or st.get("built_at") or 0
             # 重建期间依然报旧索引的条数：否则搜索/随机漫步会以为"没索引"而用不了
             st["count"] = max(len(d.get("items") or []), st.get("count") or 0)
+            # 本机取书的划线/笔记：没建过微信索引时，随机漫步也有东西可抽。
+            st["local_count"] = len(local_note_items())
             return self._json({"ok": True, "data": st,
                                "books": d.get("books") or []})
 
@@ -4798,15 +4922,31 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/notes_random":
             n = max(1, min(int(q.get("n", ["6"])[0]), 30))
-            items = load_notes_index().get("items") or []
-            if not items:
-                return self._json({"ok": True, "data": []})
-            return self._json({"ok": True, "data": random.sample(items, min(n, len(items)))})
+            # src=wx 只抽微信读书索引；src=local 只抽本机取书那一路；默认两边都抽。
+            src = (q.get("src", ["all"])[0] or "all").strip().lower()
+            wx = load_notes_index().get("items") or []
+            lc = local_note_items()
+            pool = wx if src == "wx" else (lc if src == "local" else list(wx) + lc)
+            if not pool:
+                return self._json({"ok": True, "data": [],
+                                   "wx": len(wx), "local": len(lc)})
+            return self._json({"ok": True,
+                               "data": random.sample(pool, min(n, len(pool))),
+                               "wx": len(wx), "local": len(lc)})
 
         if path == "/api/notes_of":
             bid = q.get("book", [""])[0]
             # 索引里没有就现拉这一本，两套 id 都认（否则详情页会显示「没有划线」）
             items, _resolved, _src = notes_for_book(bid)
+            # 本机取书的划线 / 自己记的笔记也并进来：卡片回顾、复制划线都该看见它们。
+            ids = {x for x in (bid, _resolved) + tuple(book_id_pairs(bid)) if x}
+            seen = {(x.get("bookId"), x.get("text")) for x in items}
+            for x in local_note_items():
+                k = (x.get("bookId"), x.get("text"))
+                if x.get("bookId") in ids and k not in seen:
+                    seen.add(k)
+                    items.append(x)
+            items.sort(key=lambda x: -(x.get("at") or 0))
             return self._json({"ok": True, "data": items})
 
         if path == "/api/detail":

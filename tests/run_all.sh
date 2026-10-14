@@ -24,6 +24,10 @@ export GUIZANG_SELFTEST_DIR="$SANDBOX"
 export GUIZANG_DATA="$SANDBOX/cache"
 export GUIZANG_BOOKS="$SANDBOX/books"
 export GUIZANG_SHOT_DIR="$SANDBOX/shots"
+# 门禁里不弹安娜的档案真窗口：那会在用户屏幕上开一个 Chromium、还占住唯一任务槽。
+# 打开 UI_SERVER 那一侧的这条开关后，/api/anna 的 search 只写口令不起窗口；
+# 界面自己手动点搜索仍会照常开窗（这条只影响测试用的那份服务）。
+export GUIZANG_ANNA_NO_WINDOW=1
 mkdir -p "$GUIZANG_DATA" "$GUIZANG_BOOKS" "$GUIZANG_SHOT_DIR"
 
 FAILED=()
@@ -57,6 +61,10 @@ run "前后端对表（版本号 / 路由 / 话术 / 四个入口）" "$PY" test
 # 取书续传锚点是纯逻辑（目录 + 已落盘章节），不用起浏览器也验得了：
 # 它守的是「卡住之后再点取书必须能接着往前读」这条 —— 卡死一次就别再来第二次。
 run "取书续传锚点" "$PY" tests/check_resume.py
+# 与续传锚点配成一对：锚点管「卡住后再取能从断点往前」，这一条管「卡住这件事本身」
+# —— 引擎进程退了但孙子进程攥着 stdout、或读输出抛异常时，任务必须照样收尾，
+# 不许把 TASK["running"] 永远钉在 True（界面「正在取」、再取被「已有任务在运行」顶回）。
+run "任务收尾（进程退了就收 / 读出错也收）" "$PY" tests/check_task_reader.py
 # 三条新线（订阅 / 视频 / 平台解析）都是离线自测：夹具跑在本机临时 http.server 上，
 # 数据目录全指进各自沙盒，不联网、不碰用户真实书库。
 run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.py
@@ -157,6 +165,18 @@ run "内置浏览器（内网拦截 / base 与跳转脚本 / 透传 / 接线）"
 # --main-w 一处定义、main 的 max-width 只认它、任何按页给 main 另开宽度的口子都判失败，
 # 顺带守住滚动条常驻槽位与「视图常驻、只挪 hidden」这两条不闪的前提。
 run "切页一致性（一块舞台 / 无横跳 / 常驻视图）" "$PY" tests/check_pane_uniform.py
+# 叠卡快速切书那条 bug（R4-4）：常驻 will-change 堆合成层、applyStack 无条件重刷整台卡、
+# 批尾每翻一步同步重铺 —— 这三条都随书量放大成卡顿，且都能在源码里一眼钉死。只读 ui.html。
+run "叠卡性能（只在翻动提层 / 位置没变不碰卡 / 批尾补卡去抖）" "$PY" tests/check_stack_perf.py
+# 划线笔记那一屏改成书籍卡片瀑布流，并把「取书」时在本机划的线也并进来（R4-6）。
+# 前端读源码钉瀑布流版式与两个来源的合并、后端直接落一份 notes.json 再读回来，全离线。
+run "划线笔记瀑布流（书卡版式 / 微信 + 取书合并 / 同一套功能）" "$PY" tests/check_notebooks.py
+# 随机漫步也要能抽本机（取书）的读书笔记，而不只是微信读书索引（R4-7）。
+# 后端收本机 notes.json / 三个路由认 local_count 与 src，前端三档 + 分色，全离线。
+run "随机漫步（微信 + 取书两路 / src 档位 / 没索引也能玩）" "$PY" tests/check_random_local.py
+# 控件质感与交互反馈（R4-5）：动效令牌、通用按压、键盘焦点、落点涟漪、卡片入场、
+# 成功回弹，外加「减少动效」与「反馈不许动版面」两条硬规矩。只读 ui.html，全离线。
+run "控件质感与交互反馈（令牌 / 按压 / 涟漪 / 入场 / 回弹）" "$PY" tests/check_ui_polish.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"

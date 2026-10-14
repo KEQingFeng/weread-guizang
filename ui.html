@@ -118,6 +118,64 @@
     transition:none!important;
   }
 
+  /* ── 控件质感与交互动效（1.2.1 · R4-5） ────────────────────────────────
+     用户要的是「控件更有质感、每次交互都有反馈动画」。做法不是给每颗按钮各写一套，
+     而是先把时长与缓动收成令牌，再给「所有能点的东西」铺一层共同的按下 / 聚焦 / 落点
+     反馈；各组件原有的细调（.ainavbtn 的居中位移、叠卡的翻页、卡片悬停抬升）写在后面，
+     权重更高自然盖过这一层，互不打架。
+
+     铁律：反馈只走 transform / opacity / box-shadow / filter / background，
+     绝不改宽高、边距这些流内属性 —— 一动版面，悬停就会把旁边的字顶走
+     （tests/check_hover_shift.py 按这条守着）。下面统一用 :where() 把权重压到 0，
+     保证任何组件自己写的 transition / :active 都能覆盖它。 */
+  :root{
+    --fx-fast:130ms;                 /* 按压：短促才跟手 */
+    --fx-dur:200ms;                  /* 常规反馈 */
+    --fx-slow:420ms;                 /* 成功回弹这类表演 */
+    --fx-out:cubic-bezier(.22,.68,.24,1);   /* 落定的手感，比 linear 稳 */
+    --press:.965;                    /* 按下去缩多少 */
+  }
+  /* 1) 共同底座：能点的东西都有一条短促的位移补间，按下去才有「弹」的感觉。 */
+  :where(button, [role="button"], summary, .pcat, .nbtag, .abitem, .ntchip, .fechip){
+    transition:transform var(--fx-fast) var(--fx-out),
+               box-shadow var(--fx-dur) var(--fx-out);
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* 2) 按压缩放：只在按着的那一瞬，松手自动弹回。 */
+  :where(button, [role="button"], summary):active:not(:disabled){
+    transform:scale(var(--press));
+  }
+  /* 3) 键盘焦点：只有键盘走查才描一圈，鼠标点不描（:focus-visible 的语义就是如此）。 */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  /* 4) 落点涟漪：JS 在指针按下的坐标插一个 .tapfx，fixed 定位、不占布局、不被父框裁剪，
+     340ms 后自己移除。一圈淡淡的强调色从落点散开，就是「点到了」。 */
+  .tapfx{
+    position:fixed; z-index:9999; border-radius:50%; pointer-events:none;
+    background:radial-gradient(circle, var(--accent-soft) 0%, rgba(47,127,240,0) 70%);
+    transform:translate(-50%,-50%) scale(0); opacity:.9;
+    animation:tapfx .34s var(--fx-out) forwards;
+  }
+  @keyframes tapfx{
+    from{transform:translate(-50%,-50%) scale(0); opacity:.9}
+    to{transform:translate(-50%,-50%) scale(1); opacity:0}
+  }
+  /* 5) 内容入场：批量渲染出来的卡片按序轻轻抬一下，换数据 / 换视图不再是硬切。 */
+  .fx-in{animation:fxup var(--fx-dur) var(--fx-out) both}
+  @keyframes fxup{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+  /* 6) 成功回弹：加书架这类「做成了」的动作给一下放大再回落，比只换字更有回音。 */
+  .fx-pop{animation:fxpop var(--fx-slow) var(--pop)}
+  @keyframes fxpop{0%{transform:scale(1)}32%{transform:scale(1.07)}100%{transform:scale(1)}}
+  /* 7) 尊重系统设置：用户说「少动效」就一律不动。 */
+  @media (prefers-reduced-motion:reduce){
+    .tapfx{display:none}
+    .fx-in{animation:none}
+    .fx-pop{animation:none}
+    :where(button, [role="button"], summary):active:not(:disabled){transform:none}
+  }
+
   *{box-sizing:border-box}
   /* 滚动条一直是「有 / 没有」两态：书架/统计这些整页滚的屏，滚动条在；订阅/阅读器/
      浏览器这些「一屏刚好」的屏，滚动条不在。二者一换，整页会左右挪一条滚动条的宽
@@ -751,16 +809,28 @@
   /* 窗口没开的时候那颗点不该呼吸 —— 它在说「closed」，闪动会被读成「正在做什么」。 */
   .zwaiting .pulse.off{animation:none; background:var(--ink-3); opacity:.45}
 
-  /* 「让窗口去搜」与镜像域名这一排：两条输入加两颗钮，窄窗折行。
-     这一屏的输入框不在 .fetools / .fmtools 那一类作用域里，样式得自己给全。 */
-  .anbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:12px 15px 4px}
-  .anbar input{height:30px; flex:1; min-width:150px; padding:0 10px; font:inherit; font-size:12px;
+  /* 「安娜的档案」1.2.1 起只剩搜索这一件事：一行输入 + 一颗键，居中摆。
+     输入框不在 .fetools / .fmtools 那一类作用域里，样式得自己给全。 */
+  .anhero{max-width:620px; margin:18px auto 0; padding:0 16px; text-align:center}
+  .anhero .t{font-size:15px; font-weight:600; color:var(--ink)}
+  .anhero .s{margin-top:8px; font-size:12px; color:var(--ink-3); line-height:1.85}
+  .anbar{display:flex; gap:10px; align-items:stretch; max-width:620px;
+    margin:24px auto 0; padding:0 16px}
+  .anbar input{height:42px; flex:1; min-width:0; padding:0 14px; font:inherit; font-size:13.5px;
     color:var(--ink); background:var(--surface-2); border:1px solid var(--line-2);
-    border-radius:9px; outline:none}
-  .anbar input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
-  .anbar input.dm{flex:none; width:170px; min-width:0}
-  /* 三段小标题：左边距对齐 .zrow 的 15px，所以不用 .fegrp（那是组件栏那一套，横向 6px）。 */
-  .ansec{padding:15px 15px 6px; font-size:11px; color:var(--ink-3); letter-spacing:.04em}
+    border-radius:12px; outline:none;
+    transition:border-color .16s ease, box-shadow .16s ease, background .16s ease}
+  .anbar input:focus{border-color:var(--accent); background:var(--surface);
+    box-shadow:0 0 0 4px var(--accent-soft)}
+  .anbar .ango{flex:none; height:42px; padding:0 24px; border:0; border-radius:12px;
+    font:inherit; font-size:13.5px; font-weight:600; color:#fff; cursor:pointer;
+    background:linear-gradient(150deg,#4b93f2,#2568cc);
+    box-shadow:0 6px 16px -8px rgba(47,127,240,.75), inset 0 .5px 0 rgba(255,255,255,.45);
+    transition:transform .14s ease, box-shadow .16s ease, filter .16s ease}
+  .anbar .ango:hover{filter:brightness(1.05);
+    box-shadow:0 9px 22px -9px rgba(47,127,240,.85), inset 0 .5px 0 rgba(255,255,255,.45)}
+  .anbar .ango:active{transform:scale(.965)}
+  .anbar .ango:disabled{cursor:default; filter:grayscale(.25); opacity:.6; transform:none}
 
   /* ── 侧边栏 + 内容区 ───────────────────── */
   .shell{display:grid; grid-template-columns:214px minmax(0,1fr); gap:16px; align-items:start}
@@ -1755,6 +1825,40 @@
   .nitem .mt{font-size:11px; color:var(--ink-3); margin-top:5px}
   .nitem .mt .src{color:var(--ink-2)}
 
+  /* 划线笔记列表改成「书籍卡片式瀑布流」：一列一列往下排，卡片按书名长短自然错落。
+     微信读书的划线 + 取书时在本机划的线并成同一面墙，同一本书只出一张卡。 */
+  .nbwall{columns:3; column-gap:14px; padding:15px}
+  @media (max-width:1000px){ .nbwall{columns:2} }
+  @media (max-width:560px){ .nbwall{columns:1} }
+  .nbcard{
+    break-inside:avoid; margin-bottom:14px; border-radius:var(--r-sm); cursor:pointer;
+    background:var(--glass-2); border:1px solid var(--line); overflow:hidden;
+    animation:soften .4s var(--spring) backwards;
+    transition:transform .26s var(--spring), box-shadow .22s ease,
+               border-color .2s ease, background .2s ease;
+  }
+  .nbcard:hover{transform:translateY(-3px); box-shadow:var(--shadow); border-color:var(--line-2); background:var(--glass)}
+  .nbcard .cv{position:relative; aspect-ratio:2/3; overflow:hidden; display:grid; place-items:center;
+    background:linear-gradient(150deg,#e7eefb,#d9e5f7)}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .nbcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)} }
+  html[data-theme="dark"] .nbcard .cv{background:linear-gradient(150deg,#232a38,#1c222e)}
+  .nbcard .cv img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block}
+  .nbcard .cv .ph{font-size:30px; font-weight:600; opacity:.2; user-select:none}
+  .nbcard .bd{padding:10px 12px 12px}
+  .nbcard .n{font-size:13px; font-weight:600; line-height:1.4;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  .nbcard .a{font-size:11px; color:var(--ink-3); margin-top:3px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .nbcard .cn{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .nbcard .cn span{font-size:10.5px; padding:2px 8px; border-radius:999px;
+    background:var(--surface-2); border:1px solid var(--line); color:var(--ink-2);
+    transition:border-color .2s ease, color .2s ease}
+  /* 来源徽章：微信读书那几支笔是官方的、取书的是本机划的，颜色分开一眼能认。 */
+  .nbcard .cn span.wx{color:var(--accent); border-color:var(--accent-soft); background:var(--accent-soft)}
+  .nbcard .cn span.lc{color:#2c8f63; border-color:rgba(44,143,99,.24); background:rgba(44,143,99,.11)}
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .nbcard .cn span.lc{color:#7fd6a8; background:rgba(127,214,168,.13)} }
+  html[data-theme="dark"] .nbcard .cn span.lc{color:#7fd6a8; background:rgba(127,214,168,.13)}
+
   @keyframes arrive{from{opacity:0; transform:translateY(10px)}to{opacity:1; transform:none}}
   /* 羊皮卷：书架卡滚进视口才从上往下摊开，同批内错开几十毫秒 */
   @keyframes unfurl{
@@ -1790,8 +1894,11 @@
     position:absolute; left:50%; top:0; width:var(--sw);
     margin-left:calc(var(--sw) / -2); opacity:0; pointer-events:none;
     animation:none; box-shadow:var(--shadow);
-    transition:transform .56s var(--spring), opacity .4s ease, box-shadow .4s ease;
-    will-change:transform, opacity}
+    transition:transform .56s var(--spring), opacity .4s ease, box-shadow .4s ease}
+  /* 合成层只在下手翻的那一下要。原先每张卡常驻 will-change，扇形一摊上百张就是
+     上百层，翻得越急、重合成越堵 —— 这就是用户说的「叠卡快速切书卡顿」。
+     翻动那一下由 applyStack 在舞台上挂 .anim 临时提层，动画收尾就摘掉。 */
+  .sstage.anim>.wcard{will-change:transform, opacity}
   .sstage>.wcard.pre,.sstage>.wcard.unfurl,.sstage>.wcard.rev{animation:none}
   .sstage>.wcard.s0{opacity:1; pointer-events:auto; z-index:20;
     transform:translate3d(0,0,0) rotateY(0deg) scale(1)}
@@ -2349,11 +2456,13 @@
   .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:10px 14px;
     font-size:13px; line-height:17px; color:var(--ink);
     border:1px solid rgba(20,30,45,.13); box-shadow:0 1px 2px rgba(20,30,45,.07);
-    cursor:grab; user-select:none; overflow:hidden; word-break:break-word;
+    cursor:grab; user-select:none; overflow:visible;
     transition:box-shadow .14s ease, outline-color .12s ease}
-  /* 后端已经把文字按字宽折成几行了（layout.boxes.lines），这里一行一个块 ——
-     行高 17px 和它算框高用的同一个数，屏幕上的框和导出的 SVG 才对得上。 */
-  .mmnode .mmln{display:block}
+  /* 后端已经把文字按像素宽折成几行了（layout.boxes.lines），这里一行一个块 ——
+     行高 17px 和它算框高用的同一个数，屏幕上的框和导出的 SVG 才对得上。
+     每行 nowrap：框宽是后端按同一把逐字像素尺量出来的，行内不该再被浏览器折一次；
+     万一字体比估算略宽，也是溢出可见而不是被裁掉（1.2.1 修「小框挤掉文字」）。 */
+  .mmnode .mmln{display:block; white-space:nowrap}
   .mmnode:hover{box-shadow:0 3px 12px rgba(20,30,45,.15)}
   .mmnode.drag{cursor:grabbing; box-shadow:0 8px 22px rgba(20,30,45,.22); z-index:4}
   .mmnode.sel{outline:2px solid var(--accent); outline-offset:1px}
@@ -3091,6 +3200,9 @@
   .qcard .t{font-size:13px; line-height:1.78; white-space:pre-wrap}
   .qcard .m{font-size:11px; color:var(--ink-3); margin-top:9px; display:flex; gap:8px; flex-wrap:wrap}
   .qcard .m .k{color:var(--ink-2)}
+  .qcard .m .k.lc{color:#2c8f63}      /* 取书那一路的划线/笔记：和微信来源分色 */
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .qcard .m .k.lc{color:#7fd6a8} }
+  html[data-theme="dark"] .qcard .m .k.lc{color:#7fd6a8}
 
   /* ═══ 流畅度：少算一点、少画一点 ═══
 
@@ -4808,13 +4920,18 @@ function shelfCard(b, bits) {
     x.onclick = e => { e.stopPropagation(); fn(); closeAllCards(); };
     return x;
   };
-  // 点开只给两个动作（用户要求）：一本 → 取书 / 正文 / 续取，加一个查看详情。
-  // 正在跑的那本不给出「取书」，免得点了被后端一句「已有任务在运行」顶回来；
-  // 取到一半的书主按钮是「续取」（引擎本来就断点续传），「清掉重取」收在详情页与任务记录里。
+  // 点开只给「办这一件事」的动作（用户要求），加一个查看详情。
+  // 1.2.1 起改了取书的收尾口径：只要盘上已经有章节，就先给「阅读」——不必等整本取完；
+  // 还没取过的才给「取书」，取到一半的在「阅读」旁边再并一颗「续取」（引擎本来断点续传）。
+  // 正在跑的那本不给这些，免得点了被后端一句「已有任务在运行」顶回来。
   if (!busy) {
     const done = bookFull(mine);
-    strip.append(mk(done ? '正文' : (mine ? '续取' : '取书'),
-      () => done ? openReader(id, b.title || id, 'shelf') : beginFetch(id, b.title)));
+    if (mine && (done || (mine.chapters || 0) > 0)) {
+      strip.append(mk('阅读', () => openReader(id, b.title || id, 'shelf')));
+      if (!done) strip.append(mk('续取', () => beginFetch(id, b.title)));
+    } else {
+      strip.append(mk('取书', () => beginFetch(id, b.title)));
+    }
   }
   strip.append(mk('查看详情', () => renderDetailView(detailStore, detailReader, b.title)));
 
@@ -4932,7 +5049,7 @@ let sideFootStamp = '';
    没重启。2026-10-07 用户报「左侧没有安娜的档案」就是它：导航那几格是后端 NAV_ITEMS
    给的，进程还是上一版，界面再怎么新也铺不出这一格，而两个版本号看着完全一样。
    后端因此多报一个 code_disk（磁盘上此刻的指纹），和它自己的 code 一比就露馅。 */
-const GUIZANG_PAGE = "1.2.0";
+const GUIZANG_PAGE = "1.2.1";
 const GZ = {back: "", code: "", disk: "", drift: false, stale: false,
             hid: false, swapping: false, why: "", prof: ""};
 
@@ -9731,6 +9848,7 @@ async function addToShelf(ids, title, btn) {
   if (btn) {
     btn.textContent = list.length > 1 ? `已加入 ${list.length} 本` : '已加入书架';
     btn.title = '微信读书书架里已经有这本了';
+    fxPop(btn);                      // 做成了给一下回弹，不只是换个字
   }
   // 批量那趟没有书名，别写成「《3 本》已加入书架」
   const who = title && list.length === 1 ? `《${title}》` : `这 ${list.length} 本`;
@@ -10141,18 +10259,40 @@ function setShelfMode(m) {
 /** 每张卡摆哪儿，只看它离当前那张有几张 —— 没有第几种状态，位置就是距离。
  *  左右对称：d=±1..±3 都摊在画内看得见、点得着，越界的才甩到画外（d>3 右、d<-3 左）。 */
 const STACK_CLS = ['s0', 's1', 's2', 's3', 'b1', 'b2', 'b3', 'sgone', 'saway'];
+/** 每张卡上一次落在哪一档。位置没变的卡一个字节都不碰它 —— 原来每翻一本就把整台卡
+ *  的 9 个状态类全删再全加回去，上百张一起触发样式重算，快速连翻就是用户看到的
+ *  「卡顿 + 闪」。存在 WeakMap 里，不进 DOM，节点被替换就跟着归零，不会留旧账。 */
+const stackPos = new WeakMap();
+let stackAnimT = null;
+/** 翻书那一下才给舞台挂合成提示（.anim → will-change），连着翻就顺延，收尾摘掉。 */
+function markStackAnim(stage) {
+  if (!stage) return;
+  stage.classList.add('anim');
+  if (stackAnimT) clearTimeout(stackAnimT);
+  stackAnimT = setTimeout(() => {
+    stackAnimT = null;
+    document.querySelectorAll('.sstage.anim').forEach(s => s.classList.remove('anim'));
+  }, 680);
+}
 function applyStack(stage) {
   const kids = [...stage.children];
+  let touched = false;
   kids.forEach((c, i) => {
     const d = i - shelfCursor;
-    c.classList.remove(...STACK_CLS);
-    c.classList.add(d === 0 ? 's0' : d === 1 ? 's1' : d === 2 ? 's2' : d === 3 ? 's3'
+    const cls = d === 0 ? 's0' : d === 1 ? 's1' : d === 2 ? 's2' : d === 3 ? 's3'
       : d === -1 ? 'b1' : d === -2 ? 'b2' : d === -3 ? 'b3'
-      : d > 3 ? 'saway' : 'sgone');
+      : d > 3 ? 'saway' : 'sgone';
+    // 位置没动就整段跳过：不删类、不加类、不写 aria，也不起补间。
+    if (stackPos.get(c) === cls) return;
+    stackPos.set(c, cls);
+    c.classList.remove(...STACK_CLS);
+    c.classList.add(cls);
     // 只有「看不见」的那几张（甩到画外的）从无障碍树里摘掉；
     // 两侧摊开的六张看得见也能点，标成 aria-hidden 就成了「读屏里不存在却能点」。
     c.setAttribute('aria-hidden', Math.abs(d) <= 3 ? 'false' : 'true');
+    touched = true;
   });
+  if (touched) markStackAnim(stage);
   const pos = stage.parentNode && stage.parentNode.querySelector('#stPos');
   if (pos) pos.textContent = kids.length ? (shelfCursor + 1) + ' / ' + kids.length : '';
   const pv = stage.parentNode && stage.parentNode.querySelector('#stPrev');
@@ -10171,15 +10311,29 @@ function shelfStep(dir) {
   if (!stage || !stage.children.length) return;
   const want = Math.max(0, Math.min(stage.children.length - 1, shelfCursor + dir));
   if (want === shelfCursor) return;
-  closeAllCards();
+  // 「翻页先收抽屉」只在真有抽屉摊着时才去扫 DOM。以前每翻一本都
+  // querySelectorAll('.wcard.open') 走一遍，连翻时全是白花的样式查询。
+  if (document.querySelector('.wcard.open')) closeAllCards();
   shelfCursor = want;
   applyStack(stage);
-  // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）
+  // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）。
+  // 补一批是 O(已铺数量) 的活，连翻时不能每一下都同步干 —— 攒到这一串翻完再补，
+  // 否则「翻到批尾」那几下会卡。翻页本身已经先走完，观感不受影响。
   const all = shelfAll();
   if (all.length > shelfShown && shelfCursor >= shelfShown - 2) {
     shelfShown += SHELF_BATCH;
-    renderShelfGrid();
+    growStackSoon();
   }
+}
+
+let growStackT = null;
+/** 把「补进下一批卡」压到连翻停下之后再做；只在叠卡这一面、还在书架时才补。 */
+function growStackSoon() {
+  if (growStackT) clearTimeout(growStackT);
+  growStackT = setTimeout(() => {
+    growStackT = null;
+    if (shelfMode === 'stack' && v === 'shelf') renderShelfGrid();
+  }, 90);
 }
 
 /* 叠卡那面的键盘：只在书架看得见、不在阅读时、焦点不在输入框里才接手，
@@ -13594,9 +13748,8 @@ function renderFlomoView() {
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
 let vidStopping = false;   // 「停止」已经点下、收尾还没走完：按钮立刻改成「正在停」
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
-let annaDomDirty = false;   // 安娜的档案域名输入被改过、还没保存（同上，别被轮询盖回）
-// 安娜的档案那一栏的状态账本（窗口开没开、接住几份、进书架几本）。
-// 只在 paintAnna() 一处写入，轮询与这一栏里的每个按钮都从那儿过一遍，别各存各的。
+// 安娜的档案那一栏的状态账本（最近搜过什么、窗口开没开）。
+// 1.2.1 起这一屏只剩搜索框与搜索键，账本只在 paintAnna() 一处写入。
 let annaState = {};
 // 浏览器组件（Playwright 的 chromium）就绪没有。安娜的档案要在本机开一个可见窗口，
 // 组件没装好时这一路起不来，界面提前拦一道、说清去哪儿修，而不是点了没反应。
@@ -14862,185 +15015,103 @@ function paintVideoCfg(v) {
   if (vf && !vf.disabled) vf.textContent = a.ffmpeg ? '重装 ffmpeg' : '装 ffmpeg';
 }
 
-/* 「安娜的档案」这一栏的状态。窗口那头负责浏览与下载，后端只读它留下的一份小账，
-   这里再把那份账照出来。页面内容、cookie、令牌都不进这条链路，所以这一屏能显示的
-   只有「窗口开没开、接住几份、进了几本、哪几本没进来、为什么没进来」。 */
-
-/** 账本里的 window 是窗口进程自己写的：被强杀时来不及写 closed，于是会说谎。
- *  「这会儿到底有没有这个进程」的真源是任务槽（runningKind），对不上时以它为准。 */
-function annaLive(st) {
-  const w = (st && st.window) || 'closed';
-  const live = running && runningKind === 'anna_browser';
-  if (live && w !== 'open' && w !== 'opening') return 'open';      // 刚点下打开，账本还没翻过来
-  if (!live && (w === 'open' || w === 'opening')) return 'stale';  // 进程没了，账本还留着
-  return w;
-}
-
-const ANNA_WIN = {
-  opening: '窗口正在打开…',
-  open: '窗口开着，在里面搜书、点下载，文件归藏自己接',
-  closed: '窗口没开',
-  failed: '窗口没起来',
-  stale: '上一次说窗口还开着，其实进程已经不在了',
-};
-
-/** 一串记录换上去。内容没变就不重画 —— 轮询每 2.6 秒一次，来回重建会把用户
- *  正指着那一行的 hover 打掉，也白烧一遍布局。 */
-function annaRows(el, list, build, emptyText) {
-  if (!el) return;
-  const sig = JSON.stringify(list || []);
-  if (el.dataset.sig === sig) return;
-  el.dataset.sig = sig;
-  const rows = (list || []).map(build);
-  if (!rows.length) {
-    const e = document.createElement('div');
-    e.className = 'emptyline';
-    e.textContent = emptyText || '还没有记录';
-    el.replaceChildren(e);
-    return;
-  }
-  el.replaceChildren(...rows);
-}
-
-function annaBadge(text, ok) {
-  const s = document.createElement('span');
-  if (ok) s.className = 'ok';
-  s.textContent = text;
-  return s;
-}
-
-/** 一行书：书脊块 + 书名 / 文件名 + 徽章。点了跳到阅读器（入库的就是本地书架里的书）。 */
-function annaBookRow(r) {
-  const row = document.createElement('div');
-  row.className = 'zrow';
-  const spine = document.createElement('div');
-  spine.className = 'zc';
-  const sp = document.createElement('span');
-  sp.className = 'sp';
-  sp.textContent = String(r.title || r.name || '?').trim().slice(0, 1);
-  spine.append(sp);
-  const mid = document.createElement('div');
-  mid.className = 'zm';
-  const t = document.createElement('div');
-  t.className = 'zt';
-  t.textContent = r.title || r.name || '未命名';
-  const a = document.createElement('div');
-  a.className = 'za';
-  a.textContent = [r.author, r.name].filter(Boolean).join(' · ');
-  const b = document.createElement('div');
-  b.className = 'zb';
-  b.append(annaBadge('已入书架', true));
-  if (r.chapters) b.append(annaBadge(`${r.chapters} 章`));
-  if (r.bytes) b.append(annaBadge(humanBytes(r.bytes)));
-  mid.append(t, a, b);
-  row.append(spine, mid);
-  const go = document.createElement('button');
-  go.className = 'deed zn';
-  go.textContent = '看这本';
-  go.onclick = () => openReader(r.book, r.title || r.name, 'anna');
-  row.append(go);
-  return row;
-}
-
-/** 一行「没进书架」：原文件还在下载夹里，原因写在明处，不假装成功。 */
-function annaPendingRow(r) {
-  const row = document.createElement('div');
-  row.className = 'zrow';
-  const mid = document.createElement('div');
-  mid.className = 'zm';
-  const t = document.createElement('div');
-  t.className = 'zt';
-  t.textContent = r.name || '未命名';
-  const a = document.createElement('div');
-  a.className = 'za';
-  a.textContent = r.reason || '没进书架';
-  const b = document.createElement('div');
-  b.className = 'zb';
-  b.append(annaBadge('原文件留着'));
-  if (r.bytes) b.append(annaBadge(humanBytes(r.bytes)));
-  mid.append(t, a, b);
-  row.append(mid);
-  return row;
-}
-
-/** 下载夹那一格里有什么。这是「现场」不是账本，所以只在这一栏进来时数一遍。 */
-function annaFileRow(f) {
-  const row = document.createElement('div');
-  row.className = 'zrow';
-  const mid = document.createElement('div');
-  mid.className = 'zm';
-  const t = document.createElement('div');
-  t.className = 'zt';
-  t.textContent = f.name || '未命名';
-  const b = document.createElement('div');
-  b.className = 'zb';
-  b.append(annaBadge(f.ok ? '收得下' : '格式不认', !!f.ok));
-  b.append(annaBadge(humanBytes(f.bytes || 0)));
-  mid.append(t, b);
-  row.append(mid);
-  return row;
-}
+/* 「安娜的档案」1.2.1 起只剩一件事：写个书名，点搜索（回车也行），窗口自动打开跳过去。
+   上一版的窗口状态、镜像域名、补收、清空、下载夹与入库记录整块砍掉 —— 那些要么由后端
+   自动兜住（域名轮换在 anna_state.domain_candidates 里），要么归「本地书架」去看。
+   这一屏不再渲染任何状态，paintAnna() 只把上一次搜过的词放进输入框的占位。 */
 
 function paintAnna(a) {
+  // 这一屏只剩搜索：账本里唯一还上屏的是「上一次搜的是哪本书」。
   annaState = a || {};
   const p = PANES.anna;
   if (!p) return;
-  const q = sel => p.querySelector(sel);
-  const st = annaState;
-  const win = annaLive(st);
-  const live = win === 'open' || win === 'opening';
-
-  const hd = q('#anWinText');
-  if (hd) hd.textContent = ANNA_WIN[win] || ANNA_WIN.closed;
-  const dot = q('#anWinDot');
-  if (dot) dot.classList.toggle('off', !live);
-  const tip = q('#anTip');
-  if (tip) {
-    const bits = [];
-    if (win === 'failed' && st.last_error) bits.push(String(st.last_error));
-    if (st.note) bits.push(String(st.note));
-    // 任务槽只有一个位置：窗口一直开着，这期间发起的取书会排队。这一句不写在
-    // 明处，「点了取书没动静」就会被当成程序卡死。
-    bits.push(live ? '窗口开着会占住任务位，这期间发起的取书会排队等它。'
-                   : '归藏自己开一个浏览器窗口，搜书与下载都在那个窗口里点。');
-    // 2026-10-07 在有头窗口里实测：详情页每一条下载链接都指向 /account，写着
-    // 「Log in to access downloads」。不登录就没有能点的下载，这一句不写在明处，
-    // 用户只会觉得「点了没反应」。登录态存在归藏自己那份浏览器档案里，登一次留着。
-    bits.push('对方现在要先登录才给下载，在这个窗口里登一次就行。');
-    tip.textContent = bits.join(' ');
-  }
-  const ob = q('#anOpen');
-  if (ob) {
-    ob.disabled = live;
-    ob.textContent = live ? '窗口已打开'
-      : (win === 'stale' || win === 'failed' ? '重新打开窗口' : '打开浏览器窗口');
-  }
-  const sb = q('#anStop');
-  if (sb) sb.hidden = !live;
-  const lb = q('#anLog');
-  if (lb) lb.hidden = !live;
-
-  const cnt = q('#anCnt');
-  const txt = `接住 ${st.caught || 0} 份 · 进书架 ${st.imported || 0} 本`
-    + ` · 没收进来 ${st.skipped || 0} 份`;
-  if (cnt && cnt.textContent !== txt) cnt.textContent = txt;
-
-  const dm = q('#anDom');
-  if (dm && !annaDomDirty) dm.placeholder = st.domain || 'annas-archive.is';
-  const kw = q('#anQ');
-  if (kw && st.keyword) kw.placeholder = '上一次搜的是「' + st.keyword + '」';
-
-  annaRows(q('#anBooks'), st.books, annaBookRow, '还没有从窗口里接住的书');
-  annaRows(q('#anPending'), st.pending, annaPendingRow, '没有没收进来的文件');
+  const kw = p.querySelector('#anQ');
+  if (kw && annaState.keyword) kw.placeholder = '上一次搜的是「' + annaState.keyword + '」';
 }
 
 /* ── 划线笔记（多选 → flomo） ─────────── */
 
 let nbBooks = [], nbItems = [], nbSel = new Set(), nbOpen = null, nbTitle = '';
 
+/** 一张书卡上到底有多少条：微信读书的划线/想法/书签 + 取书时在本机划的线。 */
+function nbCount(b) {
+  const n = (b.local || {}).notes || {};
+  return (b.noteCount || 0) + (b.reviewCount || 0) + (b.bookmarkCount || 0)
+       + (n.marks || 0) + (n.entries || 0);
+}
+
+/** 一本笔记书 → 瀑布流里的一张卡片。微信读书与取书两个来源各占一枚徽章，
+ *  同一本书两边都有也只出一张卡（点进去两边的条目并排列出）。 */
+function nbCard(b) {
+  const info = b.book || {};
+  const lb = b.local || {};
+  const title = info.title || lb.title || b.bookId || lb.id || '';
+  const card = document.createElement('div');
+  card.className = 'nbcard';
+  card.style.cursor = 'pointer';
+  const cv = document.createElement('div');
+  cv.className = 'cv';
+  const ph = () => {
+    const d = document.createElement('div');
+    d.className = 'ph';
+    d.textContent = (title || '书').slice(0, 1);
+    cv.replaceChildren(d);
+  };
+  // 封面按「官方图 → 本地缓存」顺次退：官方图床有时拒外链，第一张挂了就换下一张，
+  // 全挂才露首字底纹，不留破图。
+  const alts = [];
+  if (info.cover) alts.push(info.cover);
+  if (keySet && b.bookId) alts.push('/api/cover?book=' + encodeURIComponent(b.bookId));
+  if (lb.cover && lb.id) alts.push('/api/cover?book=' + encodeURIComponent(lb.id));
+  if (alts.length) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    let i = 0;
+    img.onerror = () => { if (i < alts.length) img.src = alts[i++]; else ph(); };
+    img.src = alts[i++];
+    cv.append(img);
+  } else ph();
+  const bd = document.createElement('div');
+  bd.className = 'bd';
+  const nm = document.createElement('div');
+  nm.className = 'n';
+  nm.textContent = title;
+  bd.append(nm);
+  if (info.author || lb.author) {
+    const au = document.createElement('div');
+    au.className = 'a';
+    au.textContent = info.author || lb.author;
+    bd.append(au);
+  }
+  const cn = document.createElement('div');
+  cn.className = 'cn';
+  const wn = (b.noteCount || 0) + (b.reviewCount || 0);
+  const ln = (((lb.notes || {}).marks) || 0) + (((lb.notes || {}).entries) || 0);
+  if (wn) {
+    const s = document.createElement('span');
+    s.className = 'wx';
+    s.textContent = `微信 ${wn} 条`;
+    cn.append(s);
+  }
+  if (ln) {
+    const s = document.createElement('span');
+    s.className = 'lc';
+    s.textContent = `取书 ${ln} 条`;
+    cn.append(s);
+  }
+  if (cn.childElementCount) bd.append(cn);
+  card.append(cv, bd);
+  card.onclick = () => openNotebook(b);
+  return card;
+}
+
 async function renderNotebooks() {
   const {p, body} = viewPane('notes', viewHeader('划线笔记'));
-  if (!keySet) { body.innerHTML = notReady(); return; }
+  // 没填微信读书 Key 时，本地取书的划线照样能看 —— 这一屏不是只有官方那一路。
+  const hasLocal = Object.values(local).some(b => b && b.notes
+    && ((b.notes.marks || 0) + (b.notes.entries || 0)) > 0);
+  if (!keySet && !hasLocal) { body.innerHTML = notReady(); return; }
   // 上次读到的列表先留着（stale-while-revalidate）：不再一进来就「读取中…」闪白。
   // 空手进来时铺的是同形状骨架（7 行 ≈ 一屏），数据到位再淡着换上去。
   const cold = !nbBooks.length;
@@ -15048,34 +15119,42 @@ async function renderNotebooks() {
   try {
     // 侧边栏悬停时预取的那份就在手边（见 wireNavAhead）：已经落地的直接用，
     // 还在飞的搭上它那一趟，只有压根没预判过才自己发。
-    const hot = await preAwait('notebooks');
-    const d = hot != null ? hot : await wcall('/user/notebooks', {count: 100});
-    nbBooks = d.books || [];
-    setNote('notes', nbBooks.length
-      ? `${d.totalBookCount || nbBooks.length} 本 · 共 ${d.totalNoteCount || 0} 条` : '');
-    if (!nbBooks.length) { setHtml(body, '<div class="emptyline">还没有笔记</div>'); return; }
-    // 数字一个没变就别动 DOM —— 反复进这一屏时列表稳稳地留在那儿
-    const sig = nbBooks.map(b => `${(b.book || {}).title || b.bookId}|${b.noteCount || 0}`
-      + `/${b.reviewCount || 0}/${b.bookmarkCount || 0}`).join(',');
+    const hot = keySet ? await preAwait('notebooks') : null;
+    const d = keySet
+      ? (hot != null ? hot : await wcall('/user/notebooks', {count: 100}))
+      : {books: []};
+    // 两个来源并成一面墙：微信读书的官方划线（/user/notebooks）+ 取回来存在
+    // 本机的书里自己划的线（/api/state 的 books[].notes，正文走 /api/mynotes）。
+    // 同一本书两边都有就并成一张卡，书名去空白与书名号后比对。
+    const norm = s => String(s || '').replace(/\s+/g, '')
+      .replace(/[《》〈〉()（）\[\]【】·:：\-—_]/g, '').toLowerCase();
+    const merged = (d.books || []).map(b => ({...b, key: 'w:' + b.bookId}));
+    const byTitle = new Map();
+    for (const b of merged) byTitle.set(norm((b.book || {}).title), b);
+    for (const lb of Object.values(local)) {
+      const n = (lb && lb.notes) || {};
+      if (!((n.marks || 0) + (n.entries || 0))) continue;
+      const k = norm(lb.title);
+      const hit = k && byTitle.get(k);
+      if (hit) { hit.local = lb; continue; }
+      const card = {bookId: '', local: lb, key: 'l:' + lb.id};
+      merged.push(card);
+      if (k) byTitle.set(k, card);
+    }
+    nbBooks = merged;
+    const totalN = merged.reduce((n, b) => n + nbCount(b), 0);
+    setNote('notes', merged.length ? `${merged.length} 本 · 共 ${totalN} 条` : '');
+    if (!merged.length) { setHtml(body, '<div class="emptyline">还没有笔记</div>'); return; }
+    // 数字一个没变就别动 DOM —— 反复进这一屏时那一墙卡片稳稳地留在那儿
+    const sig = merged.map(b => `${b.key}|${nbCount(b)}`).join(',');
     if (p.dataset.sig === sig && body.firstElementChild
-        && body.firstElementChild.className === 'wrrow') return;
+        && body.firstElementChild.className === 'nbwall') return;
     p.dataset.sig = sig;
-    body.replaceChildren(...nbBooks.map(b => {
-      const info = b.book || {};
-      const row = document.createElement('div');
-      row.className = 'wrrow';
-      row.style.cursor = 'pointer';
-      const nm = document.createElement('span');
-      nm.className = 'nm';
-      nm.textContent = info.title || b.bookId;
-      const ct = document.createElement('span');
-      ct.className = 'ct';
-      ct.textContent = `划线 ${b.noteCount || 0} · 想法 ${b.reviewCount || 0} · 书签 ${b.bookmarkCount || 0}`;
-      row.append(nm, ct);
-      row.onclick = () => openNotebook(b);
-      return row;
-    }));
-    if (cold) fadeIn(body);
+    const wall = document.createElement('div');
+    wall.className = 'nbwall';
+    merged.forEach((b, i) => wall.append(fxIn(nbCard(b), i)));
+    body.replaceChildren(wall);
+    if (cold) fadeIn(wall);
   } catch (e) {
     body.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
   }
@@ -15083,11 +15162,13 @@ async function renderNotebooks() {
 
 async function openNotebook(b) {
   const info = b.book || {};
-  const title = info.title || b.bookId;
+  const lb = b.local || {};
+  const title = info.title || lb.title || b.bookId || lb.id || '';
+  const key = b.key || ('w:' + (b.bookId || ''));
   // 还是同一本、列表也已经读出来了：直接把它显示出来就行 —— 不重画、不再打接口，
   // 连之前勾了哪些条目都还在原地。
   const old = PANES.notebook;
-  if (old && old.dataset.book === String(b.bookId || '') && nbItems.length) {
+  if (old && old.dataset.book === key && nbItems.length) {
     paneEl('notebook');
     return;
   }
@@ -15120,22 +15201,43 @@ async function openNotebook(b) {
     const c = p.querySelector('#nbCnt');
     if (c) c.textContent = '读取中…';
   }
-  p.dataset.book = b.bookId || '';
+  p.dataset.book = key;
 
   try {
-    const [mk, rv] = await Promise.all([
+    const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
+    // 微信读书那两路只在有 bookId 时打；取书笔记（本机 notes.json）走 /api/mynotes，
+    // 两边的请求一起发，回来按时间倒序混排 —— 一本书的划线本来就该按时间线看。
+    const wjobs = b.bookId ? [
       wcall('/book/bookmarklist', {bookId: b.bookId}).catch(() => ({})),
       wcall('/review/list/mine', {bookid: b.bookId}).catch(() => ({})),
-    ]);
-    const when = ts => ts ? new Date(ts * 1000).toLocaleDateString('zh-CN') : '';
-    for (const x of (mk.updated || [])) {
-      if (x.markText) nbItems.push({text: x.markText, src: '划线', when: when(x.createTime), at: x.createTime || 0});
+    ] : [null, null];
+    const ljob = lb.id
+      ? fetch('/api/mynotes?book=' + encodeURIComponent(lb.id))
+          .then(r => r.json()).catch(() => ({}))
+      : Promise.resolve({});
+    const [[mk, rv], loc] = await Promise.all([Promise.all(wjobs), ljob]);
+    if (b.bookId) {
+      for (const x of ((mk || {}).updated || [])) {
+        if (x.markText) nbItems.push({text: x.markText, src: '微信划线', when: when(x.createTime), at: x.createTime || 0});
+      }
+      for (const x of ((rv || {}).reviews || [])) {
+        const r = x.review || x;
+        const t = r.content || r.abstract || '';
+        if (t) nbItems.push({text: t, src: '微信想法', when: when(r.createTime), at: r.createTime || 0});
+      }
     }
-    for (const x of (rv.reviews || [])) {
-      const r = x.review || x;
-      const t = r.content || r.abstract || '';
-      if (t) nbItems.push({text: t, src: '想法', when: when(r.createTime), at: r.createTime || 0});
+    const doc = (loc && loc.doc) || {};
+    const KIND = {highlight: '取书划线', bold: '取书加粗', underline: '取书下划线',
+                  strike: '取书删除线', note: '取书批注'};
+    for (const m of (doc.marks || [])) {
+      const t = [m.text, m.memo].filter(Boolean).join('\n');
+      if (t) nbItems.push({text: t, src: KIND[m.kind] || '取书划线', when: when(m.created_at), at: m.created_at || 0});
     }
+    for (const e of (doc.entries || [])) {
+      const t = [e.title, e.body].filter(Boolean).join('\n');
+      if (t) nbItems.push({text: t, src: '取书笔记', when: when(e.created_at), at: e.created_at || 0});
+    }
+    nbItems.sort((x, y) => (y.at || 0) - (x.at || 0));
   } catch (e) {
     list.innerHTML = `<div class="emptyline"><b>没能读取</b>${esc(e.message)}</div>`;
     return;
@@ -15421,6 +15523,32 @@ function paintPick(body) {
     body.replaceChildren(grid);
   }
   fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
+  [...grid.children].forEach((c, i) => fxIn(c, i));
+  pickShelfButtons(grid);
+}
+
+/** 推荐卡片的动条上补一颗「加入书架」：推荐来的书多半还没进微信书架，
+ *  点一下就走 addToShelf（和详情页那颗同一套，写回微信读书并同步）。
+ *  fillGrid 会复用老节点，所以这里「补」而不是重建：已有那颗只刷状态。 */
+function pickShelfButtons(grid) {
+  for (const c of grid.children) {
+    const t = cardIds.get(c.dataset.id);
+    if (!t || !/^\d{5,20}$/.test(String(t.store || ''))) continue;
+    const strip = c.querySelector('.strip');
+    if (!strip) continue;
+    let b = strip.querySelector('.tkadd');
+    if (!b) {
+      b = document.createElement('button');
+      b.className = 'tkadd';
+      b.onclick = e => { e.stopPropagation(); addToShelf(t.store, t.title, b); };
+      strip.prepend(b);
+    }
+    const own = onOwnShelf(t.store);
+    b.textContent = own ? '已在书架' : '加入书架';
+    b.disabled = own;
+    b.title = own ? '微信读书书架里已经有这本了'
+                  : '加进你自己的微信读书书架（会真的动微信那边）';
+  }
 }
 
 /** 推荐这一路的数据：官方 /book/recommend 常常只回两三本，得再借一本种子
@@ -15662,142 +15790,50 @@ async function annaPost(payload, ms) {
   return gzApi('/api/anna', payload, ms || 20000);
 }
 
-/** 下载夹那一格有什么。这是「现场」不是账本，所以只在这一栏进来、或刚补收完时数一遍 ——
- *  轮询每 2.6 秒一次，不该去翻目录。 */
-async function annaListing() {
-  const p = PANES.anna;
-  if (!p) return;
-  const d = await annaPost({mode: 'listing'}, 8000);
-  const el = p.querySelector('#anFiles');
-  if (!el || !d || !d.ok) return;
-  annaRows(el, d.files || [], annaFileRow, '那一格里还是空的');
-}
-
 function renderAnnaView() {
-  const {p, body, fresh} = viewPane('anna', viewHeader('安娜的档案',
-    `<button class="deed" id="anWeb" style="height:30px"
-       title="在归藏的内置浏览器里打开这个镜像（要登录 / 有验证时仍请用窗口）">内置浏览器</button>
-     <button class="deed" id="anOpen" style="height:30px">打开浏览器窗口</button>
-     <button class="deed" id="anStop" style="height:30px" hidden>关掉窗口</button>`));
+  const {p, body, fresh} = viewPane('anna', viewHeader('安娜的档案'));
   if (fresh) {
+    // 1.2.1 起这一屏只剩一件事：写书名 → 搜索（回车也行）。窗口状态、镜像域名、
+    // 补收、清空、下载夹与入库记录全部砍掉 —— 那些在「本地书架」里都看得到，
+    // 域名轮换后端会自己兜（anna_state.domain_candidates），这里不必摆给人看。
     body.innerHTML = `
-      <div class="zwaiting">
-        <div class="hd"><span class="pulse" id="anWinDot"></span><span id="anWinText">窗口没开</span></div>
-        <div class="tip" id="anTip"></div>
-        <div class="act">
-          <button class="deed" id="anLog" style="height:30px" hidden>查看详情</button>
-          <button class="deed" id="anCollect" style="height:30px">补收下载夹</button>
-          <button class="deed" id="anClear" title="清掉这一栏的记录，已入库的书与原始文件都不动">清空记录</button>
-          <span class="grow"></span>
-          <span class="cnt" id="anCnt"></span>
-        </div>
+      <div class="anhero">
+        <div class="t">在安娜的档案里找一本书</div>
+        <div class="s">写书名、作者或关键词，点「搜索」或按回车，归藏会开一个浏览器窗口直接跳到搜索结果。
+          登录与点下载都在那个窗口里完成，接住的文件自己转成书进「本地书架」。</div>
       </div>
       <div class="anbar">
-        <input id="anQ" placeholder="写个书名或关键词，让窗口去搜这一页" autocomplete="off" spellcheck="false">
-        <button class="deed" id="anGo" style="height:30px">让窗口去搜</button>
-        <input class="dm" id="anDom" placeholder="annas-archive.is" autocomplete="off" spellcheck="false">
-        <button class="deed" id="anDomSave" style="height:30px">存这个镜像域名</button>
-      </div>
-      <div class="ansec">最近收进本地书架</div>
-      <div id="anBooks"></div>
-      <div class="ansec">下载夹里（转成书之前的原始文件）</div>
-      <div id="anFiles"></div>
-      <div class="ansec">没收进来的（原因写在每一行下面，原文件都留着）</div>
-      <div id="anPending"></div>`;
+        <input id="anQ" placeholder="书名 / 作者 / 关键词" autocomplete="off" spellcheck="false">
+        <button class="ango" id="anGo" type="button">搜索</button>
+      </div>`;
     wireAnna(p);
   }
-  paintAnna(annaState);
-  if (fresh) annaListing();
+  paintAnna(annaState);   // 上一次搜过的词进占位，回到这一屏仍看得见
 }
 
 function wireAnna(p) {
   const q = sel => p.querySelector(sel);
-  const qv = () => q('#anQ').value.trim();
-
-  q('#anOpen').onclick = async () => {
-    if (!browserReady) {
-      whisper('浏览器组件还没就绪：先在「设置 → 账号」里点「修复」');
-      return;
-    }
-    // 点了就先把它按住：后端起任务是同步的，但界面这一侧要等下一轮轮询（最长 2.6 秒）
-    // 才知道「已经在跑了」，中间这段时间再点一次会撞任务槽。
-    q('#anOpen').disabled = true;
-    const r = await post('anna.open');
-    if (!r.ok) {
-      q('#anOpen').disabled = false;
-      whisper(r.msg || '没能打开窗口');
-      return;
-    }
-    whisper(r.msg || '窗口正在打开');
-    paintAnna(Object.assign({}, annaState, {window: 'open'}));
-  };
-
-  q('#anStop').onclick = async () => {
-    const r = await post('stop');
-    whisper(r.ok ? '已请求关掉窗口' : (r.msg || '没能关掉'));
-  };
-
-  q('#anLog').onclick = () => showTaskLog({title: '安娜的档案窗口', state: 'running'});
-
-  // 内置浏览器这条路不用等浏览器组件：它由本机后端取回来重送，先看一眼镜像页；
-  // 真登录 / 过验证还是得用上面那颗「打开浏览器窗口」——那一份才有浏览器档案与 cookie。
-  q('#anWeb').onclick = () => {
-    const raw = ((annaState || {}).domain || 'annas-archive.is').trim();
-    const host = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    openBrowse('https://' + host + '/');
-  };
-
-  q('#anGo').onclick = async () => {
-    const kw = qv();
+  const go = q('#anGo');
+  // 一按就走：后端收到口令会顺手把窗口领起来（没开就开，开着就导航过去），
+  // 前端只负责把「正在打开」这件事先亮出来，别让按钮看着像没反应。
+  const fire = async () => {
+    const kw = q('#anQ').value.trim();
     if (!kw) { q('#anQ').focus(); whisper('先写个书名或关键词'); return; }
+    if (!browserReady) { whisper('浏览器组件还没就绪：先在「设置 → 账号」里点「修复」'); return; }
+    if (go.disabled) return;
+    go.disabled = true;
+    go.textContent = '打开中…';
     const r = await annaPost({mode: 'search', q: kw});
-    if (r && r.anna) paintAnna(r.anna);
-    whisper((r && r.msg) || '口令没送出去');
+    go.disabled = false;
+    go.textContent = '搜索';
+    if (r && r.anna) annaState = r.anna;
+    whisper((r && r.msg) || '没能去搜');
   };
-  q('#anQ').addEventListener('keydown', e => { if (e.key === 'Enter') q('#anGo').click(); });
-
-  q('#anDom').addEventListener('input', () => { annaDomDirty = true; });
-  q('#anDom').addEventListener('keydown', e => { if (e.key === 'Enter') q('#anDomSave').click(); });
-  q('#anDomSave').onclick = async () => {
-    const v = q('#anDom').value.trim();
-    const r = await annaPost({mode: 'domain', domain: v});
-    if (!r || !r.ok) { whisper((r && r.msg) || '没能保存'); return; }
-    annaDomDirty = false;
-    q('#anDom').value = '';
-    paintAnna(r.anna || annaState);
-    whisper('已保存镜像域名');
-  };
-
-  // 补收：窗口关了、或被「格式不认」挡下来的那几份，从下载夹再过一遍导入路。
-  // 收一份要解析整本书，慢的时候十几秒，所以这里把闸放宽。
-  q('#anCollect').onclick = async () => {
-    const btn = q('#anCollect');
-    btn.disabled = true;
-    btn.textContent = '收集中…';
-    const r = await annaPost({mode: 'collect'}, 120000);
-    btn.disabled = false;
-    btn.textContent = '补收下载夹';
-    if (!r || !r.ok) { whisper((r && r.msg) || '没能收'); return; }
-    paintAnna(r.anna || annaState);
-    await annaListing();
-    await drawState(true);   // 新书落架：本地书目、侧边栏那一格的数字一起接手
-    whisper(r.msg || '已收');
-  };
-
-  q('#anClear').onclick = () => {
-    sheet({
-      title: '清空这一栏的记录',
-      text: '只清这一栏的账（接住几份、进书架几本、最近列表）。书架上的书和下载夹里的原文件一个都不动。',
-      actions: [
-        {label: '确认清空', lead: true, run: async () => {
-          const r = await annaPost({mode: 'clear'});
-          if (r && r.anna) paintAnna(r.anna);
-          whisper((r && r.msg) || '已清空');
-        }},
-        {label: '算了'},
-      ],
-    });
-  };
+  go.onclick = fire;
+  // 回车同义：用户的原话是「输入书名点击搜索或者回车直接自动跳转」。
+  q('#anQ').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); fire(); }
+  });
 }
 
 /* ── 内置浏览器 ─────────────────────────────
@@ -16052,12 +16088,13 @@ async function renderDetailView(storeId, readerId, title) {
   if (/^\d{5,20}$/.test(String(detailStore || ''))) {
     acts.append(shelfBtn(detailStore, info.title || title));
   }
-  // 取到一半的那本（中止或断在半路）：主按钮改成「接着取」，旁边并列一条「清掉重取」。
-  // 补的是用户报的那个死结 —— 中止之后本地状态还写着「已抓取」，再点取书被
-  // 「已有任务在跑」顶回来，残稿留在盘上没人清，这本书于是既取不动也删不掉。
+  // 取到一半的那本（中止或断在半路）：先摆「阅读」（1.2.1 起取多少读多少），
+  // 再并列「接着取」与「清掉重取」。补的是用户报的两个结 —— 一是「必须等整本取完
+  // 才能看」，二是中止之后本地状态还写着「已抓取」、再点取书被「已有任务在跑」顶回来。
   const part = !!(mine && mine.chapters && !bookFull(mine));
   if (part) {
     acts.append(
+      mk('阅读', () => openReader(id || storeId, info.title || title, 'detail')),
       mk('接着取', async () => { if (await beginFetch(id || storeId, info.title || title)) backTo('shelf'); }),
       mk('清掉重取', () => refetchFresh(id || storeId, info.title || title), 'cut')
     );
@@ -20589,29 +20626,48 @@ function paintReview() {
 
 /* ── 随机漫步 ─────────────────────────── */
 
+let rwSrc = 'all';            // all / wx / local：这一批从哪一路的笔记里抽
+
 async function renderRandomView() {
   const {p, body, fresh} = viewPane('random', viewHeader('随机漫步',
-    '<button class="deed" id="rwMore" style="height:30px">换一批</button>'));
+    `<span class="seg txt" id="rwSeg">
+       <button data-s="all">全部</button><button data-s="wx">微信</button>
+       <button data-s="local">取书</button></span>`
+    + '<button class="deed" id="rwMore" style="height:30px">换一批</button>'));
 
   const draw = async () => {
     const btn = p.querySelector('#rwMore');
     if (btn) btn.disabled = true;
     let items = [];
-    try { items = ((await (await fetch('/api/notes_random?n=9')).json()).data) || []; }
-    catch (e) { items = []; }
+    try {
+      items = ((await (await fetch('/api/notes_random?n=9&src=' + encodeURIComponent(rwSrc))).json()).data) || [];
+    } catch (e) { items = []; }
     if (btn) btn.disabled = false;
     if (!items.length) { setHtml(body, '<div class="emptyline">还没有卡片</div>'); return; }
     paintRandomWall(body, items);
   };
-  if (fresh) p.querySelector('#rwMore').onclick = draw;
+  if (fresh) {
+    p.querySelector('#rwMore').onclick = draw;
+    [...p.querySelectorAll('#rwSeg button')].forEach(b => {
+      b.onclick = () => {
+        rwSrc = b.dataset.s;
+        [...p.querySelectorAll('#rwSeg button')].forEach(x => x.classList.toggle('on', x === b));
+        body.replaceChildren();      // 换了一路就重抽，别留着上一路的卡看串
+        draw();
+      };
+    });
+  }
+  // 这一屏常驻：切回来时高亮要停在当前档位上，不能还指着刚点过的那颗。
+  [...p.querySelectorAll('#rwSeg button')].forEach(b => b.classList.toggle('on', b.dataset.s === rwSrc));
 
   const st = await loadIdxState();
-  if (!st.count) {
+  const wxN = st.count || 0, lcN = st.local_count || 0;
+  if (!wxN && !lcN) {
     body.replaceChildren(indexPrompt(
       '随机漫步要从你的划线与想法里抽，先建一次索引（一次性，之后很快）。'));
     return;
   }
-  setNote('random', `从 ${st.count} 条里随机抽`);
+  setNote('random', `微信 ${wxN} · 取书 ${lcN}`);
   // 已经抽过一批就留着不动 —— 每次进这一屏都重抽，正是「点一下闪一下」的老毛病。
   // 想换内容点「换一批」。
   if (!body.firstElementChild || body.querySelector('[data-idx-go], .emptyline')) draw();
@@ -20629,7 +20685,7 @@ async function paintRandomWall(body, items) {
     const m = document.createElement('div');
     m.className = 'm';
     const k = document.createElement('span');
-    k.className = 'k';
+    k.className = 'k' + (x.local ? ' lc' : '');   // 取书那一路换个色，一眼分得出来源
     k.textContent = x.kind;
     m.append(k, document.createTextNode('《' + (x.title || '') + '》'));
     c.append(t, m);
@@ -21362,6 +21418,55 @@ $('#syncAuth').onclick = async () => {
     el.addEventListener('input', () => { syncDirty = true; });
     el.addEventListener('change', () => { syncDirty = true; });
   });
+
+/* ── 交互动效底座（1.2.1 · R4-5） ───────────────────────────────
+   两条：按下的落点放一圈涟漪；批量渲染的卡片按序轻轻抬起来。都尊重系统
+   「减少动态效果」—— 用户关掉就一条都不放（CSS 那边也同时兜了一层）。 */
+var FX_REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches);
+/* 认这些「能点的东西」：原生按钮、按钮角色、摘要，以及界面里几类自绘的可点条目。
+   涟漪是浮在面上的装饰，落点按指针坐标算，元素被父框裁剪也照样看得见。 */
+var FX_TAP = 'button, [role="button"], summary, .iconbtn, .navlist li, .nbtag, .pcat, .chip, .fechip, .wcard, .nbcard';
+
+function tapfx(e) {
+  if (FX_REDUCED || e.button > 0) return;
+  var t = e.target && e.target.closest ? e.target.closest(FX_TAP) : null;
+  if (!t || t.disabled) return;
+  var r = t.getBoundingClientRect();
+  var d = Math.max(24, Math.round(Math.hypot(r.width, r.height)));
+  var s = document.createElement('span');
+  s.className = 'tapfx';
+  s.style.left = e.clientX + 'px';
+  s.style.top = e.clientY + 'px';
+  s.style.width = d + 'px';
+  s.style.height = d + 'px';
+  document.body.appendChild(s);
+  setTimeout(() => s.remove(), 400);
+}
+document.addEventListener('pointerdown', tapfx, {passive: true});
+
+/* 卡片入场：同一批里按序号错开 26ms，一眼能看出是「一批」而不是砸出来的。
+   一个节点只演一次（data-fx 记着）—— 状态每 2.6 秒刷一遍，不然卡片会反复抬。
+   演完把类摘掉：fx-in 的 fill 模式会压住悬停的 transform，摘了才恢复抬升。 */
+function fxIn(el, i) {
+  if (!el || el.dataset.fx === '1') return el;
+  el.dataset.fx = '1';
+  if (FX_REDUCED) return el;
+  el.classList.add('fx-in');
+  el.style.animationDelay = Math.min(i || 0, 12) * 26 + 'ms';
+  el.addEventListener('animationend', () => {
+    el.classList.remove('fx-in');
+    el.style.animationDelay = '';
+  }, {once: true});
+  return el;
+}
+
+/* 成功回弹：给「做成了」的按钮一下放大回落。同一个节点上一发还没演完就不再叠。 */
+function fxPop(el) {
+  if (!el || FX_REDUCED || el.classList.contains('fx-pop')) return el;
+  el.classList.add('fx-pop');
+  el.addEventListener('animationend', () => el.classList.remove('fx-pop'), {once: true});
+  return el;
+}
 
 /* ── 启动 ─────────────────────────────── */
 renderView();
