@@ -1890,7 +1890,7 @@ def weread_call(api_name, params=None, timeout=25):
 
 # ---------- 加入书架（写操作） ----------
 
-SHELF_ADD_ID = re.compile(r"^\d{5,20}$")
+SHELF_ADD_ID = re.compile(r"^[0-9]{5,20}$")
 _shelf_lock = threading.Lock()
 
 
