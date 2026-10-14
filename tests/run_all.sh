@@ -172,6 +172,12 @@ run "导出口径的属性逃逸（图 / 链接 / alt 不许注出事件属性�
 # 就能从属性里逃出去挂 onmouseover=…。这里把「语言串带引号 / 尖括号 / &」三种写法
 # 各钉一条，并真打一个 EPUB 解析包内那页，确认成品里也没有多出来的事件属性。
 run "导出口径的属性逃逸（围栏语言串不许注出事件属性）" "$PY" tests/check_export_fence.py
+# 跟上面那条并排：那条管「进成品的内容能不能逃出去」，这条管「成品本身是什么字节」。
+# export_precise 写出去的章节 md / raw json / 合并稿原来不写 encoding，靠系统默认编码 ——
+# macOS 恰好是 UTF-8 所以一直没露馅，Windows 的 GBK 代码页上就变成写 GBK、读 UTF-8，
+# 正文里有个生僻字或 emoji 还会当场 UnicodeEncodeError。静态扫一遍 open()，
+# 再把默认编码按到 ASCII 真跑一遍 save_chapter → merge_chapters。纯离线。
+run "导出落盘编码（文本 open 都要 encoding / ASCII 环境下中文照样写得出）" "$PY" tests/check_export_encoding.py
 # flomo 那条路（导入 → 一条笔记收成书 → 记忆画像）全是本地文件活：解析那份导出包
 # （HTML 里套 div、图在 files/ 下）、同一条不重复入库、筛与标签用的是界面那同一把尺、
 # 画像只由数字与标签算出（它是唯一会被反复喂给 Agent 的东西，带原文就是漏）。
