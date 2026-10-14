@@ -664,6 +664,15 @@ run "响应正文坏字符（半个代理码点不再把整屏甩成空响应）
 # 回「没挪」，不落进「挪到末尾」。纯函数 + 源码 AST 走查 + in-process 真 Handler 三面
 # 都钉，不联网、不碰真实数据，归静态段。
 run "请求体数字字段脏形状（订阅整理的 index / limit / days 写脏不再回 Python 报错）" "$PY" tests/check_post_body_int.py
+# `_body_str` / `_body_list` / `_body_int` 立完规矩，书库那一摊老动作还没回头接：
+# `/api/action` 的 `_dispatch` 里仍是 `(body.get("book") or "").strip()` 与
+# `add = body.get("add") or []`。`_action` 有兜底 try/except，所以不是断连，但它把
+# `AttributeError: 'int' object has no attribute 'strip'` 原样递到界面上；
+# `book.tag` 的 add 写成对象时更坏 —— 非空值，`for x in {"a":1}` 按 key 拆出一个假
+# 标签悄悄贴上去，`shelf.add` 的 ids=123 则是 `list(123)` 抛 TypeError。收口照旧：
+# 字符串走 _body_str、列表走 _body_list，单字符串 / 列表两种正当写法照收。
+# 纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据。
+run "action 请求体字段脏形状（书号 / 夹子名 / 标签 / ids 写脏不再甩 Python 报错）" "$PY" tests/check_dispatch_body_shape.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"

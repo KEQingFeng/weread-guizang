@@ -6201,7 +6201,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self, body):
         action = (body or {}).get("action")
-        book = (body or {}).get("book", "")
+        # 书号在下面十几处都是「取出来就 .strip()」；字段级脏形状（数字 / 列表 / 对象）
+        # 用 `or ""` 挡不住（非空值都为真），一 .strip() 就是 AttributeError，被 _action
+        # 兜住后**原样递到界面上**（「这个操作没做成：AttributeError: ...」），正是
+        # `_body_str` / `_body_list` 立下的那条规矩要避免的。这里一次收口，后面
+        # `(book or "").strip()` 落在一个真 str 上，老口径一个字不变。
+        book = _body_str(body, "book")
 
         if action == "stop":
             ok, msg = stop_task()
@@ -6326,7 +6331,7 @@ class Handler(BaseHTTPRequestHandler):
             # 带 dir 时（划线笔记导出 CSV 落到用户自设的导出位置）只放行「用户自己设过的
             # 那个导出目录」，别的路径一概不理：这个动作能开的文件夹永远只有归藏自己
             # 写进去的那两个，用户传什么进来都越不出去。
-            want = (body.get("dir") or "").strip()
+            want = _body_str(body, "dir")
             d = DOWNLOAD_DIR
             chosen = export_dir()
             if want and chosen and os.path.abspath(want) == os.path.abspath(chosen) \
@@ -6340,7 +6345,7 @@ class Handler(BaseHTTPRequestHandler):
         # 各开各的，剪藏那一屏不必把微信读书那一大堆一起摊在访达里。
         if action == "openbooks":
             ensure_books_dir()
-            mod = (body.get("module") or "").strip()
+            mod = _body_str(body, "module")
             named = mod if mod in book_layout.DIR_OF else ""
             pc.open_in_file_manager(module_dir(named) if named else OUT_DIR)
             return self._json({"ok": True,
@@ -6348,23 +6353,23 @@ class Handler(BaseHTTPRequestHandler):
                                else "已打开书库文件夹"})
 
         if action == "folder.new":
-            name = (body.get("name") or "").strip()[:40]
+            name = _body_str(body, "name")[:40]
             if not name:
                 return self._json({"ok": False, "msg": "文件夹需要一个名字"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             fid = "f" + uuid.uuid4().hex[:8]
             s["folders"].append({"id": fid, "name": name})
             save_lib(lib)
             return self._json({"ok": True, "id": fid, "msg": "已新建"})
 
         if action == "folder.rename":
-            fid = (body.get("id") or "").strip()
-            name = (body.get("name") or "").strip()[:40]
+            fid = _body_str(body, "id")
+            name = _body_str(body, "name")[:40]
             if not (fid and name):
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             if not any(f["id"] == fid for f in s["folders"]):
                 return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
             for f in s["folders"]:
@@ -6374,9 +6379,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已改名"})
 
         if action == "folder.drop":
-            fid = (body.get("id") or "").strip()
+            fid = _body_str(body, "id")
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             keep = [f for f in s["folders"] if f["id"] != fid]
             if len(keep) == len(s["folders"]):
                 return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
@@ -6388,8 +6393,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "文件夹已删除，书回到未归类"})
 
         if action == "book.move":
-            bid = (body.get("book") or "").strip()
-            folder = (body.get("folder") or "").strip()
+            bid = _body_str(body, "book")
+            folder = _body_str(body, "folder")
             d = safe_book_dir(bid)
             if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6408,8 +6413,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已归入"})
 
         if action == "book.order":
-            bid = (body.get("book") or "").strip()
-            before = (body.get("before") or "").strip()
+            bid = _body_str(body, "book")
+            before = _body_str(body, "before")
             mod = book_module(bid)
             if not safe_book_dir(bid):
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6427,14 +6432,16 @@ class Handler(BaseHTTPRequestHandler):
         if action == "book.tag":
             # 给一篇文章 / 一本书贴标签（可多张）。只在它自己那个模块里贴：
             # 剪藏那套「随笔 / 待读」不会冒到微信读书的整本书上去。
-            bid = (body.get("book") or "").strip()
+            bid = _body_str(body, "book")
             mod = book_module(bid)
             if not safe_book_dir(bid):
                 return self._json({"ok": False, "msg": "找不到这本书"})
-            add = body.get("add") or []
-            drop = body.get("remove") or ""
-            if isinstance(add, str):
-                add = [add]
+            # 单张标签是字符串、多张是列表：两种都是正当写法，其余形状（数字 /
+            # 对象）一律当没写 —— 否则 `for x in 123` 又是一条 Python 报错递到
+            # 界面上，而 `{"a": 1}` 会按 key 拆出假标签悄悄贴上去。
+            raw_add = body.get("add")
+            add = [raw_add] if isinstance(raw_add, str) else _body_list(raw_add)
+            drop = _body_str(body, "remove")
             lib = load_lib()
             s = lib_scope(lib, mod)
             cur = [str(t) for t in (s["tags"].get(bid) or [])]
@@ -6459,7 +6466,7 @@ class Handler(BaseHTTPRequestHandler):
             if not (old and new):
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             n = 0
             for bid, tags in list(s["tags"].items()):
                 if old in tags:
@@ -6475,7 +6482,7 @@ class Handler(BaseHTTPRequestHandler):
             if not old:
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             n = 0
             for bid, tags in list(s["tags"].items()):
                 if old in tags:
@@ -6489,7 +6496,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": f"已从 {n} 篇摘掉"})
 
         if action == "book.delete":
-            bid = (body.get("book") or "").strip()
+            bid = _body_str(body, "book")
             d = safe_book_dir(bid)
             if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6504,12 +6511,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已从书架移除"})
 
         if action == "shelf.add":
-            ids = body.get("ids") or []
-            if isinstance(ids, str):
-                ids = [ids]
-            one = (body.get("book") or "").strip()
+            # 同 book.tag 的 add：书号可以是单个字符串或一列；数字 / 对象当没写，
+            # 不再 `list(123)` 抛 TypeError、也不把对象的 key 当书号递下去。
+            raw_ids = body.get("ids")
+            ids = [raw_ids] if isinstance(raw_ids, str) else _body_list(raw_ids)
+            one = _body_str(body, "book")
             if one:
-                ids = list(ids) + [one]
+                ids = ids + [one]
             return self._json(shelf_add(ids))
 
         return self._json({"ok": False, "msg": "未知操作"})
