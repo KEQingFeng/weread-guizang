@@ -4703,6 +4703,32 @@ def _qint(raw, default, lo=None, hi=None):
     return n
 
 
+def _body_len(raw):
+    """POST 的 `Content-Length` 收成「这条请求体该读多少字节」，认不出给 None。
+
+    为什么不跟 `_qint` 一样「脏值回默认」：查询串脏了当没传，最多是少显示几行；
+    body 长度脏了是另一回事 —— 读 0 会把还没读的字节留在流里，keep-alive 下被
+    `BaseHTTPRequestHandler` 当成下一个请求的开头（`Content-Length: abc` 这一路
+    实测就是 `int("abc")` 当场抛，连接被直接掐断，前端只看见 RemoteDisconnected）；
+    读负数则是 `read(-1)` 的语义 —— 一直读到客户端关连接为止，这条连接的线程就
+    挂在那儿（`Content-Length: -1` 实测如此）。所以这里不设默认值：认不出回 None，
+    由 `do_POST` 回 400 并主动断连。宁可这一次请求当面失败，也不带着一份猜出来的
+    长度往下走。正常浏览器发的永远是一串非负十进制数字，这条路只在坏客户端时才走。
+    """
+    if isinstance(raw, (list, tuple, dict, set)):
+        return None              # 非标量：同一个头传两遍之类，不当长度用
+    if raw is None:
+        return 0                 # 没带这个头 = 没 body（chunked 之类也不在这里读）
+    text = str(raw).strip()
+    if not text:
+        return 0
+    # 严格按 RFC 的 1*DIGIT：小数、正负号、`1e3`、`0x10`、全角数字（str.isdigit
+    # 认它、`int()` 也认它）一律不算 —— 长度是协议字段，不猜。
+    if not (text.isascii() and text.isdigit()):
+        return None
+    return int(text)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -5401,7 +5427,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        n = int(self.headers.get("Content-Length") or 0)
+        n = _body_len(self.headers.get("Content-Length"))
+        if n is None:
+            # 认不出该读多少字节：不带着猜出来的长度往下走，也不把 body 留在流里
+            # （keep-alive 会把它当成下一个请求）。回 400 并断连，见 _body_len。
+            self.close_connection = True
+            return self._json({"ok": False, "msg": "请求体长度（Content-Length）不合法"}, 400)
         # 第一道门：别的网页替用户点过来的写操作一律不收。只听回环挡不住这一手 ——
         # 请求是从用户这台机器上发出去的，浏览器根本分不出「归藏自己那个页面」和
         # 「随手打开的一个网页」，只有后端认 Origin / Sec-Fetch-Site 才分得清。
