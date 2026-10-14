@@ -3856,8 +3856,8 @@ def feed_view(q):
                 until=(one("until") or None),
                 sort=one("sort", "published_desc"))
             out = feed_mod.entries(
-                limit=max(1, min(500, int(q.get("limit", ["200"])[0] or 200))),
-                offset=max(0, int(q.get("offset", ["0"])[0] or 0)), **kw)
+                limit=_qint(q.get("limit", ["200"])[0], 200, lo=1, hi=500),
+                offset=_qint(q.get("offset", ["0"])[0], 0, lo=0), **kw)
             # total 用同一套筛法数一遍：前端「这一档共 N 条 · 已铺 M 条」要说得出
             # 还剩多少，让用户知道「再来一批」还有没有东西，而不是点了没反应。
             return {"ok": True, "entries": out, "total": feed_mod.count_entries(**kw)}
@@ -4544,8 +4544,8 @@ def flomo_view(q):
         data = flomo_notes.load(FLOMO_DIR)
         picked = flomo_notes.pick(
             data, tag=one("tag"), q=one("q"),
-            limit=max(1, min(500, int(one("limit", "80") or 80))),
-            offset=max(0, int(one("offset", "0") or 0)),
+            limit=_qint(one("limit", "80"), 80, lo=1, hi=500),
+            offset=_qint(one("offset", "0"), 0, lo=0),
             order=one("order", "desc"))
         return {"ok": True, "memos": picked["memos"], "total": picked["total"],
                 "offset": picked["offset"], "count": picked["count"],

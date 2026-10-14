@@ -568,6 +568,13 @@ run "请求体长度脏值（abc / 负数不再断连或挂住，脏值回 400�
 # 这一条给每本账做「干净 → 加 BOM → 再读」的往返：夹具本身得先读得出（不许两边都是空
 # 蒙过去），加 BOM 后必须与干净那份逐字段相同。纯临时目录，不 import 服务，归静态段。
 run "账本 BOM（带 BOM 的手改账本不再被当成空账）" "$PY" tests/check_ledger_bom.py
+# 上面那条 check_query_args.py 只扫 do_GET 的方法体，而订阅 / 便签这两屏的翻页参数
+# （limit / offset）是在 do_GET 之外的两个视图函数里裸 int(...) 收的。它们外面各有一个
+# except Exception，所以症状不是断连而是「整页从列表变成 ok:false 的一条报错」——
+# `?limit=abc` 会让这两屏一条都铺不出来，本该像 `?tail=abc` 那样当没传、回默认。
+# 这一条把两处的 _qint 收口钉住：纯行为（脏值回默认 / 好值与夹取边界不变）+ 源码走查
+# （全文件不许再有裸 int(q.get(...)) / int(one(...))）+ in-process 真机裸 HTTP。
+run "订阅 / 便签翻页参数收口（脏 limit / offset 不再把整页读成错误）" "$PY" tests/check_view_paging.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
