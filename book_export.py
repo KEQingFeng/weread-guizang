@@ -297,15 +297,23 @@ def md_to_html(md):
 # ─────────────────────────── 公共小工具 ───────────────────────────
 
 def read_chapters(book_dir):
-    """(文件名, 正文) 顺序读回逐章 md。"""
+    """(文件名, 正文) 顺序读回逐章 md。
+
+    按字节读、再按 UTF-8 解，认不出的字节用 U+FFFD 顶上。章节文件是用户能直接
+    编辑的文本，也会被云同步 / 旧版本写回来：一个手滑另存成 GBK 的章节、或一次
+    写到一半的断电，旧写法（`encoding="utf-8"` 直接读）当场 UnicodeDecodeError，
+    另外几章的正文一起打不开 —— 用户看到的是「这本书导不出来」。跳过一个坏文件
+    同样不对（少了一章，还不报到界面上）；这里只把那几个坏字节换成替代符，正文
+    的其余部分照旧。正常 UTF-8 的书一个字都不动。
+    """
     ch_dir = os.path.join(book_dir, "chapters")
     if not os.path.isdir(ch_dir):
         return []
     out = []
     for fn in sorted(f for f in os.listdir(ch_dir) if f.endswith(".md")):
         try:
-            with open(os.path.join(ch_dir, fn), encoding="utf-8") as f:
-                out.append((fn, f.read()))
+            with open(os.path.join(ch_dir, fn), "rb") as f:
+                out.append((fn, f.read().decode("utf-8", errors="replace")))
         except OSError:
             pass
     return out

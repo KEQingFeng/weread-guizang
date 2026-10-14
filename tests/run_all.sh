@@ -188,6 +188,12 @@ run "导出口径的属性逃逸（围栏语言串不许注出事件属性）" "
 # 正文里有个生僻字或 emoji 还会当场 UnicodeEncodeError。静态扫一遍 open()，
 # 再把默认编码按到 ASCII 真跑一遍 save_chapter → merge_chapters。纯离线。
 run "导出落盘编码（文本 open 都要 encoding / ASCII 环境下中文照样写得出）" "$PY" tests/check_export_encoding.py
+# 紧挨着上一条：那条管「写出去的字节是什么编码」，这条管「读回来的章节坏一个字节会不会
+# 带走整本书」。chapters/*.md 是用户能直接编辑的（也会被云同步 / 旧版本写回来），
+# `read_chapters` 原来严格按 UTF-8 读 —— 一个另存成 GBK 的章节就让 EPUB 与 PDF 一起抛
+# UnicodeDecodeError，另外几章正文也无从导出。现在按字节读、坏字节落成 U+FFFD：坏章照样
+# 进成品、好章一字不差、干净的书一个字符都不动。真打一个 EPUB 验，纯离线。
+run "导出章节读取容错（坏字节不带走整本书 / 不丢章 / 干净书零改动）" "$PY" tests/check_export_tolerant.py
 # flomo 那条路（导入 → 一条笔记收成书 → 记忆画像）全是本地文件活：解析那份导出包
 # （HTML 里套 div、图在 files/ 下）、同一条不重复入库、筛与标签用的是界面那同一把尺、
 # 画像只由数字与标签算出（它是唯一会被反复喂给 Agent 的东西，带原文就是漏）。
