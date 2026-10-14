@@ -331,6 +331,23 @@ chk("接线：官方封面 URL 打不开时换 /api/cover 再试一次，两条�
     and "if (alt) { const u = alt; alt = ''; img.src = u; return; }" in UI,
     "shelfCard 的 onerror 没有换一次本地封面")
 
+# R3：还有一部分封面「有 URL 也加载不出来」。原因是微信 / QQ 图床看 Referer ——
+# 页面从 127.0.0.1 打开，来路是外站，图床直接 403。正文图那条路（rdFixMedia）
+# 早就把来路摘掉了，封面这条却漏了。两件事钉死：封面图统一走去来路的 extCoverImg，
+# 协议相对地址补 https（//cdn 会被浏览器当成本地地址，必然 404）。
+chk("接线：远端封面统一走 extCoverImg，并摘掉 Referer（图床拒外站来路那一条）",
+    "function extCoverImg(" in UI
+    and "im.referrerPolicy = 'no-referrer'" in UI
+    and "const img = extCoverImg(coverUrl);" in UI,
+    "shelfCard 没走 extCoverImg，或没设 referrerPolicy")
+chk("接线：协议相对的封面地址补成 https（//cdn 照原样会被当成本地服务 404）",
+    "function coverSrc(" in UI and "u.startsWith('//') ? 'https:' + u : u" in UI
+    and "esc(coverSrc(coverUrl))" in UI,
+    "coverSrc 缺失，或详情页大图没走它")
+chk("接线：详情页封面大图也带 referrerpolicy=no-referrer",
+    'referrerpolicy="no-referrer"\n         onerror="this.remove()"' in UI,
+    "详情页封面 img 漏了 referrerpolicy")
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print()
 print("封面规则取证：" + ("全部通过" if not FAIL else "%d 项未过：%s" % (len(FAIL), FAIL)))
