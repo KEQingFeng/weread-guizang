@@ -85,7 +85,7 @@ def _guard(url):
     host = (p.hostname or "").lower()
     if not host:
         raise ValueError("这个链接没有主机名，打不开")
-    if clip_article.BLOCKED_HOSTS.match(host):
+    if clip_article.host_blocked(host):
         raise ValueError("这是本机或内网地址，归藏不替你访问")
 
 
