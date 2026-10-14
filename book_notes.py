@@ -74,11 +74,26 @@ def load_notes(book_dir):
         return empty_notes()
     doc.setdefault("marks", [])
     doc.setdefault("entries", [])
-    for key in ("marks", "entries"):
-        # 手改过、或写到一半的档里可能是 `"marks": null` / 给成对象：setdefault 修不了
-        # 「键在但值是 None」，照原来的 `for x in doc[key]` 会当场抛 TypeError，界面
-        # 上就是这本书的笔记一打开就 500。形状不对一律当空，别有下文。
-        doc[key] = [x for x in _seq(doc[key]) if isinstance(x, dict) and x.get("id")]
+    # 手改过、或写到一半的档里可能是 `"marks": null` / 给成对象：setdefault 修不了
+    # 「键在但值是 None」，照原来的 `for x in doc[key]` 会当场抛 TypeError，界面
+    # 上就是这本书的笔记一打开就 500。形状不对一律当空，别有下文。
+    #
+    # 光在「是不是字典、有没有 id」这一层筛还不够：**字段本身**也可能是手改过的
+    # 别的形状，它不抛在读盘这一步，而是抛在下游 —— 划线时间戳一半是数字、一半是
+    # 「昨天」时 `export_markdown` 的排序在 `int < str` 上当场抛（用户看到的是
+    # 「导出没做成」），`ch` 给成数组时 `by_ch.setdefault(list)` 抛 unhashable
+    # （导出与导图一起坏）。这里按写入口径把字段收一遍（`_mark_row` / `_entry_row`，
+    # 读写共用一把尺子）：只收形状，不丢条目、不补 id、也不把认不出的时间戳
+    # 编成「现在」——认不出给 0，导出显示空白、排序当最旧，不替用户造一条时间。
+    doc["marks"] = [_mark_row(x, 0, False) for x in _seq(doc["marks"])
+                    if isinstance(x, dict) and x.get("id")]
+    doc["entries"] = [_entry_row(x, 0, False) for x in _seq(doc["entries"])
+                      if isinstance(x, dict) and x.get("id")]
+    # 顶层那两个时间戳同理：`"created_at": 1e400` 在盘上是合法的，json.dumps
+    # 会把它原样印成 `Infinity` —— 那不是合法 JSON，界面 JSON.parse 整份 /api/mynotes
+    # 直接失败（笔记一屏全空）。越界值一律按认不出处理。
+    for k in ("created_at", "updated_at"):
+        doc[k] = _stamp(doc.get(k), 0)
     doc["schema"] = SCHEMA
     return doc
 
@@ -100,6 +115,56 @@ def save_notes(book_dir, doc):
     return True
 
 
+def _mark_row(m, t, mint_id):
+    """一条划线的字段形状 —— 读盘（load_notes）与存盘（_normalize）共用的一把尺子。
+
+    `t` 是时间戳认不出时的兜底：存盘给当前时间（旧的写入口径），读盘给 0 ——
+    盘上那个「昨天」不是时间，宁可导出留空、排序当最旧，也不替用户编一个
+    「刚划的」。`mint_id` 只在存盘那一侧为真；读盘时缺 id 的条目在门口就被筛掉了。
+    """
+    text = _clip(m.get("text"), 4000)
+    tag = m.get("tag") if m.get("tag") in TAG_BY_KEY else ""
+    if m.get("tag_name"):                       # 允许前端只给中文名
+        tt = TAG_BY_NAME.get(str(m["tag_name"])[:8])
+        tag = tt["key"] if tt else tag
+    return {
+        "id": _clip(m.get("id"), 40) or ("m_" + uuid.uuid4().hex[:10] if mint_id else ""),
+        "ch": _clip(m.get("ch"), 60),
+        "text": text,
+        "prefix": _clip(m.get("prefix"), 120),
+        "suffix": _clip(m.get("suffix"), 120),
+        "kind": m.get("kind") if m.get("kind") in KINDS else "highlight",
+        "tag": tag,
+        # 颜色跟着标签走：选了「疑问」就是那支笔；自己挑的颜色（合法 #hex）优先。
+        "color": _hex(m.get("color")) or (TAG_BY_KEY[tag]["color"] if tag else ""),
+        "memo": _clip(m.get("memo"), 4000),
+        "page": _clip(m.get("page"), 40),
+        "created_at": _stamp(m.get("created_at"), t),
+        "updated_at": _stamp(m.get("updated_at"), t),
+    }
+
+
+def _entry_row(e, t, mint_id):
+    """一条笔记条目的字段形状，口径与 `_mark_row` 相同。"""
+    refs = []
+    for r in _seq(e.get("refs"))[:40]:
+        if not isinstance(r, dict):
+            continue
+        refs.append({"text": _clip(r.get("text"), 1200), "ch": _clip(r.get("ch"), 60),
+                     "mark": _clip(r.get("mark"), 40), "entry": _clip(r.get("entry"), 40)})
+    return {
+        "id": _clip(e.get("id"), 40) or ("n_" + uuid.uuid4().hex[:10] if mint_id else ""),
+        "title": _clip(e.get("title"), 200),
+        "body": _clip(e.get("body"), MAX_ENTRY_BODY),
+        "ch": _clip(e.get("ch"), 60),
+        "tag": e.get("tag") if e.get("tag") in TAG_BY_KEY else "",
+        "refs": refs,
+        "tpl": _clip(e.get("tpl"), 60),
+        "created_at": _stamp(e.get("created_at"), t),
+        "updated_at": _stamp(e.get("updated_at"), t),
+    }
+
+
 def _normalize(doc):
     """把前端传来的文档收敛成能安全落盘的样子：字段裁剪、时间戳补齐、条数封顶。"""
     out = empty_notes()
@@ -109,50 +174,15 @@ def _normalize(doc):
     for m in _seq(doc.get("marks"))[:MAX_ITEMS]:
         if not isinstance(m, dict):
             continue
-        text = _clip(m.get("text"), 4000)
-        if not text:
+        row = _mark_row(m, now, True)
+        if not row["text"]:
             continue
-        tag = m.get("tag") if m.get("tag") in TAG_BY_KEY else ""
-        if m.get("tag_name"):                       # 允许前端只给中文名
-            t = TAG_BY_NAME.get(str(m["tag_name"])[:8])
-            tag = t["key"] if t else tag
-        marks.append({
-            "id": _clip(m.get("id"), 40) or "m_" + uuid.uuid4().hex[:10],
-            "ch": _clip(m.get("ch"), 60),
-            "text": text,
-            "prefix": _clip(m.get("prefix"), 120),
-            "suffix": _clip(m.get("suffix"), 120),
-            "kind": m.get("kind") if m.get("kind") in KINDS else "highlight",
-            "tag": tag,
-            # 颜色跟着标签走：选了「疑问」就是那支笔，前端不必两处各设一遍再担心对不上；
-            # 自己挑的颜色（合法 #hex）优先，允许不被标签覆盖。
-            "color": _hex(m.get("color")) or (TAG_BY_KEY[tag]["color"] if tag else ""),
-            "memo": _clip(m.get("memo"), 4000),
-            "page": _clip(m.get("page"), 40),
-            "created_at": _int(m.get("created_at"), now),
-            "updated_at": _int(m.get("updated_at"), now),
-        })
+        marks.append(row)
     rest = MAX_ITEMS - len(marks)
     for e in _seq(doc.get("entries"))[:max(rest, 0)]:
         if not isinstance(e, dict):
             continue
-        refs = []
-        for r in _seq(e.get("refs"))[:40]:
-            if not isinstance(r, dict):
-                continue
-            refs.append({"text": _clip(r.get("text"), 1200), "ch": _clip(r.get("ch"), 60),
-                         "mark": _clip(r.get("mark"), 40), "entry": _clip(r.get("entry"), 40)})
-        entries.append({
-            "id": _clip(e.get("id"), 40) or "n_" + uuid.uuid4().hex[:10],
-            "title": _clip(e.get("title"), 200),
-            "body": _clip(e.get("body"), MAX_ENTRY_BODY),
-            "ch": _clip(e.get("ch"), 60),
-            "tag": e.get("tag") if e.get("tag") in TAG_BY_KEY else "",
-            "refs": refs,
-            "tpl": _clip(e.get("tpl"), 60),
-            "created_at": _int(e.get("created_at"), now),
-            "updated_at": _int(e.get("updated_at"), now),
-        })
+        entries.append(_entry_row(e, now, True))
     marks.sort(key=lambda x: (-x["updated_at"], x["ch"]))
     entries.sort(key=lambda x: (-x["updated_at"], x["title"]))
     out["marks"], out["entries"] = marks, entries
@@ -200,8 +230,24 @@ def _int(v, default=None):
         return default
 
 
+def _stamp(v, default=0):
+    """盘上 / 前端给来的时间戳：认得出就用，认不出（含 Infinity / 1e400）回默认。
+
+    `_int` 只兜 TypeError / ValueError，而 `json` 认 `1e400` 与 `Infinity`，落到
+    `int(float('inf'))` 抛的是 OverflowError —— 这份档是用户能直接改的，一个越界值
+    不该让整本书的笔记读不出来（读盘这一路以前连 `_int` 都没过，脏值会直接穿到
+    导出的排序上）。
+    """
+    try:
+        return _int(v, default)
+    except OverflowError:               # int(inf)：越界数字当认不出
+        return default
+
+
 def _hex(v):
-    s = (v or "").strip()
+    # 手改过的 color 可能是数字 / 数组：先收成字符串再比对，否则 (v or "").strip()
+    # 在非字符串上抛 AttributeError，一次保存/读盘就带崩整份笔记。
+    s = str(v or "").strip()
     return s if re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", s) else ""
 
 

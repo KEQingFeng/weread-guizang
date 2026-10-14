@@ -300,6 +300,14 @@ run "划线笔记导出 Markdown（引用行括号 / 空引用 / 划线段 / 落
 # 别的笔记一起丢）。模板库满 200 条时旧代码 `items[:200]` 又把刚存的那条切在门外，
 # 接口却回「模板存好了」。四类各钉一条，纯函数 + 临时目录，不 import 服务、不联网。
 run "书本地笔记存盘（坏档读得开 / 坏时间戳不丢整份 / 坏形状当空 / 模板顶最旧）" "$PY" tests/check_book_notes.py
+# 上面那条钉的是「容器形状」（marks 是不是列表、有没有 id）。这一条补的是**字段级**：
+# notes.json 里一条划线的 created_at 是「昨天」、ch 是数组、color 是数字时，读盘这一步
+# 照旧过，脏值却穿到下游才炸 —— export_markdown 的排序在 `int < str` 上抛（导出报
+# 「导出没做成」），`by_ch.setdefault(list)` / `note_tree(cut="chapter")` 抛 unhashable。
+# 现在 load_notes 与 _normalize 共用 _mark_row / _entry_row 一把尺子：只收形状，不丢
+# 条目、不补 id、认不出的时间戳回 0（不拿「现在」编）。另钉顶层 `1e400` 不许变成
+# JSON 里的 `Infinity`（那会让界面 JSON.parse 整份失败）。纯函数 + 临时目录，全离线。
+run "笔记读盘脏字段（混排时间戳 / 数组 ch / 越界数字不带走导出与导图）" "$PY" tests/check_notes_dirty_read.py
 # 维护那一套（卸载组件 / 清除数据）最要紧的不是「删得掉」而是「删不掉不该删的」：
 # 书库、别人家的模型、别人家的浏览器、数据目录本身 —— 四条红线各钉一条。
 # 全程在临时沙盒里跑，不碰真实的 cache / 书库 / HF 缓存 / playwright 缓存。
