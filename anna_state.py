@@ -44,6 +44,14 @@ PENDING_KEEP = 12        # 「没进书架」最多记几本
 SEEN_KEEP = 300          # 去重账最多记多少条摘要（超出从最旧裁）
 NOTE_MAX = 160           # 一句话回执的字数上限
 
+# 落盘文件名的两条上限。目录项上限是 255 字节（ext4 / APFS 都一样），所以只按
+# 「字符数」截是不够的：120 个中文字看着只有 120 个字符，UTF-8 却是 360 字节，
+# `open()` 当场 ENAMETOOLONG。留到 180 字节是给 anna_browser 撞名时追加的
+# `-<时间戳>-<序号>`（十几字节）留余量，拼完仍在 255 以内。
+MAX_NAME_CHARS = 120
+MAX_NAME_BYTES = 180
+MAX_EXT_CHARS = 16       # 长过这个的「扩展名」不是扩展名
+
 
 # ── 归一化 ────────────────────────────────────────────────────────
 
@@ -218,18 +226,38 @@ def incoming_dir(data_dir, create=False):
     return p
 
 
+def _fit_bytes(text, limit):
+    """按 UTF-8 字节截断，且绝不切出半个字（半个字写盘就是坏字节）。"""
+    raw = text.encode("utf-8")
+    if len(raw) <= limit:
+        return text
+    return raw[:limit].decode("utf-8", "ignore")
+
+
 def safe_name(filename):
     """浏览器给的文件名洗一遍再用：只留最后一截、去掉分隔符与控制字符。
 
     下载名来自远端站点，可能带路径、也可能就是 `../../x`。这一层不守住，
     写盘就能写到书架外面去 —— 所以宁可不信任它。
+
+    名字还要收得住长度，而且**按字节收**：目录项的上限是 255 字节，中文一个字
+    就是三个字节。按「字符数」截出来的名字看着不长，落盘那一下却直接
+    ENAMETOOLONG（`open()` 抛 OSError，下载接不住）。所以两条上限同时管住：
+    字符数（ASCII 怪名）与 UTF-8 字节数（中文长标题）。
     """
     name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
     name = re.sub(r"[\x00-\x1f\x7f]", "", name)
     name = re.sub(r"[ /]+", "_", name)
-    if len(name) > 120:
-        stem, dot, tail = name[:100], ".", name.split(".")[-1]
-        name = stem + dot + tail if dot in name else stem
+    if len(name) > MAX_NAME_CHARS or len(name.encode("utf-8")) > MAX_NAME_BYTES:
+        stem, dot, tail = name.rpartition(".")
+        # 点号后面那一截长过 MAX_EXT_CHARS 就不是扩展名（是正文被点号切开的一截），
+        # 不值得为留住它把整段正文截没。
+        ext = tail if dot and 0 < len(tail) <= MAX_EXT_CHARS else ""
+        cut = (len(ext) + 1) if ext else 0
+        room_c = max(1, MAX_NAME_CHARS - cut)
+        room_b = max(1, MAX_NAME_BYTES - cut)
+        head = _fit_bytes(stem or name, room_b)[:room_c].rstrip(". ")
+        name = ("%s.%s" % (head, ext)) if (head and ext) else (head or ext)
     # 只剩点号的名字（"." / ".."）拼上去就是「上一级」：basename 挡不住它，
     # 因为它本来就是最后一截。这一类一律当没名字处理，绝不拿去拼路径。
     if not name.strip("."):
