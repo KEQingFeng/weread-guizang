@@ -68,6 +68,11 @@ def _legacy_ipv4(host):
                 n = int(p, 10)
         except ValueError:
             return None
+        # 负数段（`-1.0.0.1`）不是 inet_aton 认的写法，得在这里就回掉：int() 收得下它，
+        # 后面按位拼出来的也是个负数，交给 ipaddress.ip_address() 会当场抛 —— 护栏
+        # 本该只回「放行 / 拒绝」，一抛就把取页路打成 500 或连接被甩。
+        if n < 0:
+            return None
         nums.append(n)
     # 前几段各占 8 位，最后一段占满剩下的位（单段写法就是整个 32 位）
     tail_bits = 8 * (5 - len(nums))
@@ -115,7 +120,12 @@ def host_blocked(host):
         return _ip_blocked(mapped if mapped is not None else ip)
     legacy = _legacy_ipv4(h)
     if legacy is not None:
-        return _ip_blocked(ipaddress.ip_address(legacy))
+        try:
+            return _ip_blocked(ipaddress.ip_address(legacy))
+        except ValueError:
+            # 理论上到不了（_legacy_ipv4 只回 0 .. 2**32-1 的整数）。留着是给这条路钉个
+            # 契约：认不出的东西一律当拒，绝不让 host_blocked 自己把异常冒给调用方。
+            return True
     return False
 
 
