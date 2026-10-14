@@ -15,11 +15,11 @@ import signal
 import statistics
 import sys
 import time
-import urllib.request
 from collections import deque
 
 from playwright.async_api import async_playwright
 
+import download_images
 import platform_compat as pc
 
 USER_DATA_DIR = os.path.join("cache", "browser_profile")
@@ -1466,30 +1466,27 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
 
 
 def download_all_images(raw_dir, img_dir):
-    os.makedirs(img_dir, exist_ok=True)
-    tasks = []
-    for jf in sorted(os.listdir(raw_dir)):
-        if jf.endswith(".json"):
-            for img in json.load(open(os.path.join(raw_dir, jf))).get("images", []):
-                tasks.append((img["url"], img["file"]))
+    """导出途中顺手把图下下来。
+
+    下载这一步没有自己的一套实现：落在 download_images 里，跟界面上「重新下载
+    图片」走的是同一条路（原子落盘 / 去重 / 坏记录不拖垮整本）。以前这里另抄了
+    一遍 `open(fp,"wb")`，非原子写的坑两边都有，改一处漏一处。
+    """
+    tasks, _skipped = download_images.collect_tasks(raw_dir, img_dir)
     if not tasks:
         print("  (无图片)"); return 0
+    os.makedirs(img_dir, exist_ok=True)
     print(f"\n  下载 {len(tasks)} 张图片...")
     ok = 0
-    for url, fname in tasks:
-        fp = os.path.join(img_dir, fname)
-        if os.path.exists(fp) and os.path.getsize(fp) > 1000:
-            ok += 1; continue
-        try:
-            req = urllib.request.Request(url, headers={
-                "Referer": "https://weread.qq.com/", "User-Agent": "Mozilla/5.0"})
-            raw = urllib.request.urlopen(req, timeout=20).read()
-            if len(raw) > 500:
-                open(fp, "wb").write(raw); ok += 1
-                if ok % 20 == 0:
-                    print(f"    {ok}/{len(tasks)}...")
-        except Exception as e:
-            print(f"    ⚠️  {fname} 失败: {e}")
+    for url, fp in tasks:
+        r = download_images.download_one(url, fp)
+        if r in ("ok", "skip"):
+            ok += 1
+            if ok % 20 == 0:
+                print(f"    {ok}/{len(tasks)}...")
+        else:
+            reason = r[5:] if r.startswith("fail:") else r
+            print(f"    ⚠️  {os.path.basename(fp)} 失败: {reason}")
     print(f"  ✅ 图片下载完成 {ok}/{len(tasks)}")
     return ok
 
