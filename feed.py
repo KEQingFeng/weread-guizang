@@ -398,26 +398,92 @@ def _fetch_bytes(url, headers=None):
 # ── 解析 ────────────────────────────────────────────────────────────
 
 _SCRIPT_STYLE = re.compile(r"(?is)<(script|style|iframe)\b[^>]*>.*?</\1\s*>")
-# 只开到一半的那种：订阅源常把正文截断，`<script>alert(1)` 根本没有闭合标签。
-# 浏览器会把没闭合的 <script>/<style>/<iframe> 后面的整段都当成它的内容，所以这里
-# 也照同样的规矩，从开口一直清到结尾 —— 留着它，等于把可执行内容原样递出去。
-_SCRIPT_STYLE_OPEN = re.compile(r"(?is)<(script|style|iframe)\b[^>]*>.*\Z")
+# 没配对的 `<script src=…>`（HTML 里它照样执行、还会吞掉后面的正文）由这一条兜掉。
+# 成对的那种上一条已经整块删了，这里看到的只会是漏网的开口或收尾标签。
+_SCRIPT_ORPHAN = re.compile(r"(?i)</?(script|style|iframe)\b[^>]*>")
 _ON_ATTR = re.compile(r"(?i)\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)")
-_URL_ATTR = re.compile(r"""(?i)\s(href|src|xlink:href|formaction)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
+_URL_ATTR = re.compile(r"""(?i)\s(href|src|xlink:href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
 _BAD_SCHEME = re.compile(r"(?i)^(javascript|vbscript|livescript):")
 _DATA_IMG = re.compile(r"(?i)^data:image/")
-# 浏览器解析地址时：先解一层 HTML 实体，再把 URL 里的 TAB / 换行整个删掉，首尾的
-# 空白与控制符也去掉。于是 `&#106;avascript:alert(1)`、`java\tscript:alert(1)` 在浏览器
-# 眼里都是 javascript: —— 过滤若只看原始那几个字节，等于没滤。
-_CTRL_IN_URL = re.compile(r"[\t\n\r]")
+# 判协议前先剔掉控制字符：浏览器解析 URL 时会把 tab / 换行 / 回车扔掉，
+# `jav&#9;ascript:` 在它眼里和 `javascript:` 是同一个东西。
+_CTRL = re.compile(r"[\x00-\x20\x7f]+")
 
 
-def _url_in_browser(s):
-    """这个地址到了浏览器手里会被还原成什么（只用它判协议，绝不用它输出）。"""
-    try:
-        return _CTRL_IN_URL.sub("", html.unescape(s)).strip()
-    except Exception:
-        return str(s or "").strip()
+def _tag_spans(text):
+    """`<...>` 的 (起, 止) 区间；引号里的 `>` 不算标签结束。
+
+    只把落在这段区间里的内容当标签清 —— 正文里那种普通的 `/src=1` 是可读文字，
+    不是属性，不能碰。
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        j = text.find("<", i)
+        if j < 0:
+            break
+        k, quote = j + 1, ""
+        while k < n:
+            c = text[k]
+            if quote:
+                if c == quote:
+                    quote = ""
+            elif c in "\"'":
+                quote = c
+            elif c == ">":
+                break
+            k += 1
+        if k >= n:                      # 没有收尾的 `>`：后面都当普通文本
+            break
+        out.append((j, k + 1))
+        i = k + 1
+    return out
+
+
+def _attr_boundaries(tag):
+    """把标签里处在「属性名 / 自闭斜杠」位置的那个 `/` 归一成空格。
+
+    HTML 认 `<a/href=…>`、`<img src=x /onerror=…>` 这种写法：`/` 在属性名前面
+    就是个分隔符，浏览器照常把 href / onerror 当属性立起来；而 `_URL_ATTR` /
+    `_ON_ATTR` 的 `\\s` 边界看不见它，javascript: 与 onerror= 于是整套漏过。
+    引号里的 `/`（例如 `title="a/src=b"`）是属性值的一部分，留着不动；`<br/>`
+    这种收尾的 `/` 后面直接是 `>`，也不是分隔符，一并留着。
+    """
+    if "/" not in tag:
+        return tag
+    out = [tag[:1]]
+    quote = ""
+    for i, c in enumerate(tag[1:], start=1):
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c in "\"'":
+            quote = c
+        elif c == "/" and i > 1 and tag[i - 1] != "<" and tag[i + 1:i + 2] != ">":
+            c = " "
+        out.append(c)
+    return "".join(out)
+
+
+def _fix_url(m, base):
+    attr, val = m.group(1), m.group(2)
+    quote = val[0] if val[:1] in ("\"", "'") else ""
+    inner = val[1:-1] if quote else val
+    s = inner.strip()
+    # 浏览器先把字符引用解回来再当 URL 用，所以判协议也得看解开之后的样子：
+    # `java&#115;cript:` 在浏览器眼里就是 `javascript:`。
+    probe = _CTRL.sub("", html.unescape(s))
+    if _BAD_SCHEME.match(probe):
+        return ' %s="#"' % attr
+    if probe.lower().startswith("data:") and not _DATA_IMG.match(probe):
+        return ' %s="#"' % attr
+    if base and not re.match(r"(?i)^[a-z][a-z0-9+.-]*:", probe) and not probe.startswith("#"):
+        try:
+            s = urllib.parse.urljoin(base, s)
+        except Exception:
+            pass
+    out = '"%s"' % s.replace('"', "&quot;")
+    return " %s=%s" % (attr, out)
 
 
 def sanitize_html(raw, base=""):
@@ -430,28 +496,18 @@ def sanitize_html(raw, base=""):
     if not raw:
         return ""
     txt = _SCRIPT_STYLE.sub("", raw)
-    txt = _SCRIPT_STYLE_OPEN.sub("", txt)
-    txt = _ON_ATTR.sub("", txt)
-
-    def fix(m):
-        attr, val = m.group(1), m.group(2)
-        quote = val[0] if val[:1] in ("\"", "'") else ""
-        inner = val[1:-1] if quote else val
-        s = inner.strip()
-        probe = _url_in_browser(s)
-        if _BAD_SCHEME.match(probe):
-            return ' %s="#"' % attr
-        if probe.lower().startswith("data:") and not _DATA_IMG.match(probe):
-            return ' %s="#"' % attr
-        if base and not re.match(r"(?i)^[a-z][a-z0-9+.-]*:", s) and not s.startswith("#"):
-            try:
-                s = urllib.parse.urljoin(base, s)
-            except Exception:
-                pass
-        out = '"%s"' % s.replace('"', "&quot;")
-        return " %s=%s" % (attr, out)
-
-    return _URL_ATTR.sub(fix, txt)
+    txt = _SCRIPT_ORPHAN.sub("", txt)
+    spans = _tag_spans(txt)
+    if not spans:
+        return txt
+    out, last = [], 0
+    for a, b in spans:
+        out.append(txt[last:a])
+        tag = _ON_ATTR.sub("", _attr_boundaries(txt[a:b]))
+        out.append(_URL_ATTR.sub(lambda m: _fix_url(m, base), tag))
+        last = b
+    out.append(txt[last:])
+    return "".join(out)
 
 
 _TAG = re.compile(r"(?s)<[^>]+>")

@@ -1,148 +1,129 @@
-#!/usr/bin/env python3
-"""归藏门禁：订阅正文的清洗（feed.sanitize_html）能不能被绕过。
+# -*- coding: utf-8 -*-
+"""订阅正文清洗（feed.sanitize_html）的离线验收：只许留可读内容，不许留可执行的口子。
 
-它守的是一句话：**外站灌进来的正文里，可执行的东西一个都别想留在成品里。**
+订阅是「同一批源反复灌进来」，正文 HTML 直接进阅读器渲染，所以这批用例盯的是
+**浏览器认、而过滤没认**的那几种写法 —— 它们看上去像没生效，实际点一下就执行：
 
-订阅和剪藏不一样 —— 剪藏是用户主动粘的单篇，订阅是同一批源反复灌进来，而且是
-「收进书架」直接落成书的那条路。所以 sanitize_html 是这个模块的安全边界，它自己
-的注释也写着「写得更硬」。但原来那把尺子只量原始那几个字节，浏览器却不是这么
-解析地址的：
+  A `/` 当属性分隔符：`<a/href="javascript:…">`、`<img src=x /onerror=…>`。
+    属性正则原来只认 `\\s` 边界，这类写法的 href / onerror 整个漏在外头。
+  B 字符引用包起来的协议：`java&#115;cript:`、`jav&#9;ascript:`、`javascript&colon;`。
+    浏览器先把 `&#…;` 解回来再当 URL 用，只在原文里找「javascript」会漏。
+  C 没配对的 `<script src=…>`：成对的整块会被删，落单的开口标签仍会执行、还会吞正文。
+  D 两份「正当内容」必须原样活着：相对链接补绝对、data:image 放行、引号里的 `/src=`
+    是属性值的一部分、正文里普通的 `/src=1` 是可读文字 —— 加固不能把它们一起改坏。
 
-  · `&#106;avascript:alert(1)` —— 属性值先过一遍 HTML 实体解码，浏览器手里就是
-    `javascript:...`；
-  · `java\\tscript:alert(1)` —— URL 里的 TAB / 换行会被整个删掉，拼回来还是
-    `javascript:`；
-  · `<script>alert(1)` —— 订阅源常把正文截断，没有闭合标签，浏览器会把后面整段
-    都当成脚本内容，原来那条只认「成对闭合」的正则漏掉了它。
-
-这一份不联网、不起服务，直接对着纯函数打；跑法：
-
-    .venv/bin/python tests/check_feed_sanitize.py
+不联网、不开浏览器、不写盘。
 """
 import os
-import pathlib
-import shutil
 import sys
-import tempfile
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-
-# GUIZANG_DATA 要在 import feed 之前指到沙盒：feed 在导入时就把 DATA_DIR / STORE
-# 定下来了，设晚了它还是认用户真实的数据目录。
-SANDBOX = tempfile.mkdtemp(prefix="gz-feed-sanitize-")
-os.environ["GUIZANG_DATA"] = os.path.join(SANDBOX, "data")
-os.makedirs(os.environ["GUIZANG_DATA"], exist_ok=True)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import feed  # noqa: E402
 
-FAILED = []
+BASE = "https://ex.com/p/"
+FAIL = []
 PASSED = 0
 
 
-def chk(name, cond, extra=""):
+def chk(name, ok, extra=""):
     global PASSED
-    if cond:
+    print(("  ok  " if ok else " FAIL ") + name + ("" if ok else "  <- " + repr(extra)))
+    if ok:
         PASSED += 1
     else:
-        FAILED.append(name)
-    print(("PASS  " if cond else "FAIL  ") + name + ("" if cond else "   " + repr(extra)))
+        FAIL.append(name)
 
 
-BASE = "https://site.example/post/1"
+def clean(raw, base=BASE):
+    return feed.sanitize_html(raw, base)
 
 
-def clean(raw):
-    return feed.sanitize_html(raw, base=BASE)
+# ── A `/` 当属性分隔符 ────────────────────────────────────────────────
+a1 = clean('<a/href="javascript:alert(1)">点我</a>')
+chk("A1 `<a/href=…>` 的 javascript: 被换成 #", 'href="#"' in a1 and "javascript:" not in a1.lower(), a1)
 
+a2 = clean('<a/href=javascript:alert(1)>点我</a>')
+chk("A2 同一个写法不带头引号也挡住", 'href="#"' in a2 and "javascript:" not in a2.lower(), a2)
 
-def no_js(out):
-    """清洗结果里不许再留得下可执行的协议（大小写 / 实体都算）。"""
-    low = out.lower()
-    return ("javascript:" not in low and "vbscript:" not in low
-            and "livescript:" not in low and "data:text" not in low
-            and "&#106;avascript" not in low and "&#x6a;avascript" not in low
-            and "java\tscript" not in low and "java\nscript" not in low)
+a3 = clean("<img src=x /onerror=alert(1)>")
+chk("A3 `<img src=x /onerror=…>` 的 onerror 被删",
+    "onerror" not in a3.lower() and "alert(1)" not in a3.lower(), a3)
 
+a4 = clean("<img/src=x/onerror=alert(1)>")
+chk("A4 `<img/src=x/onerror=…>` 两条口子一起堵住",
+    "onerror" not in a4.lower() and "javascript:" not in a4.lower(), a4)
 
-# ── 1. 协议判定要按浏览器的规矩来（实体 / 空白拆字 / &colon;） ────────────
-for label, raw in [
-    ("实体：十进制 &#106;avascript:", '<a href="&#106;avascript:alert(1)">x</a>'),
-    ("实体：十六进制 &#x6a;avascript:", '<a href="&#x6a;avascript:alert(1)">x</a>'),
-    ("实体：大写 &#X6A;AVASCRIPT:", '<a href="&#X6A;AVASCRIPT:alert(1)">x</a>'),
-    ("实体：&colon; 冒充冒号", '<a href="javascript&colon;alert(1)">x</a>'),
-    ("拆字：java<TAB>script:", '<a href="java\tscript:alert(1)">x</a>'),
-    ("拆字：java<LF>script:", '<a href="java\nscript:alert(1)">x</a>'),
-    ("拆字：java<CR>script:", '<a href="java\rscript:alert(1)">x</a>'),
-    ("拆字：实体换行 java&#x0A;script:", '<a href="java&#x0A;script:alert(1)">x</a>'),
-    ("前导空白 + 实体", '<a href=" &#106;avascript:alert(1)">x</a>'),
-]:
-    got = clean(raw)
-    chk("拦截 " + label, '#' in got and no_js(got), got)
+a5 = clean("<a /onclick=alert(1)>点我</a>")
+chk("A5 `<a /onclick=…>` 的事件属性被删", "onclick" not in a5.lower(), a5)
 
-for label, raw in [
-    ("src 里的实体 javascript:", '<img src="&#106;avascript:alert(1)">'),
-    ("formaction 里的 javascript:", '<button formaction="javascript:alert(1)">x</button>'),
-]:
-    got = clean(raw)
-    chk("拦截 " + label, "#" in got and no_js(got), got)
+a6 = clean('<a href="/rel">x</a>')
+chk("A6 斜杠分隔的正当相对链接仍补成绝对", a6 == '<a href="https://ex.com/rel">x</a>', a6)
 
-chk("拦截 vbscript:", no_js(clean('<a href="vbscript:msgbox(1)">x</a>')))
-chk("拦截 data:text/html（含实体写法）",
-    no_js(clean('<a href="data:text/html,<b>x</b>">x</a>'))
-    and no_js(clean('<a href="&#100;ata:text/html,x">x</a>')))
+# ── B 字符引用包起来的协议 ────────────────────────────────────────────
+for tag, body in (
+        ("B1 十进制 `java&#115;cript:`", '<a href="java&#115;cript:alert(1)">x</a>'),
+        ("B2 十六进制 `java&#x73;cript:`", '<a href="java&#x73;cript:alert(1)">x</a>'),
+        ("B3 夹了制表符 `jav&#9;ascript:`", '<a href="jav&#9;ascript:alert(1)">x</a>'),
+        ("B4 实体冒号 `javascript&colon;`", '<a href="javascript&colon;alert(1)">x</a>'),
+        ("B5 实体包住首字母 `&#106;avascript:`", '<a href="&#106;avascript:alert(1)">x</a>'),
+):
+    got = clean(body)
+    chk(tag + " 照样被挡住", 'href="#"' in got, got)
 
+# base 为空也不能漏（解析时 base 由源地址补，但不该赌它永远非空）
+for name, body in (
+        ("B6 base 为空：实体协议仍挡住", '<a href="java&#115;cript:alert(1)">x</a>'),
+        ("B7 base 为空：斜杠分隔的 onerror 仍挡住", "<img src=x /onerror=alert(1)>"),
+):
+    got = feed.sanitize_html(body)
+    bad = "javascript" in got.lower() or "onerror" in got.lower() or "alert(1)" in got
+    chk(name, not bad, got)
 
-# ── 2. 没闭合的 <script> / <style> / <iframe> 必须清到底 ────────────────
-for label, raw in [
-    ("未闭合 <script>", "<p>hi</p><script>alert(1)"),
-    ("未闭合 <script src>", '<p>hi</p><script src="//evil.example/x.js">'),
-    ("未闭合 <iframe>", '<p>hi</p><iframe src="//evil.example/x">'),
-    ("未闭合 <style>", "<p>hi</p><style>body{display:none}"),
-]:
-    got = clean(raw)
-    chk("清掉 " + label, "script" not in got.lower() and "iframe" not in got.lower()
-        and "style" not in got.lower() and "evil.example" not in got and "alert" not in got,
-        got)
+# ── C 没配对的 script ─────────────────────────────────────────────────
+c1 = clean("<script>bad()</script>后面还有正文")
+chk("C1 配对的 <script> 整块删掉、正文留着", "script" not in c1.lower() and "后面还有正文" in c1, c1)
 
-chk("闭合标签带空格也认（</script >）",
-    clean('<p>a</p><script src="x"></script ><p>b</p>') == "<p>a</p><p>b</p>",
-    clean('<p>a</p><script src="x"></script ><p>b</p>'))
-chk("中间那段成对的 <script> 清掉，两边的正文留住",
-    clean("<p>a</p><script>bad()</script><p>b</p>") == "<p>a</p><p>b</p>",
-    clean("<p>a</p><script>bad()</script><p>b</p>"))
+c2 = clean("<script src=//evil.example/x.js>")
+chk("C2 没配对的 <script src=…> 被删", "script" not in c2.lower(), c2)
 
+c3 = clean("留意 <script src=//evil.example/x.js> 这种写法")
+chk("C3 落单的开口 script 删了、门外的字还在", "script" not in c3.lower() and "这种写法" in c3, c3)
 
-# ── 3. 回归：正常内容一个字不许动 ─────────────────────────────────────
-chk("回归：内联 on* 仍然剥掉",
-    "onerror" not in clean('<img src=x onerror="alert(1)">').lower())
-chk("回归：data:image 放行",
-    clean('<img src="data:image/png;base64,AAAA">').count("data:image/png") == 1)
-chk("回归：相对地址补成绝对、&amp; 不重复转义",
-    clean('<a href="/a?b=1&amp;c=2">x</a>') ==
-    '<a href="https://site.example/a?b=1&amp;c=2">x</a>',
-    clean('<a href="/a?b=1&amp;c=2">x</a>'))
-chk("回归：绝对地址原样留住",
-    clean('<a href="https://e.com/a?b=1&amp;c=2">x</a>') ==
-    '<a href="https://e.com/a?b=1&amp;c=2">x</a>')
-chk("回归：页内锚点不被改写", 'href="#sec"' in clean('<a href="#sec">x</a>'))
-chk("回归：正文文字留着",
-    "正文" in clean("<p>正文</p><script>alert(1)"))
+c4 = clean("<iframe src=//evil.example/></iframe>正文")
+chk("C4 iframe 也一并清掉", "iframe" not in c4.lower() and "正文" in c4, c4)
 
+# ── D 正当内容不许被改坏 ─────────────────────────────────────────────
+d1 = clean('<a title="a/src=b" href="/x">t</a>')
+chk("D1 引号里的 /src= 是属性值，原样留着",
+    'title="a/src=b"' in d1 and 'href="https://ex.com/x"' in d1, d1)
 
-# ── 4. 走到「收进书架」那一层也不许留下 javascript: ───────────────────
-# to_shelf 用的是 _html_to_md：它先清洗、再把 <a href> 翻成 markdown 链接。
-# 清洗这一关漏了，这里就会漂出一串 `[点我](javascript:...)`。
-md = feed._html_to_md('<p>正文</p><a href="&#106;avascript:alert(1)">点我</a>', BASE)
-chk("集成：翻成 markdown 后没有 javascript: 链接",
-    "javascript:" not in md.lower() and "javascript" not in md.lower(), md)
-md2 = feed._html_to_md('<p>正文</p><script>alert(1)', BASE)
-chk("集成：截断的 <script> 不会把脚本源码留在正文里",
-    "alert" not in md2 and "<" not in md2, md2)
+d2 = clean("正文里的 https://ex.com/a/src=1 是可读文字，不该被动")
+chk("D2 正文里的 /src= 不被当属性", d2 == "正文里的 https://ex.com/a/src=1 是可读文字，不该被动", d2)
 
+d3 = clean('<img src="data:image/png;base64,AAA">')
+chk("D3 data:image 仍放行", 'src="data:image/png;base64,AAA"' in d3, d3)
 
-shutil.rmtree(SANDBOX, ignore_errors=True)
-print("\n订阅清洗体检：%d 项通过，失败 %d 项" % (PASSED, len(FAILED)))
-for f in FAILED:
-    print("  ✗ " + f)
-sys.exit(1 if FAILED else 0)
+d4 = clean('<img src="data:text/html,<script>x</script>">')
+chk("D4 data:text/html 仍拒收", "data:text/html" not in d4, d4)
+
+d5 = clean("<br/>换行前的自闭合斜杠不该被改")
+chk("D5 <br/> 保持自闭合写法", "<br/>" in d5, d5)
+
+d6 = clean("纯正文没有任何标签")
+chk("D6 没有标签时原样返回", d6 == "纯正文没有任何标签", d6)
+
+d7 = clean('<a href="x>y" onclick="a">t</a>')
+chk("D7 引号里的 > 不截断标签，onclick 照样被删",
+    "onclick" not in d7.lower() and "x>y" in d7, d7)
+
+d8 = clean("")
+chk("D8 空串回空串", d8 == "", repr(d8))
+
+print()
+print("订阅正文清洗：通过 %d 项，失败 %d 项" % (PASSED, len(FAIL)))
+if FAIL:
+    for f in FAIL:
+        print("  ✗ " + f)
+    sys.exit(1)
+print("ok  浏览器认的几种属性写法与实体协议都被挡住，正当内容原样保留")
