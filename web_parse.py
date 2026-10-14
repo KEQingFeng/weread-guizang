@@ -78,7 +78,7 @@ def _guard(url):
     剪藏的 fetch() 自己也会挡一次，但它只覆盖走 HTML 的那两条路；X 是直接问
     cdn.syndication.twimg.com 的，绕开了 fetch，护栏就得在这儿统一补上。
     """
-    u = (url or "").strip()
+    u = _text(url).strip()
     if not u:
         raise ValueError("链接是空的")
     parts = clip_article.split_url(u)
@@ -146,6 +146,32 @@ def _fetch_page(url, wall_msg):
 
 
 _B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _text(value):
+    """外站 JSON 里的文本字段：只认字符串，认不出就当没有。
+
+    知乎 / 小红书 / X 的接口回来的是别人家的 JSON，字段形状不由我们定：`title`
+    可能是个数字、`desc` 可能是对象、`photos` 里的 `url` 可能是嵌套数组。这类值
+    一旦顺着 `(x or "").strip()` 或 `[:120]` 走下去，抛的就是
+    `'int' object has no attribute 'strip'` 这种 Python 报错，一路弹到用户脸上；
+    更糟的是 `str()` 一下就把一坨 JSON 当正文收进书架。所以文本一律先过这里。
+    """
+    return value if isinstance(value, str) else ""
+
+
+def _clip(value, limit):
+    """文本按字符数截断；非字符串当空串。"""
+    return _text(value)[:limit]
+
+
+def _list(value):
+    """外站 JSON 里的数组字段：不是数组就当空表。
+
+    `for x in (obj.get("photos") or [])` 挡得住 None 和空表，挡不住一个数字——
+    那样抛的是 `'int' object is not iterable`。数组字段一律先过这里。
+    """
+    return value if isinstance(value, (list, tuple)) else []
 
 
 def _base36(value):
@@ -229,7 +255,7 @@ def _fmt_epoch(ts):
 
 def _fmt_iso(text):
     """ISO8601（X 的 created_at）→ 本地时间文本。解不动就原样留着，别丢信息。"""
-    t = (text or "").strip()
+    t = _text(text).strip()
     if not t:
         return ""
     try:
@@ -242,21 +268,21 @@ def _fmt_iso(text):
 
 
 def _one_line(text, limit=0):
-    s = re.sub(r"\s+", " ", text or "").strip()
+    s = re.sub(r"\s+", " ", _text(text)).strip()
     return s[:limit] if limit else s
 
 
 def _images_md(urls):
     """图片一律用 Markdown 引用接在正文后面：阅读器认得这个写法，入库也走同一条路。"""
-    return "".join("\n\n![](%s)" % u for u in urls if u)
+    return "".join("\n\n![](%s)" % u for u in urls if isinstance(u, str) and u)
 
 
 def _result(title, author, site, date, cover, url, markdown, words):
     """统一出口：键必须跟 clip_article._extract_once 一模一样，上层才能一视同仁。"""
     return {
-        "title": (title or "")[:120],
-        "author": (author or "")[:60],
-        "site": (site or "")[:60],
+        "title": _clip(title, 120),
+        "author": _clip(author, 60),
+        "site": _clip(site, 60),
         "date": date or "",
         "cover": cover or "",
         "url": url,
@@ -299,13 +325,17 @@ def _x(url):
         data = json.loads(raw)
     except ValueError:
         raise ValueError("这条推现在打不开（删了、或设了保护），归藏取不到")
+    # 合法 JSON 不等于一个对象：数组 / 数字 / null 都过得了 json.loads，
+    # 但再往下 `data.get(...)` 抛的就是 `'list' object has no attribute 'get'`。
+    if not isinstance(data, dict):
+        raise ValueError("这条推现在打不开（删了、或设了保护），归藏取不到")
 
     user = data.get("user") if isinstance(data.get("user"), dict) else {}
-    text = (data.get("text") or "").strip()
+    text = _text(data.get("text")).strip()
     photos = []
-    for p in (data.get("photos") or []):
+    for p in _list(data.get("photos")):
         url_p = (p.get("url") if isinstance(p, dict) else "") or ""
-        if url_p:
+        if isinstance(url_p, str) and url_p:
             photos.append(url_p)
 
     # 没有作者、也没有文字和配图，等于接口给回一个空壳：被删、设了保护、或纯视频
@@ -317,8 +347,8 @@ def _x(url):
     md = clip_article._clean(text + _images_md(photos))
     words = clip_article._word_count(md)
 
-    screen = (user.get("screen_name") or "").strip()
-    display = _one_line(user.get("name") or "")
+    screen = _text(user.get("screen_name")).strip()
+    display = _one_line(user.get("name"))
     handle = ("@" + screen) if screen else ""
     title = _one_line(text, 40) or ("%s 的推文" % handle if handle else "X 上的推文")
     author = display or handle
@@ -420,16 +450,16 @@ def _xhs(url):
             raise ValueError("小红书这一页要登录（扫码）才给正文，归藏拿不到")
         raise ValueError("这一页里没读出笔记正文（可能要登录，或笔记已经删了）")
 
-    title = _one_line(note.get("title") or "")
-    desc = (note.get("desc") or "").strip()
+    title = _one_line(note.get("title"))
+    desc = _text(note.get("desc")).strip()
     user = note.get("user") if isinstance(note.get("user"), dict) else {}
-    author = _one_line((user or {}).get("nickname") or "")
+    author = _one_line((user or {}).get("nickname"))
 
     images = []
-    for img in (note.get("imageList") or []):
+    for img in _list(note.get("imageList")):
         if not isinstance(img, dict):
             continue
-        u = (img.get("urlDefault") or img.get("url") or "").strip()
+        u = _text(img.get("urlDefault") or img.get("url")).strip()
         if u:
             images.append(u)
 
