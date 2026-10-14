@@ -358,6 +358,10 @@ def _http(url, headers=None):
     gzip 自己解：有些站点只在 Accept-Encoding 里给了 gzip 才肯按 gzip 回，
     而 urllib 不会自动解压，不处理的话拿到的是一堆压缩字节。
     """
+    # 订阅地址是用户填的，但发现订阅、刷新条目这几步抓的地址来自上一趟的页面内容；
+    # 谁把我们 302 到内网都不算数。跳转那道闸与剪藏共用一份（延迟 import 避免顶层耦合）。
+    import clip_article
+    clip_article.ensure_redirect_guard()
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": ("application/rss+xml,application/atom+xml,application/feed+json,"

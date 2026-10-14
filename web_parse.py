@@ -100,6 +100,9 @@ def fetch_json(url):
     不走 clip_article.fetch 是因为它带一条「里面必须有 <，否则不像网页」的检查——
     syndication 接口正常时回的正是没有尖括号的纯 JSON，会被它一票否决。
     """
+    # 这一条走的是裸 urlopen，跳转那道闸得自己先装上（和 fetch 一样，见
+    # clip_article.ensure_redirect_guard）。
+    clip_article.ensure_redirect_guard()
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "application/json,text/plain,*/*",

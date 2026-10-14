@@ -14,6 +14,7 @@ import json, glob, os, re, socket, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import platform_compat as pc
+import clip_article
 
 # 书库位置：默认相对 cwd 的 output/，壳/后端用 GUIZANG_OUTPUT 指到「文档/归藏」。
 OUTPUT_DIR = pc.output_dir()
@@ -92,6 +93,9 @@ def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
     last = "fail:empty"
     for attempt in range(retries):
         try:
+            # 图片地址是从网页扒下来的 raw/*.json 里读出来的，站点把我们 302 到内网
+            # 也不算数：先装上跳转那道闸（与剪藏共用一份，见 ensure_redirect_guard）。
+            clip_article.ensure_redirect_guard()
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 raw = resp.read()

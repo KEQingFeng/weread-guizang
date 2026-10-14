@@ -3620,6 +3620,8 @@ def cache_cover(book_id, url):
     if os.path.isfile(p) and os.path.getsize(p) > 800:
         return True
     try:
+        # 图床把我们 302 到内网也不算数：装上与剪藏共用的那道跳转闸。
+        clip_article.ensure_redirect_guard()
         req = urllib.request.Request(u, headers={"User-Agent": clip_article.UA})
         with urllib.request.urlopen(req, timeout=20) as r:
             raw = r.read(4 * 1024 * 1024)
