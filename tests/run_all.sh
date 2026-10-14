@@ -451,6 +451,14 @@ run "地址护栏（老式 IP 写法 / IPv6 内网段 / 跳转）" "$PY" tests/c
 # 当场抛 —— 内置浏览器那条路只兜 Blocked，于是敲这种地址不是回人话而是把连接甩掉；
 # 页面里写死的 `og:image` 带这种主机名会把整次剪藏带崩。纯函数 + 四条路入口，不联网。
 run "地址护栏反面输入（认不出的数值主机名不把护栏打抛）" "$PY" tests/check_url_guard_neg.py
+# 上一条管「护栏收到认不出的主机名不抛」，这一条管「地址本身就解不出来」：`urlparse` 碰到
+# 半个 IPv6 方括号（`http://[::1`、`https://[`）自己会抛 ValueError，而内置浏览器那条路
+# 只兜 Blocked、`/api/browse` 也没有第二道 try —— 异常穿到 BaseHTTPRequestHandler 手上
+# 就是把连接关掉。用户在地址栏敲错一个方括号、或外站页面里的链接拼成半个方括号，看到的
+# 不是「这一页没取回来」那张自带错误页，而是 iframe 一片空白。剪藏那份早收口了
+# （clip_article.url_block_reason 的 except ValueError），这一条把内置浏览器补齐，三层都钉：
+# 纯函数（Blocked 带人话）/ 对照 + 源码接线 + 跳转守卫 / in-process 真 Handler 裸 HTTP GET。
+run "内置浏览器地址收口（半个 IPv6 方括号回一页人话，不是空响应）" "$PY" tests/check_browse_url.py
 # 上一条钉的是「粘进来的地址」，内置浏览器那一跳也自带检查；但剪藏 / 平台解析 / 订阅 /
 # 插图 / 封面这五条取页路都是裸 urlopen —— 默认 opener 跟着 Location 走、不再问一次新地址
 # 能不能去，于是外站 302 到 127.0.0.2 就把内网正文当文章取回来了（实测内网真被敲到）。
