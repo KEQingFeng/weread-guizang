@@ -648,6 +648,15 @@ run "订阅 / 便签翻页参数收口（脏 limit / offset 不再把整页读�
 # 真字符串，认不出当没写。纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，
 # 不联网、不碰真实数据，归静态段。
 run "请求体字符串字段脏形状（state / q / mode / Key 写脏不再断连）" "$PY" tests/check_post_body_str.py
+# 字符串 / 列表都收口了，但「小 Agent 对话」这两个口还剩半截：`/api/agent/chat` 的
+# `history` 是老写法直接 `(history or [])[-8:]` 再 `.get(...)`（数字在切片处 TypeError，
+# 数组混数字在 `.get` 处 AttributeError，字符串按字符逐条炸），`text` / `ctx` 则原样递给
+# `agent_quick` / `agent_payload` 让里面的 `.strip()` 抛 —— 这几处都没有兜底 try/except，
+# 异常穿出 do_POST 后连接被直接关掉，前端又是「按下去没反应」。收口是 ui_server._body_msgs
+# （只放行 `[{"role","content(str)"}]`，脏单条丢掉、不是列表当没写）+ 既有的 `_body_str`。
+# 纯函数 + 源码接线 + in-process 真 Handler（上游 agent_open 换成假的）三面都钉，
+# 不连外网、不碰真实数据，归静态段。
+run "小 Agent 请求体字段脏形状（history / text / ctx 写脏不再断连）" "$PY" tests/check_agent_body_shape.py
 # 请求体、查询串、请求行都收过口了，还剩响应这一头：账本里的字符串可能带着落单的
 # 半个代理码点（手改 / 云同步落盘 / 旧版本写回），`json.dumps(ensure_ascii=False)`
 # 原样留在正文里，`_send` 的 `body.encode("utf-8")` 当场抛。异常穿出 do_GET /
