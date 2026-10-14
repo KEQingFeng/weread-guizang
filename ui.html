@@ -118,6 +118,64 @@
     transition:none!important;
   }
 
+  /* ── 控件质感与交互动效（1.2.1 · R4-5） ────────────────────────────────
+     用户要的是「控件更有质感、每次交互都有反馈动画」。做法不是给每颗按钮各写一套，
+     而是先把时长与缓动收成令牌，再给「所有能点的东西」铺一层共同的按下 / 聚焦 / 落点
+     反馈；各组件原有的细调（.ainavbtn 的居中位移、叠卡的翻页、卡片悬停抬升）写在后面，
+     权重更高自然盖过这一层，互不打架。
+
+     铁律：反馈只走 transform / opacity / box-shadow / filter / background，
+     绝不改宽高、边距这些流内属性 —— 一动版面，悬停就会把旁边的字顶走
+     （tests/check_hover_shift.py 按这条守着）。下面统一用 :where() 把权重压到 0，
+     保证任何组件自己写的 transition / :active 都能覆盖它。 */
+  :root{
+    --fx-fast:130ms;                 /* 按压：短促才跟手 */
+    --fx-dur:200ms;                  /* 常规反馈 */
+    --fx-slow:420ms;                 /* 成功回弹这类表演 */
+    --fx-out:cubic-bezier(.22,.68,.24,1);   /* 落定的手感，比 linear 稳 */
+    --press:.965;                    /* 按下去缩多少 */
+  }
+  /* 1) 共同底座：能点的东西都有一条短促的位移补间，按下去才有「弹」的感觉。 */
+  :where(button, [role="button"], summary, .pcat, .nbtag, .abitem, .ntchip, .fechip){
+    transition:transform var(--fx-fast) var(--fx-out),
+               box-shadow var(--fx-dur) var(--fx-out);
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* 2) 按压缩放：只在按着的那一瞬，松手自动弹回。 */
+  :where(button, [role="button"], summary):active:not(:disabled){
+    transform:scale(var(--press));
+  }
+  /* 3) 键盘焦点：只有键盘走查才描一圈，鼠标点不描（:focus-visible 的语义就是如此）。 */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  /* 4) 落点涟漪：JS 在指针按下的坐标插一个 .tapfx，fixed 定位、不占布局、不被父框裁剪，
+     340ms 后自己移除。一圈淡淡的强调色从落点散开，就是「点到了」。 */
+  .tapfx{
+    position:fixed; z-index:9999; border-radius:50%; pointer-events:none;
+    background:radial-gradient(circle, var(--accent-soft) 0%, rgba(47,127,240,0) 70%);
+    transform:translate(-50%,-50%) scale(0); opacity:.9;
+    animation:tapfx .34s var(--fx-out) forwards;
+  }
+  @keyframes tapfx{
+    from{transform:translate(-50%,-50%) scale(0); opacity:.9}
+    to{transform:translate(-50%,-50%) scale(1); opacity:0}
+  }
+  /* 5) 内容入场：批量渲染出来的卡片按序轻轻抬一下，换数据 / 换视图不再是硬切。 */
+  .fx-in{animation:fxup var(--fx-dur) var(--fx-out) both}
+  @keyframes fxup{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+  /* 6) 成功回弹：加书架这类「做成了」的动作给一下放大再回落，比只换字更有回音。 */
+  .fx-pop{animation:fxpop var(--fx-slow) var(--pop)}
+  @keyframes fxpop{0%{transform:scale(1)}32%{transform:scale(1.07)}100%{transform:scale(1)}}
+  /* 7) 尊重系统设置：用户说「少动效」就一律不动。 */
+  @media (prefers-reduced-motion:reduce){
+    .tapfx{display:none}
+    .fx-in{animation:none}
+    .fx-pop{animation:none}
+    :where(button, [role="button"], summary):active:not(:disabled){transform:none}
+  }
+
   *{box-sizing:border-box}
   /* 滚动条一直是「有 / 没有」两态：书架/统计这些整页滚的屏，滚动条在；订阅/阅读器/
      浏览器这些「一屏刚好」的屏，滚动条不在。二者一换，整页会左右挪一条滚动条的宽
@@ -9790,6 +9848,7 @@ async function addToShelf(ids, title, btn) {
   if (btn) {
     btn.textContent = list.length > 1 ? `已加入 ${list.length} 本` : '已加入书架';
     btn.title = '微信读书书架里已经有这本了';
+    fxPop(btn);                      // 做成了给一下回弹，不只是换个字
   }
   // 批量那趟没有书名，别写成「《3 本》已加入书架」
   const who = title && list.length === 1 ? `《${title}》` : `这 ${list.length} 本`;
@@ -15093,7 +15152,7 @@ async function renderNotebooks() {
     p.dataset.sig = sig;
     const wall = document.createElement('div');
     wall.className = 'nbwall';
-    merged.forEach(b => wall.append(nbCard(b)));
+    merged.forEach((b, i) => wall.append(fxIn(nbCard(b), i)));
     body.replaceChildren(wall);
     if (cold) fadeIn(wall);
   } catch (e) {
@@ -15464,6 +15523,7 @@ function paintPick(body) {
     body.replaceChildren(grid);
   }
   fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
+  [...grid.children].forEach((c, i) => fxIn(c, i));
   pickShelfButtons(grid);
 }
 
@@ -21358,6 +21418,55 @@ $('#syncAuth').onclick = async () => {
     el.addEventListener('input', () => { syncDirty = true; });
     el.addEventListener('change', () => { syncDirty = true; });
   });
+
+/* ── 交互动效底座（1.2.1 · R4-5） ───────────────────────────────
+   两条：按下的落点放一圈涟漪；批量渲染的卡片按序轻轻抬起来。都尊重系统
+   「减少动态效果」—— 用户关掉就一条都不放（CSS 那边也同时兜了一层）。 */
+var FX_REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches);
+/* 认这些「能点的东西」：原生按钮、按钮角色、摘要，以及界面里几类自绘的可点条目。
+   涟漪是浮在面上的装饰，落点按指针坐标算，元素被父框裁剪也照样看得见。 */
+var FX_TAP = 'button, [role="button"], summary, .iconbtn, .navlist li, .nbtag, .pcat, .chip, .fechip, .wcard, .nbcard';
+
+function tapfx(e) {
+  if (FX_REDUCED || e.button > 0) return;
+  var t = e.target && e.target.closest ? e.target.closest(FX_TAP) : null;
+  if (!t || t.disabled) return;
+  var r = t.getBoundingClientRect();
+  var d = Math.max(24, Math.round(Math.hypot(r.width, r.height)));
+  var s = document.createElement('span');
+  s.className = 'tapfx';
+  s.style.left = e.clientX + 'px';
+  s.style.top = e.clientY + 'px';
+  s.style.width = d + 'px';
+  s.style.height = d + 'px';
+  document.body.appendChild(s);
+  setTimeout(() => s.remove(), 400);
+}
+document.addEventListener('pointerdown', tapfx, {passive: true});
+
+/* 卡片入场：同一批里按序号错开 26ms，一眼能看出是「一批」而不是砸出来的。
+   一个节点只演一次（data-fx 记着）—— 状态每 2.6 秒刷一遍，不然卡片会反复抬。
+   演完把类摘掉：fx-in 的 fill 模式会压住悬停的 transform，摘了才恢复抬升。 */
+function fxIn(el, i) {
+  if (!el || el.dataset.fx === '1') return el;
+  el.dataset.fx = '1';
+  if (FX_REDUCED) return el;
+  el.classList.add('fx-in');
+  el.style.animationDelay = Math.min(i || 0, 12) * 26 + 'ms';
+  el.addEventListener('animationend', () => {
+    el.classList.remove('fx-in');
+    el.style.animationDelay = '';
+  }, {once: true});
+  return el;
+}
+
+/* 成功回弹：给「做成了」的按钮一下放大回落。同一个节点上一发还没演完就不再叠。 */
+function fxPop(el) {
+  if (!el || FX_REDUCED || el.classList.contains('fx-pop')) return el;
+  el.classList.add('fx-pop');
+  el.addEventListener('animationend', () => el.classList.remove('fx-pop'), {once: true});
+  return el;
+}
 
 /* ── 启动 ─────────────────────────────── */
 renderView();
