@@ -56,9 +56,11 @@ def platform_of(url):
     """这个链接属于哪个站：zhihu / xhs / x / 空串（不认识）。
 
     只认主机名，不看路径——路径的解析各站自己再做一次，这里判错会连带
-    「要按哪家的护栏取」一起错。
+    「要按哪家的护栏取」一起错。解不出来的地址（半个 IPv6 方括号之类）回空串，
+    交给通用剪藏去讲那句人话，别在这里抛 `Invalid IPv6 URL`。
     """
-    host = (urllib.parse.urlparse((url or "").strip()).hostname or "").lower()
+    parts = clip_article.split_url(url)
+    host = parts[1] if parts else ""
     if not host:
         return ""
     if host in ("zhihu.com", "www.zhihu.com", "zhuanlan.zhihu.com") or host.endswith(".zhihu.com"):
@@ -79,10 +81,13 @@ def _guard(url):
     u = (url or "").strip()
     if not u:
         raise ValueError("链接是空的")
-    p = urllib.parse.urlparse(u)
-    if p.scheme.lower() not in clip_article.ALLOWED_SCHEMES:
-        raise ValueError("只认 http/https 链接（现在这个是 %s）" % (p.scheme or "空"))
-    host = (p.hostname or "").lower()
+    parts = clip_article.split_url(u)
+    if parts is None:
+        # 和剪藏 fetch 同口径：解不出来的地址回同一句人话，不是 `Invalid IPv6 URL`。
+        raise ValueError("这个地址解不出来")
+    scheme, host = parts[0], parts[1]
+    if scheme not in clip_article.ALLOWED_SCHEMES:
+        raise ValueError("只认 http/https 链接（现在这个是 %s）" % (scheme or "空"))
     if not host:
         raise ValueError("这个链接没有主机名，打不开")
     if clip_article.host_blocked(host):

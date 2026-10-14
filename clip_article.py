@@ -129,18 +129,36 @@ def host_blocked(host):
     return False
 
 
+def split_url(u):
+    """解一个地址 → (scheme, host, path)；解不出来回 None。
+
+    地址护栏自己不许抛：这种地址是要被「拒绝」的，不是要被「解释」的。`urlparse`
+    碰到半个 IPv6 方括号（`http://[::1`、`https://[`）会当场抛
+    `ValueError: Invalid IPv6 URL` —— 于是「拦下这个地址」变成「界面收到一句 Python
+    的英文报错」，甚至把整次剪藏带崩。解不出来的地址在各处都有明确去处，所以这里
+    统一收成一个 None，由调用方决定是拒绝、跳过还是当「不认识这一家」：
+      · `url_block_reason` → 回一句人话「这个地址解不出来」；
+      · `fetch` / `web_parse._guard` → 抛同口径的 ValueError；
+      · `first_image` → 跳过这张图，看正文里的下一张；
+      · `web_parse.platform_of` → 回「不认识这一家」，由通用剪藏去讲那句话。
+    """
+    try:
+        p = urllib.parse.urlparse((u or "").strip())
+        return p.scheme.lower(), (p.hostname or "").lower(), p.path
+    except ValueError:
+        return None
+
+
 def url_block_reason(u):
     """这个地址为什么不能替用户去访问（能访问回空串）。
 
     「发出请求之前」那道闸与「跳转目标」那道闸共用这一处判据：以后加一条拒绝规则，
     只改这里。urlparse 自己也会对半个 IPv6 方括号之类抛 ValueError，一并收成拒绝。
     """
-    try:
-        p = urllib.parse.urlparse((u or "").strip())
-        scheme = p.scheme.lower()
-        host = (p.hostname or "").lower()
-    except ValueError:
+    parts = split_url(u)
+    if parts is None:
         return "这个地址解不出来"
+    scheme, host = parts[0], parts[1]
     if scheme not in ALLOWED_SCHEMES:
         return "只认 http/https 链接（现在这个是 %s）" % (scheme or "空")
     if not host:
@@ -418,7 +436,12 @@ def first_image(markdown, base):
             continue
         if NON_COVER.search(u):
             continue
-        ext = os.path.splitext(urllib.parse.urlparse(u).path)[1]
+        parts = split_url(u)
+        if parts is None:
+            # 半个 IPv6 方括号之类：这条地址本来就取不回图，跳过看下一张。
+            # 旧写法直接 urlparse，会把「这一页有一张拼错的图」升级成整次剪藏失败。
+            continue
+        ext = os.path.splitext(parts[2])[1]
         if ext and ext not in COVER_EXT:
             continue
         return _abs(u, base)
@@ -727,10 +750,14 @@ def fetch(url):
     u = (url or "").strip()
     if not u:
         raise ValueError("链接是空的")
-    p = urllib.parse.urlparse(u)
-    if p.scheme.lower() not in ALLOWED_SCHEMES:
-        raise ValueError("只认 http/https 链接（现在这个是 %s）" % (p.scheme or "空"))
-    host = (p.hostname or "").lower()
+    parts = split_url(u)
+    if parts is None:
+        # 地址护栏的第一步是先把地址解开；解不出来要回同一句人话，而不是把
+        # `Invalid IPv6 URL` 这种运行期错误原样递给界面（见 split_url）。
+        raise ValueError("这个地址解不出来")
+    scheme, host = parts[0], parts[1]
+    if scheme not in ALLOWED_SCHEMES:
+        raise ValueError("只认 http/https 链接（现在这个是 %s）" % (scheme or "空"))
     if not host:
         raise ValueError("这个链接没有主机名，打不开")
     if host_blocked(host):
