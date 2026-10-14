@@ -1627,12 +1627,66 @@ NOTES_STATE = {"running": False, "done": 0, "total": 0, "built_at": 0, "count": 
 _notes_lock = threading.Lock()
 
 
+def _idx_text(v):
+    """索引里的一条文本字段：None / 数字 / 对象都收成字符串，下游点 .get / 切片不再炸。"""
+    if isinstance(v, str):
+        return v
+    return "" if v is None else str(v)
+
+
+def _idx_at(v):
+    """时间戳收成非负整数。索引里的排序键是 `-(x.at)`，字符串 / None 会当场抛。"""
+    try:
+        return max(0, int(v))
+    except Exception:
+        return 0
+
+
+def _norm_index_item(x):
+    """洗一条划线 / 想法。不是对象的脏条目（裸字符串 / null / 数字）直接丢。"""
+    if not isinstance(x, dict):
+        return None
+    return {"bookId": _idx_text(x.get("bookId")),
+            "title": _idx_text(x.get("title")),
+            "author": _idx_text(x.get("author")),
+            "kind": _idx_text(x.get("kind") or "划线"),
+            "text": _idx_text(x.get("text")),
+            "at": _idx_at(x.get("at"))}
+
+
+def _norm_index_book(b):
+    """洗一条「建过索引的书」。books 被写成对象 / 字符串时也得回一张干净的表。"""
+    if not isinstance(b, dict):
+        return None
+    return {"bookId": _idx_text(b.get("bookId")), "title": _idx_text(b.get("title"))}
+
+
 def load_notes_index():
+    """读笔记索引，并把形状收口到下游能直接用的样子。
+
+    这份账本不只本进程在写：整份重建与单本增量合并交替落盘，用户也可能手工编辑、
+    旧版本落过别的形状。原先只验顶层 `items` 是不是表就原样递出去，于是索引里
+    只要混进一条裸字符串 / null，`x.get(...)` 就在这些地方当场抛：
+
+      · /api/notes_search —— 划线搜索 500（前端只看见「搜索失败」）；
+      · /api/notes_of 与 merge_notes_index —— 去重用的 `(bookId, text)` 元组算不出；
+      · local_context（MCP / Agent 摘要）与 /api/notes_random —— `-(x.at)` 排不了序。
+
+    一条脏数据不该让整份索引作废：认得出的条目照留、字段收成安全形状，认不出的
+    整条丢掉。顶层不是对象 / `items` 不是表时仍当空账（那是「整份坏了」，没得救）。
+    """
     try:
         with open(NOTES_IDX, encoding="utf-8") as f:
             d = json.load(f)
         if isinstance(d, dict) and isinstance(d.get("items"), list):
-            return d
+            return {"built_at": _idx_at(d.get("built_at")),
+                    "items": [it for it in (_norm_index_item(x) for x in d["items"])
+                              if it is not None],
+                    "books": [b for b in (_norm_index_book(x)
+                                          for x in (d.get("books")
+                                                    if isinstance(d.get("books"), list)
+                                                    else []))
+                              if b is not None]}
     except Exception:
         pass
     return {"built_at": 0, "items": [], "books": []}
@@ -1693,10 +1747,11 @@ def build_notes_index():
                 "books": [{"bookId": b["bookId"],
                            "title": (b.get("book") or {}).get("title") or b["bookId"]}
                           for b in books]}
-        os.makedirs(CACHE_DIR, exist_ok=True)
+        # 走统一的原子写（临时名带 pid+随机串）：整份重建是几十分钟的活，写一半
+        # 被中断的话直接覆写会留下一份半截 JSON，下次读进来整份索引当空 —— 用户
+        # 看到的是「辛苦建好的划线全没了」。先写临时件再 os.replace，坏也只坏临时件。
         with _notes_lock:
-            with open(NOTES_IDX, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
+            _write_json(NOTES_IDX, data)
         NOTES_STATE.update({"built_at": data["built_at"], "count": len(items)})
         log(f"--- 笔记索引完成：{len(books)} 本 / {len(items)} 条 ---")
     except Exception as e:
@@ -1728,7 +1783,11 @@ def book_id_pairs(any_id):
 
 
 def fetch_book_notes(book_id, title="", author=""):
-    """直接问官方网关要这本的划线与想法（不等全量索引）。"""
+    """直接问官方网关要这本的划线与想法（不等全量索引）。
+
+    `at` 一律经 `_idx_at` 收成整数：这一路的条目会被 /api/notes_of 直接排序
+    （`-(x.at)`），网关把 createTime 写成字符串时，`-` 一个 str 会当场把详情页打成 500。
+    """
     items = []
     try:
         d = weread_call("/book/bookmarklist", {"bookId": book_id}, timeout=25)
@@ -1737,7 +1796,7 @@ def fetch_book_notes(book_id, title="", author=""):
             if t:
                 items.append({"bookId": book_id, "title": title, "author": author,
                               "kind": "划线", "text": t,
-                              "at": x.get("createTime") or 0})
+                              "at": _idx_at(x.get("createTime"))})
     except Exception:
         pass
     try:
@@ -1748,7 +1807,7 @@ def fetch_book_notes(book_id, title="", author=""):
             if t:
                 items.append({"bookId": book_id, "title": title, "author": author,
                               "kind": "想法", "text": t,
-                              "at": r.get("createTime") or 0})
+                              "at": _idx_at(r.get("createTime"))})
     except Exception:
         pass
     return items
@@ -1769,11 +1828,12 @@ def merge_notes_index(items):
         bid = added[0].get("bookId")
         if not any(b.get("bookId") == bid for b in d["books"]):
             d["books"].append({"bookId": bid, "title": added[0].get("title") or bid})
-        d.setdefault("built_at", time.time())
+        # load 现在总会带上 built_at（脏 / 缺省是 0），setdefault 修不了这个 0，
+        # 得显式补一个真时间，否则「索引已建」的判断会一直为假、反复整份重建。
+        d["built_at"] = d.get("built_at") or time.time()
         try:
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            with open(NOTES_IDX, "w", encoding="utf-8") as f:
-                json.dump(d, f, ensure_ascii=False)
+            # 同一把原子写：合并写一半也不能让整份索引变成半截 JSON。
+            _write_json(NOTES_IDX, d)
             NOTES_STATE["count"] = len(d["items"])
             NOTES_STATE["built_at"] = d["built_at"]
         except Exception:
