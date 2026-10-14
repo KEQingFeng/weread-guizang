@@ -539,6 +539,14 @@ run "配置脏字段（内层形状不对不再让 /api/state 整页失联）" "
 # 认不出回 None，do_POST 回 400 并主动断连，绝不带着猜出来的长度往下走。纯函数 + 源码接线
 # + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据，归静态段。
 run "请求体长度脏值（abc / 负数不再断连或挂住，脏值回 400）" "$PY" tests/check_post_length.py
+# 上面那三条把「顶层是畸形体」收了口：body 解析出来不是对象就统一当 `{}`。可字段级
+# 还漏着一档 —— `{"books": 123}` / `{"items": 123}` 是合法 JSON，顶层是对象，类型却
+# 不对。`/api/book_state` `/api/delete_many` `/api/flomo` `/api/notes_csv` 这四条没有
+# 兜底 try/except，落到 `for b in ids:` / `items[:200]` 就是 TypeError，异常穿出
+# `do_POST` 后连接被直接掐断，前端只看见 RemoteDisconnected。收口是 ui_server._body_list
+# （与查询串的 _qint 同一把尺子：认不出当没传）。纯函数 + 源码接线 + 真机四个口裸 HTTP
+# 打脏形状三面都钉，不起浏览器、不联网、不碰真实数据，归静态段。
+run "请求体字段形状（books/items 写脏不再断连，正常列表照旧）" "$PY" tests/check_post_body_shape.py
 # 账本被记事本 / 云同步「另存」过时文件头会多三个字节 BOM，原先按 utf-8 读会整份
 # 解不动、被每个读取者兜底成空账 —— 然后下一次保存把空账写回去，手改前的数据就没了。
 # 这一条给每本账做「干净 → 加 BOM → 再读」的往返：夹具本身得先读得出（不许两边都是空

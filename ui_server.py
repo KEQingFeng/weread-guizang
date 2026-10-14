@@ -4730,6 +4730,23 @@ def _body_len(raw):
     return int(text)
 
 
+def _body_list(raw):
+    """请求体里那个「本该是列表」的字段收成列表；形状不对就当空表。
+
+    为什么单开一处：`do_POST` 开头写着「畸形体不该把连接搞崩」，可那一道只管
+    顶层 —— 顶层不是对象时统一收成 `{}`，字段级却没管。`{"books": 123}` /
+    `{"items": 123}` 都是合法 JSON，落到 `for b in ids:` / `items[:200]` 就是
+    `TypeError: 'int' object is not iterable`（对象还多一种 `unhashable type: 'slice'`），
+    异常穿出 `do_POST` 后连接被直接掐断，前端 `await` 只看见 RemoteDisconnected ——
+    正是 `_qint` / `_body_len` 立下的那条规矩（见 tests/check_query_args.py 与
+    tests/check_plan_input.py）。字段级也照办：不抛、当没传，比回 500 或断连好解释。
+
+    只认 `list`：HTTP 这一侧的 JSON 数组解析出来就是 list，元组 / 其它可迭代
+    （字符串会按字符拆、字典会按 key 拆）都不是「一个列表」，当脏值处理。
+    """
+    return raw if isinstance(raw, list) else []
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -5502,7 +5519,7 @@ class Handler(BaseHTTPRequestHandler):
                                "msg": f"已导入《{info['title']}》，共 {info['chapters']} 章"})
 
         if u.path == "/api/book_state":
-            ids = (body or {}).get("books") or []
+            ids = _body_list((body or {}).get("books"))
             st = ((body or {}).get("state") or "").strip()[:8]
             want = str((body or {}).get("module") or "").strip()
             lib = load_lib()
@@ -5525,7 +5542,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": msg})
 
         if u.path == "/api/delete_many":
-            ids = (body or {}).get("books") or []
+            ids = _body_list((body or {}).get("books"))
             n = 0
             lib = load_lib()
             for b in ids:
@@ -5759,7 +5776,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json({"ok": False, "msg": str(e)[:160]})
         if u.path == "/api/flomo":
-            items = (body or {}).get("items") or []
+            items = _body_list((body or {}).get("items"))
             if not items:
                 return self._json({"ok": False, "msg": "没有选中任何内容"})
             url = (body or {}).get("url") or load_cfg().get("flomo_url") or ""
@@ -5785,7 +5802,7 @@ class Handler(BaseHTTPRequestHandler):
             # 文件名与条数。为什么要有这条路：网页直连 flomo 的 webhook 要 PRO，
             # 而导入 CSV 谁都能用 —— 想让笔记进 flomo 又没开会员的人走这里。
             rows = []
-            for it in (body or {}).get("items") or []:
+            for it in _body_list((body or {}).get("items")):
                 if not isinstance(it, dict):
                     continue
                 txt = str(it.get("text") or "").strip()
