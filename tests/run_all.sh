@@ -79,7 +79,6 @@ run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.p
 # 也会被漏过去。这一条把它们连同「正常链接 / data:image 一个字不改」一起钉死，纯函数、离线。
 run "订阅正文清洗（实体 / 拆字协议 / 斜杠分隔 / 落单 script / 回归）" "$PY" tests/check_feed_sanitize.py
 run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
-run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
 # 导入自己的书（Markdown / TXT / EPUB / PDF）第一关是「这份字节是什么编码」。GBK / GB18030
 # 的中文 TXT 是老用户的常见来源，而**无 BOM 的 utf-16 解码几乎不会报错**：它拿两个字节当
 # 一个字硬解，偶数长度的 GBK 正文会被整篇解成别的字（「中文测试」→「탖쓎」）。这一条把
