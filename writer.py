@@ -50,6 +50,57 @@ LENGTHS = [
 LENGTH_OF = {k: (label, tokens, stop) for k, label, tokens, stop in LENGTHS}
 
 
+# ---------- 脏账本兜底 ----------
+#
+# meta.json 与 _books.json 都是用户能直接编辑的文本文件，旧版本也落过别的形状。
+# 读它们的地方原来一律直读直用：一个 "很多" 落在 words 上，写作屏左栏整栏加载不出来
+# （/api/writer 抛穿），存盘那一刀也被顶回 —— 用户以为存上了，其实一个字没落；
+# "灵感角度" 这种裸字符串会被 list() 逐字拆成「灵」「感」「角」「度」再写回去，
+# 提示词里点名的不再是角度。下面三把尺子只在读账本时用一次，后面照旧直读。
+
+def _int(v, default=0):
+    """账上的数字字段：认得出就转成 int，认不出回默认，绝不抛。
+
+    `"42"`、`42.0` 这类认得出的形状照认（旧写法 `int(v or 0)` 对 `"42"` 能过、
+    对 `"42.0"` 与 `null` 都会抛），只把真认不出的换成默认。
+    """
+    try:
+        return int(v)
+    except Exception:
+        pass
+    try:
+        return int(float(str(v).strip()))
+    except Exception:
+        return default
+
+
+def _as_list(v):
+    """脏账里的容器：认 list/tuple；裸字符串收成「一个元素」。
+
+    裸字符串要是直接 `for s in "灵感角度"` 会被逐字拆开再写回去，一个角度变成四个
+    单字角度；不是容器的（数字 / null / dict）一律当空，免得后面拿它当清单遍历。
+    """
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    if isinstance(v, str):
+        return [v] if v.strip() else []
+    return []
+
+
+def _sparks(v):
+    """灵感角度那一栏：收成一份干净的字符串清单（短、非空、保序去重）。
+
+    与 `remember_sparks` 写入时用的是同一把尺（strip / 40 字 / 去重），这样
+    「读出来再存回去」不会越洗越长，也不会因为手改过一次就多出重复项。
+    """
+    out = []
+    for a in _as_list(v):
+        s = str(a).strip()[:40]
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
 # ---------- 路径与 id ----------
 
 def new_id():
@@ -186,15 +237,26 @@ def blank_meta(book_id, title=""):
 
 
 def load_meta(draft_dir):
+    """读这一篇的 meta，顺手把手改脏的字段收成能用的形状。
+
+    这里是读稿子唯一的入口（`read` / `brief` / `note` / `save` / 书架卡片都走它），
+    所以脏字段在这一处收干净，后面各处照旧直读。收不出数的按 0 / 空清单算，
+    这篇稿子不因为一个字段坏掉就整篇消失；下一次存盘会把收好的形状写回去，
+    账本自己就修好了。
+    """
     m = book_layout.read_meta(draft_dir)
     if not m or m.get("format") != MODULE:
         return None
-    m.setdefault("rev", 0)
-    m.setdefault("sparks", [])
-    m.setdefault("title", "")
-    m.setdefault("words", 0)
-    m.setdefault("created", int(os.path.getmtime(meta_path(draft_dir))))
-    m.setdefault("updated", m["created"])
+    try:
+        born = int(os.path.getmtime(meta_path(draft_dir)))
+    except OSError:
+        born = int(time.time())
+    m["rev"] = _int(m.get("rev"), 0)
+    m["words"] = _int(m.get("words"), 0)
+    m["created"] = _int(m.get("created"), born)
+    m["updated"] = _int(m.get("updated"), m["created"])
+    m["sparks"] = _sparks(m.get("sparks"))
+    m["title"] = str(m.get("title") or "")[:80]
     return m
 
 
@@ -480,7 +542,7 @@ def load_books(books_root):
         if not isinstance(b, dict) or not book_id_ok(b.get("id")):
             continue
         keep, seen = [], set()
-        for did in b.get("chapters") or []:
+        for did in _as_list(b.get("chapters")):
             did = str(did or "")
             # 同一本书里也不许重复列同一个章号：重复一次，界面上就是两行一模一样的。
             if not ok_id(did) or did in seen:
@@ -491,8 +553,8 @@ def load_books(books_root):
             keep.append(did)
         out.append({"id": str(b["id"]), "title": str(b.get("title") or ""),
                     "chapters": keep,
-                    "created": int(b.get("created") or 0),
-                    "updated": int(b.get("updated") or 0)})
+                    "created": _int(b.get("created"), 0),
+                    "updated": _int(b.get("updated"), 0)})
     return out
 
 
@@ -610,7 +672,9 @@ def order_chapter(books_root, book_id, draft_id, delta):
     if draft_id not in ids:
         return False, {"msg": "这一章不在这本书里"}
     at = ids.index(draft_id)
-    to = max(0, min(len(ids) - 1, at + int(delta or 0)))
+    # delta 从请求体里来，可能是 "上" / null / 对象 —— 认不出就当「不挪」，
+    # 不能让它一个 int() 把这一趟 500 掉（用户点了上移却什么都没发生，比报错好查）。
+    to = max(0, min(len(ids) - 1, at + _int(delta, 0)))
     if to == at:
         return True, {"book": book, "moved": False}
     ids.pop(at)
