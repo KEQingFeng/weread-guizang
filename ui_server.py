@@ -3091,8 +3091,13 @@ def merged_markdown(book_id):
         buf.write(f"**{author}**\n\n")
     buf.write("---\n\n")
     for fn in files:
-        with open(os.path.join(ch_dir, fn), encoding="utf-8") as f:
-            buf.write(f.read().rstrip("\n"))
+        # 与 EPUB / PDF 同一条口径（book_export.read_chapter_file）：章节文件被另存成
+        # GBK、或断电留下半截字节时，坏字节只落成替代符。这里原来严格按 UTF-8 读，
+        # 一个坏章节就让合并稿（单本 / 多本打包、整篇 AI 小结）当场 UnicodeDecodeError。
+        text = book_export.read_chapter_file(os.path.join(ch_dir, fn))
+        if text is None:
+            continue
+        buf.write(text.rstrip("\n"))
         buf.write("\n\n---\n\n")
     return buf.getvalue()
 
@@ -3221,10 +3226,9 @@ def book_outline(book_id):
             catalog = []
     chapters = []
     for i, fn in enumerate(files):
-        try:
-            text = open(os.path.join(ch_dir, fn), encoding="utf-8").read()
-        except Exception:
-            text = ""
+        # 目录里的章名从正文首行取；坏字节走与阅读 / 导出同一个容错读法，
+        # 否则一章另存成 GBK 时这里悄悄读成空串，目录里就只剩「第 N 章」。
+        text = book_export.read_chapter_file(os.path.join(ch_dir, fn)) or ""
         # 第一行非空内容就是章名（引擎写盘时带 # 前缀）
         title = ""
         for line in text.splitlines():
@@ -3260,10 +3264,10 @@ def chapter_text(book_id, ch):
     p = os.path.realpath(os.path.join(ch_dir, ch))
     if not p.startswith(ch_dir + os.sep) or not os.path.isfile(p):
         return None
-    try:
-        return open(p, encoding="utf-8").read()
-    except Exception:
-        return None
+    # 阅读页这一侧与导出走同一把尺子：坏字节落成替代符、正文其余部分照旧，
+    # 而不是认不出来就回 None（旧行为让 /api/read 对一章 GBK 档回「没有这一章」，
+    # 文件明明就在目录里）。真读不到才回 None。
+    return book_export.read_chapter_file(p)
 
 
 def book_image(book_id, name):
