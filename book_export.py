@@ -306,26 +306,42 @@ def md_to_html(md):
 
 # ─────────────────────────── 公共小工具 ───────────────────────────
 
+def read_chapter_file(path):
+    """单章正文：按字节读、再按 UTF-8 解，认不出的字节用 U+FFFD 顶上。
+
+    章节文件是用户能直接编辑的文本，也会被云同步 / 旧版本 / 别的编辑器写回来：
+    一个手滑另存成 GBK 的章节、或一次写到一半的断电，严格 UTF-8 读法当场
+    UnicodeDecodeError。导出那两条路（EPUB / PDF）早就按这个口径收口了，但
+    **读同一批文件的还有界面这一侧** —— 阅读页取某一章正文、合并稿、打包、
+    整篇小结，各自再读一遍。同一个坏字节在那边是「这一章打不开 / 下载点了没反应」，
+    在这边是「整本书导不出来」，病根一模一样，尺子也只该有一把，所以抽到这里：
+    导出与读写章节的地方都走这个函数。
+
+    认不出的字节只换成替代符，正文其余部分照旧（正常 UTF-8 一个字都不动）；
+    文件读不到（不存在 / 权限 / 同名目录）才回 None，由调用方决定怎么落。
+    """
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def read_chapters(book_dir):
     """(文件名, 正文) 顺序读回逐章 md。
 
-    按字节读、再按 UTF-8 解，认不出的字节用 U+FFFD 顶上。章节文件是用户能直接
-    编辑的文本，也会被云同步 / 旧版本写回来：一个手滑另存成 GBK 的章节、或一次
-    写到一半的断电，旧写法（`encoding="utf-8"` 直接读）当场 UnicodeDecodeError，
-    另外几章的正文一起打不开 —— 用户看到的是「这本书导不出来」。跳过一个坏文件
-    同样不对（少了一章，还不报到界面上）；这里只把那几个坏字节换成替代符，正文
-    的其余部分照旧。正常 UTF-8 的书一个字都不动。
+    逐章走 read_chapter_file 那唯一一把尺子：坏字节换成替代符、正文其余部分
+    照旧，不丢章、也不把一个坏文件当成整本书的错。读不到的文件（权限 / 同名
+    目录）只跳过，不带崩整趟。
     """
     ch_dir = os.path.join(book_dir, "chapters")
     if not os.path.isdir(ch_dir):
         return []
     out = []
     for fn in sorted(f for f in os.listdir(ch_dir) if f.endswith(".md")):
-        try:
-            with open(os.path.join(ch_dir, fn), "rb") as f:
-                out.append((fn, f.read().decode("utf-8", errors="replace")))
-        except OSError:
-            pass
+        text = read_chapter_file(os.path.join(ch_dir, fn))
+        if text is not None:
+            out.append((fn, text))
     return out
 
 

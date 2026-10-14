@@ -268,6 +268,13 @@ run "导出落盘编码（文本 open 都要 encoding / ASCII 环境下中文照
 # UnicodeDecodeError，另外几章正文也无从导出。现在按字节读、坏字节落成 U+FFFD：坏章照样
 # 进成品、好章一字不差、干净的书一个字符都不动。真打一个 EPUB 验，纯离线。
 run "导出章节读取容错（坏字节不带走整本书 / 不丢章 / 干净书零改动）" "$PY" tests/check_export_tolerant.py
+# 上面那条收的是导出（EPUB / PDF）那一侧；读同一批 chapters/*.md 的还有界面这一侧 ——
+# 阅读页取某一章、合并稿、单本 / 多本打包、剪藏 / 订阅 / 视频的「整篇小结」，原先各自
+# 又 `open(..., encoding="utf-8")` 读一遍：一个另存成 GBK 的章节在导出那边早就只坏几个字，
+# 在这边却让 `chapter_text` 回 None（`/api/read` 404「没有这一章」，文件明明在）与
+# `merged_markdown` 抛穿 `do_GET`（`/api/zip` 甩连接、整篇小结报错）。现在四处都走
+# `book_export.read_chapter_file` 这一把尺子。纯函数 + 进程内真服务，不联网，归静态段。
+run "阅读 / 打包读章节容错（坏字节不回 404 / 不甩连接 / 好章零改动）" "$PY" tests/check_reader_tolerant.py
 # 上一条管「坏字节不许带走整本书」，管不到「正文里的控制字节撞上渲染器的占位记号」。
 # md_to_html 内部拿 \x00 / \x01 当行内代码与转义的占位，而正文是外部内容（导入的书、
 # 剪藏原文、手改或云同步写回的章节），0x00 / 0x01 都是合法 UTF-8、read_chapters 原样
