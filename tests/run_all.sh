@@ -459,6 +459,13 @@ run "地址护栏反面输入（认不出的数值主机名不把护栏打抛）
 # （clip_article.url_block_reason 的 except ValueError），这一条把内置浏览器补齐，三层都钉：
 # 纯函数（Blocked 带人话）/ 对照 + 源码接线 + 跳转守卫 / in-process 真 Handler 裸 HTTP GET。
 run "内置浏览器地址收口（半个 IPv6 方括号回一页人话，不是空响应）" "$PY" tests/check_browse_url.py
+# 上一条把内置浏览器补齐了，注释里写「剪藏那份早收口了」—— 收口的只有 url_block_reason
+# 一个函数，真正拿地址的 clip_article.fetch / first_image 与 web_parse.platform_of / _guard
+# 各自又裸 urlparse 了一遍：粘一个 `http://[::1` 进来回的是 `Invalid IPv6 URL` 这句英文
+# 运行期错误；一页正文里只要夹一张拼错的图（`<img src="http://a[b">`），挑封面那一步就把
+# 整次剪藏带走。这一条按同一处收口（clip_article.split_url 解不出来回 None）逐条钉住：
+# 要拒绝的拒绝、要跳过的跳过、要不认识的回不认识，正常地址与正常挑图规则一个不动机。
+run "剪藏地址收口（半个 IPv6 方括号不把取页 / 首图 / 认站打抛）" "$PY" tests/check_clip_url_guard.py
 # 上一条钉的是「粘进来的地址」，内置浏览器那一跳也自带检查；但剪藏 / 平台解析 / 订阅 /
 # 插图 / 封面这五条取页路都是裸 urlopen —— 默认 opener 跟着 Location 走、不再问一次新地址
 # 能不能去，于是外站 302 到 127.0.0.2 就把内网正文当文章取回来了（实测内网真被敲到）。
