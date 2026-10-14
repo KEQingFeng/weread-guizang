@@ -105,8 +105,18 @@ def handle_download(dd, queue, download):
         stem, dot, tail = name.rpartition(".")
         if not stem:
             stem, dot, tail = name, "", ""
-        name = "%s-%d%s%s" % (stem, int(time.time()), dot, tail)
-        target = os.path.join(os.path.dirname(target), name)
+        folder = os.path.dirname(target)
+        stamp = int(time.time())
+        name = "%s-%d%s%s" % (stem, stamp, dot, tail)
+        target = os.path.join(folder, name)
+        # 时间戳只精确到秒：同一秒里连着接住三份同名文件时，后两份会算出同一个
+        # 名字，save_as 就把上一份刚接住的覆盖掉（用户下了四本、书架里只剩两本）。
+        # 所以撞上了再补一个序号，撞一次加一个，直到真的空出来为止。
+        n = 1
+        while os.path.exists(target):
+            n += 1
+            name = "%s-%d-%d%s%s" % (stem, stamp, n, dot, tail)
+            target = os.path.join(folder, name)
     try:
         download.save_as(target)
     except Exception as e:
