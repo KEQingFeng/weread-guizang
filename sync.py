@@ -64,6 +64,24 @@ def _int(v):
         return 0
 
 
+def _json_obj(blob):
+    """网络那头回的一段 JSON，收成一个对象；不是 JSON / 不是对象就给空 dict，绝不抛。
+
+    这些响应全都来自这台机器之外，形状不由我们定：微软的令牌与 Graph 接口、
+    中间还可能夹一层反向代理或门户认证页（回的是 HTML，不是 JSON）；接口报错时
+    也可能回一段 JSON 数组。原来的读法一律 `json.loads(...).get(...)`：
+    前者当场 `JSONDecodeError`、后者 `AttributeError` —— 而 `/api/sync/onedrive/start`
+    与 `/poll` 两条 POST 没有任何兜底，异常穿出 `do_POST` 的结果是连接被掐，
+    界面上就是「点了授权没反应」。收口放在这一处，调用方各自按「没拿到某个字段」
+    说人话（谁该报错、谁该退回默认，由那条路自己定）。
+    """
+    try:
+        data = json.loads(blob.decode("utf-8", "replace"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _norm(cfg):
     """把外部传进来的配置补成完整结构，缺什么补默认，别让调用方到处判空。"""
     cfg = _obj(cfg)
@@ -269,11 +287,16 @@ def _ms_token(c):
         with _http("POST", MS_TOKEN, data=body,
                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                    timeout=30) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+            j = _json_obj(r.read())
     except urllib.error.HTTPError as e:
         raise RuntimeError("OneDrive 令牌刷新失败：%s" % e.read().decode("utf-8", "replace")[:160])
-    od["access_token"] = j.get("access_token") or ""
-    od["access_exp"] = _now() + int(j.get("expires_in") or 3600)
+    # 回了个对象却没带令牌（代理页面 / 半截响应）：以前会把 access_token 设成空串、
+    # 照常返回来，下一次请求带着 "Bearer " 去撞 401，报错理由离现场很远。
+    # 这里当场说清楚；旧 refresh_token 一个字不动（微软不一定每次都给新的）。
+    if not j.get("access_token"):
+        raise RuntimeError("OneDrive 令牌刷新失败：那边没给访问令牌")
+    od["access_token"] = j["access_token"]
+    od["access_exp"] = _now() + (_int(j.get("expires_in")) or 3600)
     if j.get("refresh_token"):
         od["refresh_token"] = j["refresh_token"]
     return od["access_token"]
@@ -303,7 +326,7 @@ def _ms_put_large(c, path, blob):
     h = _ms_headers(c)
     h["Content-Type"] = "application/json"
     with _http("POST", sess_url, data=body, headers=h, timeout=60) as r:
-        upload = json.loads(r.read().decode("utf-8", "replace")).get("uploadUrl")
+        upload = _json_obj(r.read()).get("uploadUrl")
     if not upload:
         raise RuntimeError("OneDrive 没给上传地址")
     chunk = 6 * 1024 * 1024
@@ -356,15 +379,22 @@ def device_start(cfg):
         with _http("POST", MS_DEVICECODE, data=body,
                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                    timeout=30) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+            j = _json_obj(r.read())
     except urllib.error.HTTPError as e:
         return False, "申请设备码失败：%s" % e.read().decode("utf-8", "replace")[:200], None
+    # 没拿到设备码就当申请失败：以前会照回 ok=True + device_code=None，界面存下这条
+    # 「等待中的码」，用户输完代码点确定，后端只回一句「没在等授权」。
+    if not j.get("device_code"):
+        return False, ("申请设备码失败：%s"
+                       % (j.get("error_description") or j.get("error")
+                          or "那边没给设备码（可能被代理页面拦了）")), None
     return True, "去这个网址输入代码完成授权", {
         "user_code": j.get("user_code"),
         "verify_uri": j.get("verification_uri") or j.get("verification_uri_complete"),
         "device_code": j.get("device_code"),
-        "interval": int(j.get("interval") or 5),
-        "expires_in": int(j.get("expires_in") or 900),
+        # 认不出的间隔 / 有效期退回默认：`int("abc")` 会当场抛（见 sync._int）
+        "interval": _int(j.get("interval")) or 5,
+        "expires_in": _int(j.get("expires_in")) or 900,
     }
 
 
@@ -380,9 +410,9 @@ def device_poll(cfg, device_code):
         with _http("POST", MS_TOKEN, data=body,
                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                    timeout=30) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
+            j = _json_obj(r.read())
     except urllib.error.HTTPError as e:
-        j = json.loads(e.read().decode("utf-8", "replace") or "{}")
+        j = _json_obj(e.read())
         err = j.get("error")
         if err == "authorization_pending":
             return "pending", "还没点确认…", None
@@ -391,10 +421,17 @@ def device_poll(cfg, device_code):
         if err == "expired_token":
             return "expired", "代码过期了，重新申请", None
         return "error", j.get("error_description") or err or "授权失败", None
+    # 回了个对象却没带访问令牌：代理页面 / 半截响应。绝不能当成功 —— 界面会清掉
+    # 等待中的设备码，用户看到「授权成功」，下一次同步却还是没授权。
+    if not j.get("access_token"):
+        return "error", (j.get("error_description") or j.get("error")
+                         or "那边没给访问令牌，再试一次"), None
     od = c["onedrive"]
-    od["refresh_token"] = j.get("refresh_token") or ""
-    od["access_token"] = j.get("access_token") or ""
-    od["access_exp"] = _now() + int(j.get("expires_in") or 3600)
+    od["access_token"] = j["access_token"]
+    od["access_exp"] = _now() + (_int(j.get("expires_in")) or 3600)
+    # 微软不一定每次都回新的 refresh_token：没给就留着旧的那枚，别把它抹成空串
+    if j.get("refresh_token"):
+        od["refresh_token"] = j["refresh_token"]
     return "ok", "授权成功", c
 
 
