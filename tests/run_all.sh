@@ -180,6 +180,14 @@ run "书架清单脏账本（meta / 进度不是对象时不整份抛）" "$PY" 
 # 这一条把「脏形状当没 meta、好数据一个字不改、六条路一个都不抛」和一条「旧读法确实会抛」
 # 的对照一起钉住，纯函数 + 临时沙盒，不联网、不开浏览器，归 --fast 静态段。
 run "书目录 meta 脏形状（合并稿 / 打包 / 导出 / 目录 / 改书名 / 清残稿不抛）" "$PY" tests/check_meta_shape.py
+# 上一条管的是「meta 被写成不是对象」；这一条管「meta 是对象，可字符串值里夹着落单的
+# 半个代理码点」—— `"\ud800"` 这种转义 JSON 收得下，utf-8 却编不出来：一本书的
+# title 带上它，`GET /api/zip` 会在 `zipfile.writestr` 里抛穿 do_GET、把连接直接甩掉
+# （用户只看见「下载点了没反应」），`/api/epub`、`/api/pdf` 是 500，`content_disp`
+# 拼下载头时自己也会抛。收口放在读 meta 的唯一入口 `book_layout.read_meta()`，
+# 下载头那道 HTTP 边界另兜一层。纯函数 + 临时沙盒 + 一个进程内真服务，不联网、
+# 不开浏览器，归 --fast 静态段。
+run "书目录 meta 半个代理码点（打包 / 导出 / 下载头不甩连接）" "$PY" tests/check_meta_surrogate.py
 # 上一条管「干净的老账本折得对不对」，这一条管「脏的老账本会不会把整份书架打崩」。
 # cache/library.json 会被手工编辑、被云同步从别处落盘、旧版本也写过别的形状：顶层
 # `"assign": ["书号"]`、`"order": 5`、`"folders": 5`，或 modules 里 folders 的元素
