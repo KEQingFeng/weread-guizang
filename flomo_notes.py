@@ -436,7 +436,8 @@ def load(flomo_dir):
     不因为一个字段坏掉就整条丢。
     """
     try:
-        with open(path_in(flomo_dir), encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(path_in(flomo_dir), encoding="utf-8-sig") as f:
             d = json.load(f)
     except Exception:
         d = {}
@@ -851,7 +852,7 @@ def to_shelf(flomo_dir, memo_id, out_root, import_fn=None):
     os.makedirs(info["dir"], exist_ok=True)
     meta = {}
     try:
-        with open(mp, encoding="utf-8") as f:
+        with open(mp, encoding="utf-8-sig") as f:
             meta = json.load(f)
     except Exception:
         meta = {}
@@ -1029,7 +1030,7 @@ def read_portrait(flomo_dir):
     """读回画像；没有就现算一份并落盘（首次让 Agent 读时不该拿到空的）。"""
     jp = os.path.join(flomo_dir, PORTRAIT_DIR, PORTABLE_JSON)
     try:
-        with open(jp, encoding="utf-8") as f:
+        with open(jp, encoding="utf-8-sig") as f:
             p = json.load(f)
         if isinstance(p, dict):
             return p

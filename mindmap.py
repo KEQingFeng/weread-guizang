@@ -332,7 +332,8 @@ def load_map(book_dir) -> dict:
     坏文件不重命名不删除：这是个读接口，动用户的文件得由用户点头。
     """
     try:
-        with open(path_of(book_dir), encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(path_of(book_dir), encoding="utf-8-sig") as f:
             raw = json.load(f)
         if not isinstance(raw, dict):
             return normalize(empty())

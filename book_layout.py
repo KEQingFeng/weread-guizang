@@ -140,7 +140,8 @@ def read_meta(book_dir):
     """读一本书的 meta.json；坏了、没有都给空 dict（调用方各有一套兜底）。"""
     import json
     try:
-        with open(os.path.join(book_dir, "meta.json"), encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(os.path.join(book_dir, "meta.json"), encoding="utf-8-sig") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:

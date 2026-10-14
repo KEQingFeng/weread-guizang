@@ -62,7 +62,8 @@ def load_notes(book_dir):
     if not os.path.exists(p):
         return empty_notes()
     try:
-        with open(p, encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(p, encoding="utf-8-sig") as f:
             doc = json.load(f)
         if not isinstance(doc, dict):
             raise ValueError("不是对象")
@@ -275,7 +276,7 @@ def chapter_titles(book_dir):
     if not os.path.exists(cat):
         return out
     try:
-        with open(cat, encoding="utf-8") as f:
+        with open(cat, encoding="utf-8-sig") as f:
             titles = json.load(f)
     except Exception:
         return out
@@ -410,7 +411,7 @@ def _custom_list(cache_dir):
     if not os.path.exists(p):
         return []
     try:
-        with open(p, encoding="utf-8") as f:
+        with open(p, encoding="utf-8-sig") as f:
             data = json.load(f)
     except Exception:
         return []

@@ -464,7 +464,8 @@ def lib_scope(lib, module=None):
 
 def load_lib():
     try:
-        with open(LIB_PATH, encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(LIB_PATH, encoding="utf-8-sig") as f:
             d = json.load(f)
     except Exception:
         d = {}
@@ -558,7 +559,7 @@ CFG_DICT_KEYS = ("sync",)
 
 def load_cfg():
     try:
-        with open(CFG_PATH, encoding="utf-8") as f:
+        with open(CFG_PATH, encoding="utf-8-sig") as f:
             d = json.load(f)
     except Exception:
         d = {}
@@ -693,7 +694,7 @@ def load_readstat():
     同一口径：按形状收干净，认不出的丢掉。
     """
     try:
-        with open(READSTAT_PATH, encoding="utf-8") as f:
+        with open(READSTAT_PATH, encoding="utf-8-sig") as f:
             raw = json.load(f)
     except Exception:
         raw = {}
@@ -809,7 +810,7 @@ _ACTIVITY_LOCK = threading.RLock()
 def load_activity():
     with _ACTIVITY_LOCK:
         try:
-            with open(ACTIVITY_PATH, encoding="utf-8") as f:
+            with open(ACTIVITY_PATH, encoding="utf-8-sig") as f:
                 raw = json.load(f)
         except Exception:
             raw = {}
@@ -879,7 +880,7 @@ _PLAN_LOCK = threading.RLock()
 
 def load_plan():
     try:
-        with open(PLAN_PATH, encoding="utf-8") as f:
+        with open(PLAN_PATH, encoding="utf-8-sig") as f:
             raw = json.load(f)
     except Exception:
         raw = {}
@@ -1715,7 +1716,7 @@ def load_notes_index():
     整条丢掉。顶层不是对象 / `items` 不是表时仍当空账（那是「整份坏了」，没得救）。
     """
     try:
-        with open(NOTES_IDX, encoding="utf-8") as f:
+        with open(NOTES_IDX, encoding="utf-8-sig") as f:
             d = json.load(f)
         if isinstance(d, dict) and isinstance(d.get("items"), list):
             return {"built_at": _idx_at(d.get("built_at")),
@@ -3610,7 +3611,7 @@ def notes_counts(book_dir):
         return hit[1]
     out = {"marks": 0, "entries": 0}
     try:
-        with open(p, encoding="utf-8") as f:
+        with open(p, encoding="utf-8-sig") as f:
             doc = json.load(f)
         if isinstance(doc, dict):
             out = {"marks": len(doc.get("marks") or []),

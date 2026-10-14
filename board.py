@@ -262,7 +262,8 @@ def load_board(book_dir, board_id) -> dict | None:
     if not path or not os.path.exists(path):
         return None
     try:
-        with open(path, encoding="utf-8") as f:
+        # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
+        with open(path, encoding="utf-8-sig") as f:
             doc = json.load(f)
     except (OSError, ValueError, UnicodeDecodeError):
         return None
@@ -275,7 +276,7 @@ def _env_row(book_dir, name, path):
     """列表用的一行：只取信封字段，不返回 canvas（200 块板的画布全拖给界面毫无意义）。"""
     doc = None
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             got = json.load(f)
         doc = got if isinstance(got, dict) else None
     except (OSError, ValueError, UnicodeDecodeError):
