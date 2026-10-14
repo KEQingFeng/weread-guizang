@@ -19,6 +19,7 @@ README 里的地址护栏说的都是它），跳转闸只是把同一处判据�
 import http.server
 import os
 import pathlib
+import socket
 import sys
 import tempfile
 import threading
@@ -196,8 +197,23 @@ class _Inside(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class _Server(http.server.ThreadingHTTPServer):
+    """按主机名选对地址族。
+
+    ThreadingHTTPServer 默认写死 AF_INET：拿它去绑 `::1` 会走 IPv4 那套解析，
+    当场 `gaierror`（nodename nor servname provided）。内网落点常只剩 `::1` 可用
+    （macOS 默认不回环整个 127/8，`127.0.0.2` 绑不上），所以这一步必须按地址选族，
+    否则夹具直接搭不起来、那条「内网没被敲」的核心断言根本跑不到。
+    """
+
+    def __init__(self, addr, handler):
+        host = addr[0]
+        self.address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        super().__init__(addr, handler)
+
+
 def _serve(handler_cls, host):
-    srv = http.server.ThreadingHTTPServer((host, 0), handler_cls)
+    srv = _Server((host, 0), handler_cls)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -206,15 +222,17 @@ outside = _serve(_Outside, "127.0.0.1")
 outside_host, outside_port = outside.server_address[0], outside.server_address[1]
 
 inside_srv = None
+_why = []
 for _h in ("127.0.0.2", "::1"):
     try:
         inside_srv = _serve(_Inside, _h)
         inside_host = _h
         break
-    except OSError:
+    except OSError as e:
+        _why.append("%s: %s" % (_h, e))
         continue
 if inside_srv is None:
-    chk("找得到一台「内网」临时服务用于验证", False, "127.0.0.2 与 ::1 都绑不上")
+    chk("找得到一台「内网」临时服务用于验证", False, " / ".join(_why))
     inside_host, inside_port = "127.0.0.2", 1
 else:
     inside_port = inside_srv.server_address[1]
@@ -224,7 +242,10 @@ _real_blocked = clip_article.host_blocked
 clip_article.host_blocked = lambda h: (h or "").strip() != "127.0.0.1"
 
 PUB = "http://127.0.0.1:%d/start" % outside_port
-INSIDE = "http://%s:%d/secret" % (inside_host, inside_port)
+# IPv6 落点要加方括号，否则 `http://::1:8000/x` 会被解析成「没有主机名」——那样虽然也被
+# 拦下，但拦的是「格式坏」而不是「内网」，这条要验的是后者，所以必须拼成合法 IPv6 URL。
+_inside_literal = "[%s]" % inside_host if ":" in inside_host else inside_host
+INSIDE = "http://%s:%d/secret" % (_inside_literal, inside_port)
 
 # C1. 302 到内网：必须拒，且内网那台一次都没被敲。
 _Outside.target = INSIDE
