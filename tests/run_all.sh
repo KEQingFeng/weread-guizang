@@ -89,6 +89,12 @@ run "订阅刷新合并（空正文不抹旧正文 / 真改动仍刷新 / 状态
 # `java<TAB>script:` 在浏览器手里都是 javascript:；截断的 `<script>` 没有闭合标签，
 # 也会被漏过去。这一条把它们连同「正常链接 / data:image 一个字不改」一起钉死，纯函数、离线。
 run "订阅正文清洗（实体 / 拆字协议 / 斜杠分隔 / 落单 script / 回归）" "$PY" tests/check_feed_sanitize.py
+# feed.json 不只 feed.py 在写：用户会手改、旧版本写过别的形状、云同步也会落半截。
+# _load 原来只 setdefault 了三个键名，值坏掉就带出去 —— entries 写成列表 / 字符串时
+# `.values()` 直接抛 AttributeError（这条异常在 _load 外面，连空账都回不去，界面「订阅」
+# 整页打不开）；feeds 写成对象、seen 写成列表、源行缺 id、settings.groups 写成字符串
+# 各有各的炸法。这一条钉住「坏形状收成空账、合法数据照留、公开读接口一个都不抛」，离线。
+run "订阅账本脏形状（坏形状收空账 / 合法照留 / 读接口不抛）" "$PY" tests/check_feed_dirty.py
 run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
 # 上一条管「字节是什么编码」，这一条管「正文怎么切章」。Markdown 的 `#` 在围栏代码块里
 # 是注释不是章节，可旧切法对全篇一视同仁 —— 导入一本带代码示例的 md（`# 安装依赖`
