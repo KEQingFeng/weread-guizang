@@ -73,6 +73,11 @@ run "任务收尾（进程退了就收 / 读出错也收）" "$PY" tests/check_t
 # 三条新线（订阅 / 视频 / 平台解析）都是离线自测：夹具跑在本机临时 http.server 上，
 # 数据目录全指进各自沙盒，不联网、不碰用户真实书库。
 run "RSS 订阅（发现 / 抓取 / 去重 / 入库）" "$PY" tests/check_feed.py
+# 订阅正文的清洗是外站内容进成品的那道边界。原来那把尺子只量原始字节，浏览器却会
+# 先解一层 HTML 实体、再把 URL 里的 TAB / 换行删掉 —— `&#106;avascript:` 与
+# `java<TAB>script:` 在浏览器手里都是 javascript:；截断的 `<script>` 没有闭合标签，
+# 也会被漏过去。这一条把它们连同「正常链接 / data:image 一个字不改」一起钉死，纯函数、离线。
+run "订阅清洗（实体 / 拆字协议 / 未闭合标签 / 回归）" "$PY" tests/check_feed_sanitize.py
 run "平台解析（知乎 / 小红书 / X）" "$PY" tests/check_web_parse.py
 # 导入自己的书（Markdown / TXT / EPUB / PDF）第一关是「这份字节是什么编码」。GBK / GB18030
 # 的中文 TXT 是老用户的常见来源，而**无 BOM 的 utf-16 解码几乎不会报错**：它拿两个字节当
