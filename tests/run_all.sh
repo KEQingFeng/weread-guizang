@@ -262,6 +262,10 @@ run "跨站写操作（判定边界 / 接线 / 真机拦得住且不误伤）" "
 # 能加、点下去被引擎判成「没有可用的书籍编号」。现在 Python 这侧只留 book_ids.py 一份，
 # 界面那两处是 JS / HTML 接不过来，就按同一组数字逐处比对。纯逻辑 + 源码走查，全离线。
 run "书城短 id 一把尺子（边界 / 13–20 位 / 两层接线 / 界面同一组数字）" "$PY" tests/check_shelf_add.py
+# 查询串里的数字被手改坏（?tail=abc / ?n=abc）时，裸 int() 会穿出 do_GET 把连接掐断，
+# 前端只看见 RemoteDisconnected —— 又是「点了没反应」那一种。这一条钉住 _qint 的收口
+# 口径与四个调用点：纯函数 + 只读源码，不依赖浏览器，归静态段。
+run "查询参数脏值（不崩 / 不越界 / 四个调用点收口）" "$PY" tests/check_query_args.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
