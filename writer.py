@@ -105,10 +105,54 @@ def words(text):
             "total": han + latin + digit, "chars": len(text or "")}
 
 
-def outline(text):
-    """大纲：把 # 行按出现顺序列出来，给侧边目录与「跳到这一节」。"""
-    out = []
+# 围栏代码块：最多三格缩进 + 三个以上的反引号或波浪号（CommonMark 那两条）。
+# 写作页的工具条只插 ```，可粘贴进来的稿子什么写法都有，两种都得认。
+_FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+_FENCE_BARE = re.compile(r"[`~]{3,}\Z")
+
+
+def _fence_mark(line):
+    """这一行是围栏标记的话，给 (字符, 长度, 后面的信息串)；不是就给 None。"""
+    m = _FENCE.match(str(line or ""))
+    if not m:
+        return None
+    return m.group(2)[0], len(m.group(2)), m.group(3)
+
+
+def _prose_lines(text):
+    """把围栏代码块整段跳过，逐行给 (原始行号, 行内容)。
+
+    **为什么标题与大纲必须跳代码块**：粘一段带 `# 注释` 的代码进稿子，若还照
+    `^#+ ` 认标题，大纲里就多出并不存在的章节，稿子以代码开头时标题还会变成
+    ``` 那一串反引号。`book_export.md_to_html` 导出时早就是这么分的，两处口径
+    得对齐，否则「导出看到的结构」和「AI 读到的大纲」是两份。
+
+    行号仍按**原文**数，所以要 enumerate 原始行再筛，不能筛完再编号 ——「跳到这一节」
+    靠的就是原文行号。
+    """
+    mark = None
     for i, line in enumerate((text or "").splitlines(), start=1):
+        f = _fence_mark(line)
+        if mark is None:
+            if f:
+                mark = (f[0], f[1])
+                continue
+            yield i, line
+            continue
+        # 在代码块里：只有「同种字符、不短于开头、后面没别的东西」才算收尾。
+        # 收尾那一行自己也是代码区的一部分，不往外吐。
+        if f and f[0] == mark[0] and f[1] >= mark[1] and not f[2].strip():
+            mark = None
+        continue
+
+
+def outline(text):
+    """大纲：把 # 行按出现顺序列出来，给侧边目录与「跳到这一节」。
+
+    只数代码块外面的 `#` —— 块里的井号是注释，不是章节。
+    """
+    out = []
+    for i, line in _prose_lines(text):
         m = re.match(r"^(#{1,6})\s+(.*\S)\s*$", line)
         if m:
             out.append({"level": len(m.group(1)), "title": m.group(2).strip(), "line": i})
@@ -116,10 +160,14 @@ def outline(text):
 
 
 def title_from(text, fallback="未题名"):
-    """标题兜底：先认第一行 `#`，再认第一个非空行的前 24 字。"""
-    for line in (text or "").splitlines():
+    """标题兜底：先认第一行 `#`，再认第一个非空行的前 24 字。
+
+    代码块里的行不算候选：以一段代码开头的稿子，标题不该是 ``` 或某句注释。
+    整篇都是代码时给 `fallback` —— 那确实还没有标题，比硬凑一行代码诚实。
+    """
+    for _i, line in _prose_lines(text):
         s = line.strip()
-        if not s:
+        if not s or _FENCE_BARE.match(s):
             continue
         m = re.match(r"^#{1,6}\s+(.*\S)$", s)
         if m:
