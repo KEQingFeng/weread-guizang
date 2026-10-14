@@ -132,7 +132,32 @@ chk("每周模式：本周累计跨天相加", vw["period"] == 50, vw)
 chk("每周模式：今天只算今天那 30 页", vw["today"] == 30, vw["today"])
 chk("每周模式：本周达标", vw["hit"] is True)
 
-# ── 7 账本规范化：坏数据不许带崩 ──────────────────────────────
+# ── 7 末章章末 = 读完全书（取整口径与总页数对齐）──────────────
+# 总字数不是整千时，一般位置按四舍五入，末章章末必须与 total_pages 的向上取整一致：
+# 否则 3100 字（4 页）的书读到最后一个字也只算 round(3.1)=3 页，「已读完」永远触发不了，
+# 底栏永远写着还剩 1 页 —— 读到末章章末是界面唯一会报出的「读完」信号。
+CH_ODD = [{"chars": 1200}, {"chars": 1900}]          # 共 3100 字 → 4 页
+chk("3100 字两章 → 总页数 4（向上取整）", rp.total_pages(CH_ODD) == 4, rp.total_pages(CH_ODD))
+chk("读到末章章末 = 总页数（不是四舍五入的 3）",
+    rp.pages_at(CH_ODD, 1, 1.0) == rp.total_pages(CH_ODD), rp.pages_at(CH_ODD, 1, 1.0))
+chk("末章章内一半仍按四舍五入（1200 + 半章 950 → 2 页）",
+    rp.pages_at(CH_ODD, 1, 0.5) == 2, rp.pages_at(CH_ODD, 1, 0.5))
+chk("非末章的章末不吃这条（第 0 章 1200 字 → 1 页）",
+    rp.pages_at(CH_ODD, 0, 1.0) == 1, rp.pages_at(CH_ODD, 0, 1.0))
+chk("章序号越界仍是总页数", rp.pages_at(CH_ODD, 9, 0) == 4, rp.pages_at(CH_ODD, 9, 0))
+
+odd = rp.blank()
+rp.put_plan(odd, "O1", "零头书", rp.total_pages(CH_ODD), "daily", 1, now=NOW)
+rp.record_pos(odd, "O1", CH_ODD, 1, 1.0, now=NOW)
+po = rp.get(odd, "O1")
+chk("零头书读到末章章末即标记读完", bool(po["done_at"]), po)
+chk("零头书读完高水位顶到总页数", po["high"] == 4, po["high"])
+chk("零头书读完留下档案且页数记 4 页",
+    len(po["history"]) == 1 and po["history"][0]["pages"] == 4, po["history"])
+vo = rp.view(odd, "O1", total=rp.total_pages(CH_ODD), now=NOW, today=DAY)
+chk("零头书读完：还剩 0 页、100%", vo["left"] == 0 and vo["pct"] == 100, vo)
+
+# ── 8 账本规范化：坏数据不许带崩 ──────────────────────────────
 dirty = {"plans": {
     "A": {"pages": "abc", "goal": {"period": "monthly", "pages": 0}, "high": -5,
           "days": {"bad": 3, "2026-01-02": "4", "2026-01-03": -9},
@@ -153,7 +178,7 @@ chk("空书号被丢掉", "" not in clean["plans"])
 chk("不是 dict 的账本也能兜住", rp.load(None)["plans"] == {})
 chk("读一本没计划的书：has=false", rp.view(clean, "没有这本")["has"] is False)
 
-# ── 8 列出在进行的计划 + 清掉一本 ────────────────────────────
+# ── 9 列出在进行的计划 + 清掉一本 ────────────────────────────
 act = rp.list_active(store)
 chk("在进行的计划里没有被做完的那本", all(x["book"] != "B1" for x in act),
     [x["book"] for x in act])
