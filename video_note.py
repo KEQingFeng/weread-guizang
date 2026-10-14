@@ -1397,6 +1397,9 @@ def _transcript_doc(spoken, asr_cfg, plan_info):
 
 
 def _write_json(path, obj):
+    # 先把它从下面的解析缓存踢掉：文件换了，缓存里那份就是上一版转写，
+    # 留着的话「保存完再读还是旧字」会变成一条查不出来的鬼影。
+    _JSON_CACHE.pop(path, None)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
@@ -1410,6 +1413,32 @@ def _read_json(path):
             return json.load(f)
     except Exception:
         return None
+
+
+# transcript.json 会被转写工作台按一屏 240 段反复读（长视频一本能到几十兆），
+# 每翻一屏都 json.load 整份是加载延迟里最大的一笔。按 (大小, mtime) 缓存解析结果，
+# 文件一改（_write_json 落了新盘）上面就把这一条踢掉，所以缓存永远不会比盘上旧。
+# 只留最近几本：读完一本换下一本，旧的那份自然被挤出去，不会一直占着内存。
+_JSON_CACHE = {}
+_JSON_CACHE_MAX = 6
+
+
+def _read_json_cached(path):
+    """按 (文件大小, mtime_ns) 记住 parse 过的 JSON —— 供只读的转写读取用。"""
+    try:
+        st = os.stat(path)
+    except OSError:
+        _JSON_CACHE.pop(path, None)
+        return None
+    key = (st.st_size, st.st_mtime_ns)
+    hit = _JSON_CACHE.get(path)
+    if hit and hit[0] == key:
+        return hit[1]
+    doc = _read_json(path)
+    if len(_JSON_CACHE) >= _JSON_CACHE_MAX:
+        _JSON_CACHE.clear()
+    _JSON_CACHE[path] = (key, doc)
+    return doc
 
 
 def _write_text(path, text):
@@ -1787,7 +1816,8 @@ def _txt_segments(path):
             for line in raw.splitlines() if line.strip()]
 
 
-def load_transcript(book_dir, keyword="", start=None, end=None):
+def load_transcript(book_dir, keyword="", start=None, end=None,
+                    offset=0, limit=None, with_text=True):
     """读一本书的转写，收成同一种形状（带 source 说明是从哪份文件来的）。
 
     transcript.json 在就读它（source="json"，有时间戳）；不在就从 transcript.txt 兜底
@@ -1796,10 +1826,17 @@ def load_transcript(book_dir, keyword="", start=None, end=None):
     keyword / start / end 是筛段：关键词不分大小写，也认说话人；时间按「这段和这个区间
     有交集」算。没时间戳的段落在带时间条件时会被滤掉 —— 它没法证明自己落在区间里，
     留着比假装它算数更诚实。
+
+    offset / limit / with_text 是给转写工作台那一屏用的。长视频的转写能到几万段，
+    界面一屏只铺 240 段（VT_PAGE），可原来这里不管三七二十一先把整本拼成 text、
+    再把全量段落发出去，前端自己切片 —— 每翻一屏都付一次全量代价，长视频加载慢
+    就慢在这一笔。现在切片挪进读取层：with_text=False 时连全文都不拼。默认仍是
+    「全量 + 全文」，编辑器保存、重建那些老调用一个字都不用改。
     """
     book_dir = book_dir or ""
     meta = _read_meta(book_dir)
-    doc = _read_json(os.path.join(book_dir, TRANS_FILE))
+    # 走解析缓存：同一本反复开屏不用把几十兆 JSON 重 parse 一遍。
+    doc = _read_json_cached(os.path.join(book_dir, TRANS_FILE))
     if isinstance(doc, dict) and isinstance(doc.get("segments"), list):
         source = "json"
         segments = [_norm_seg(s) for s in doc["segments"]
@@ -1849,13 +1886,21 @@ def load_transcript(book_dir, keyword="", start=None, end=None):
                 hits.append(s)
         rows = hits
 
+    matched = len(rows)
+    # 切片放在这里做：页面只拿得到自己那一屏，长视频翻页的成本与转写条数脱钩。
+    off = max(0, int(offset or 0))
+    page = rows[off:] if limit is None else rows[off:off + max(0, int(limit))]
+
     return {"book_dir": book_dir, "path": path, "source": source, "engine": engine,
             "language": language, "duration": duration, "edited": edited,
             "timed": any(s.get("start") is not None for s in segments),
             "title": str((doc if isinstance(doc, dict) else {}).get("title")
                          or meta.get("title") or ""),
-            "total": len(segments), "matched": len(rows),
-            "segments": rows, "text": _join_text(segments)}
+            "total": len(segments), "matched": matched,
+            "offset": off, "returned": len(page),
+            "has_more": off + len(page) < matched,
+            "segments": page,
+            "text": _join_text(segments) if with_text else ""}
 
 
 def save_transcript(book_dir, segments, engine=None, language=None, duration=None,

@@ -60,7 +60,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 # 版本号只写在这一处：shell/build_macos.sh 会把它读出来盖进 Info.plist，
 # 打的 dmg 也就跟着叫同一个名字，不会再出现「界面一个数、访达另一个数」。
 # 界面「关于」那一类要显示它 —— 用户报问题时先问「你装的哪一版」，界面上能直接看到。
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # 这份 ui_server.py 的内容指纹。版本号比不出来的那部分靠它：源码直接跑的人
 # 改完代码未必动版本号，于是旧进程和新代码写着同一个数，谁也不认谁是旧的 ——
@@ -3289,6 +3289,8 @@ def _finish_stop(proc, grace=60):
         # POSIX 杀进程组；Windows 用 taskkill /T，把浏览器子进程一起收掉
         pc.hard_kill(proc)
         log("--- 收尾超时，已强制结束（之前落盘的章节都在）---")
+    else:
+        log("--- 已停止（之前落盘的内容都在）---")
 
 
 def stop_task():
@@ -3302,14 +3304,12 @@ def stop_task():
     # SIGKILL，浏览器被一起打死，几万字在手的章节直接蒸发 —— 用户看到的「中止=白抓」。
     # Windows 没有可捕获的 SIGTERM，改发 CTRL_BREAK；发不出去才会退化为硬杀。
     pc.send_stop(proc)
-    for _ in range(40):
-        if proc.poll() is not None:
-            log("--- 已停止（已抓到的章节都在盘上）---")
-            return True, "已停止"
-        time.sleep(0.25)
+    # 点击即停：这趟请求不再干等进程退出（以前最多等 10 秒才回话，界面上就是
+    # 「点了停止没反应」）。信号发出去就立刻回，收尾交给后台那条线盯着 —— 任务一翻面，
+    # 轮询那条线自然会把「已停下」报到界面上。
     threading.Thread(target=_finish_stop, args=(proc,), daemon=True).start()
-    log("--- 已请求停止，正在把在手的内容落盘 ---")
-    return True, "正在收尾（把手上这一章落盘就退），已导出的内容不会丢"
+    log("--- 已请求停止，正在收尾（手上这一段做完就退）---")
+    return True, "已请求停止，正在收尾"
 
 
 # ---------- 剪藏与本地笔记 ----------
@@ -4108,17 +4108,18 @@ def video_view(q):
             limit = _vnum(one("limit")) or VIDEO_SEG_PAGE
             limit = max(1, min(VIDEO_SEG_PAGE, limit))
             try:
-                t = video_note.load_transcript(d, keyword=one("q"), start=frm, end=to)
+                # 切片与「要不要拼全文」都交给读取层：长视频一屏只算一屏的账，
+                # 不再先把整本转写拼成 text 再扔掉（加载慢的那一笔就在这儿）。
+                t = video_note.load_transcript(d, keyword=one("q"), start=frm, end=to,
+                                               offset=offset, limit=limit,
+                                               with_text=False)
             except ValueError as e:
                 return {"ok": False, "msg": str(e)[:180]}
-            rows = t.pop("segments", [])
             # 全文（整本转写能到几十万字）和段落是同一份东西的两种写法，跟着筛出来的段落
             # 一起发会让人误解一次，还白占一大块带宽。界面上要全文的地方（重建、导出）
-            # 都在后端自己做，这里一条都不发 —— 不弹掉的话上面那句注释就只是愿望。
+            # 都在后端自己做，这里一条都不发 —— with_text=False 已经把它省在源头，
+            # 这一 pop 是给将来改回默认值兜底。
             t.pop("text", None)
-            page = rows[offset:offset + limit]
-            t.update({"segments": page, "offset": offset,
-                      "returned": len(page), "has_more": offset + len(page) < len(rows)})
             return {"ok": True, "transcript": t}
         # status 给「能不能跑」那一行用：available 说工具齐不齐，asr 说云转写的地址
         # 填没填 —— 后者只有一份配置视图（key 只回有没有、尾号），明文永不出后端。

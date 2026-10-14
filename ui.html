@@ -1033,6 +1033,33 @@
   .clipta.one{min-height:0; height:34px; line-height:1.5; resize:none; padding:0 13px}
   .clipta:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
   .clipin .stools{padding:11px 0 12px; border-bottom:1px solid var(--line)}
+  /* 顶部不再放常驻粘贴框：复制链接后点这颗手指，自己去读剪贴板并开始解析。
+     解析时外圈那条环从 0 慢慢走到满，解析完成正好转满一圈（见 clipRingStart/Done）。 */
+  .clipdrop{display:flex; flex-direction:column; align-items:center; gap:9px; padding:20px 0 6px}
+  .clipfinger{
+    position:relative; width:72px; height:72px; padding:0; border:0; border-radius:50%;
+    background:transparent; color:var(--accent); cursor:pointer;
+    display:grid; place-items:center; transition:transform .15s ease;
+  }
+  .clipfinger::before{
+    content:''; position:absolute; inset:8px; border-radius:50%;
+    background:var(--accent-soft); transition:background .15s ease;
+  }
+  .clipfinger:hover::before{background:rgba(47,127,240,.2)}
+  .clipfinger:active{transform:scale(.94)}
+  .clipfinger:disabled{color:var(--ink-3); cursor:default}
+  .clipfinger:disabled::before{background:rgba(127,140,160,.12)}
+  .cf-ico{position:relative; z-index:1; width:30px; height:30px}
+  .cf-ring{
+    position:absolute; inset:0; width:72px; height:72px; pointer-events:none;
+    transform:rotate(-90deg);   /* 12 点方向起笔：进度是「从顶上顺时针转一圈」 */
+  }
+  .cf-ring circle{fill:none; stroke-width:3; stroke-linecap:round}
+  .cf-track{stroke:transparent}
+  .clipfinger.busy .cf-track{stroke:rgba(47,127,240,.16)}
+  .cf-bar{stroke:var(--accent); opacity:0}
+  .clipfinger.busy .cf-bar,.clipfinger.done .cf-bar{opacity:1}
+  .cliphelp{font-size:12px; color:var(--ink-3); text-align:center; line-height:1.7; min-height:20px}
   .cliprow{display:flex; align-items:flex-start; gap:12px; padding:12px 15px; border-top:1px solid var(--line)}
   .cliprow:first-child{border-top:0}
   .cliprow .bd{flex:1; min-width:0}
@@ -1468,6 +1495,14 @@
   .vtbook .lt i{font-style:normal; font-size:10px; line-height:1; padding:3px 6px; border-radius:6px;
     border:1px solid var(--line-2); color:var(--ink-3); background:var(--paper)}
   .vtbook .lt i.on{color:var(--accent); border-color:var(--accent); background:var(--accent-soft)}
+  /* 「转写中」那一行：它还不是一本书，点不动，只把任务摆出来给人看 */
+  .vtbook.pending{cursor:default}
+  .vtbook.pending:hover{background:transparent}
+  .vtbook.pending .nm{color:var(--ink-2)}
+  .vtbook.pending .ct{color:var(--accent)}
+  .vtbook .ct .spin{display:inline-block; width:8px; height:8px; margin-right:2px;
+    border:1.5px solid var(--accent); border-top-color:transparent; border-radius:50%;
+    vertical-align:-1px; animation:spin .8s linear infinite}
   /* 任务区（能力灯 + 贴链接 + 进度）占上头一块，长视频转完的日志也不会把工作台顶出视野 */
   .vttask{flex:none; min-height:0; max-height:46%; overflow:auto; overscroll-behavior:contain}
   .vtwork{flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line)}
@@ -1572,12 +1607,43 @@
     min-height:0; border-right:1px solid var(--line); background:var(--paper)}
   .fmcompose{display:flex; flex-direction:column; gap:9px; padding:14px 14px 12px; height:100%; min-height:0}
   .fmcompose .ttl{font-size:12px; font-weight:600; color:var(--ink-2); letter-spacing:.02em}
-  .fmcompose textarea{
-    flex:1 1 auto; min-height:150px; resize:none; padding:11px 12px; border-radius:var(--r-sm);
+  /* 工具条 + 一块真正的富文本区：点一下就加粗 / 变标题 / 起列表，不用自己敲记号。
+     和写作页同一套 Markdown 口径（记下来时经 wrGet 转回 Markdown 落盘），
+     所以左边的笔与右边时间线、Agent 读到的都是同一种写法。 */
+  .fmbar{display:flex; align-items:center; gap:2px; flex-wrap:wrap;
+    padding:3px; border:1px solid var(--line-2); border-bottom:0;
+    border-radius:var(--r-sm) var(--r-sm) 0 0; background:var(--surface-2)}
+  .fmbar button{
+    width:27px; height:24px; padding:0; border:0; border-radius:6px; cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:transparent; color:var(--ink-2); font:inherit; font-size:12px; line-height:1;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .fmbar button:hover{background:var(--accent-soft); color:var(--accent)}
+  .fmbar button:active{transform:scale(.94)}
+  .fmbar button.on{background:var(--accent); color:#fff}
+  .fmbar .sep{width:1px; height:15px; margin:0 2px; background:var(--line-2)}
+  .fmcompose .fmed{
+    flex:1 1 auto; min-height:150px; overflow:auto; padding:11px 12px;
+    border-radius:0 0 var(--r-sm) var(--r-sm);
     border:1px solid var(--line-2); background:var(--surface); color:var(--ink);
-    font:inherit; font-size:12.5px; line-height:1.7; outline:none;
+    font-size:12.5px; line-height:1.7; outline:none;
     transition:border-color .16s ease, box-shadow .16s ease}
-  .fmcompose textarea:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .fmcompose .fmed:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
+  .fmcompose .fmed.fmbare{position:relative}
+  /* 占位语由 CSS 画，不在 DOM 里 —— 不然会被当成正文存进稿子。 */
+  .fmcompose .fmed.fmbare::before{content:attr(data-ph); position:absolute; left:12px; top:11px;
+    max-width:calc(100% - 24px); white-space:pre-line; color:var(--ink-3); pointer-events:none}
+  .fmed p{margin:0 0 .6em}
+  .fmed>*:first-child{margin-top:0}
+  .fmed h1,.fmed h2,.fmed h3{margin:.45em 0 .35em; font-size:1.15em; font-weight:650}
+  .fmed ul,.fmed ol{margin:.3em 0 .6em; padding-left:1.6em}
+  .fmed li{margin:.15em 0}
+  .fmed blockquote{margin:.4em 0; padding:.1em 0 .1em 10px;
+    border-left:3px solid var(--accent); color:var(--ink-2)}
+  .fmed code{font-size:11.5px; padding:1px 5px; border-radius:5px; background:var(--paper-inset)}
+  .fmed pre{margin:.4em 0; padding:8px 10px; border-radius:8px; overflow:auto;
+    background:var(--paper-inset)}
+  .fmed pre code{padding:0; background:none}
   .fmcompose .bar{display:flex; align-items:center; gap:8px}
   .fmcompose .bar .grow{flex:1}
   .fmcompose .bar .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
@@ -1663,7 +1729,7 @@
     .fmcols{flex-direction:column}
     .fmleft{width:auto; border-right:0; border-bottom:1px solid var(--line)}
     .fmcompose{height:auto}
-    .fmcompose textarea{flex:none; min-height:118px}
+    .fmcompose .fmed{flex:none; min-height:118px}
     .fmcard{margin:0 6px 7px}
     .fmimg img{width:88px; height:88px}
   }
@@ -2270,13 +2336,17 @@
      <svg> 装边。两者叠在 .mmsheet 上，这张「纸」的尺寸就是后端给的 width/height，
      缩放只是对它做一次 transform —— 节点、边、拖拽坐标全跟着走，不必各自换算，
      也就不会出现「放大之后线接不到框上」这种两套几何对不上的老毛病。 */
+  /* touch-action 只放行单指滚动，把浏览器自己的双指页面缩放关掉 ——
+     不关的话两指落下先被浏览器拿去放大整个网页，导图这一层收不到捏合事件。 */
   .mmwrap{flex:1; min-height:0; overflow:auto; position:relative;
-    background:var(--paper-2); scrollbar-width:thin}
+    background:var(--paper-2); scrollbar-width:thin; touch-action:pan-x pan-y}
   .mmsheet{position:relative; transform-origin:0 0}
   .mmsheet>svg.mmedges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none}
   .mmsheet>svg.mmedges path{fill:none}
   .mmsheet>svg.mmedges text{font-size:10px; fill:var(--ink-3)}
-  .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:7px 11px;
+  /* 内边距与行高必须跟 mindmap.py 的 _PAD_X/_PAD_Y/_ROW 对齐：屏幕上量到的框，
+     要跟导出的 SVG 一模一样大，不然「看着不挤」只是这一端的错觉。 */
+  .mmnode{position:absolute; box-sizing:border-box; border-radius:9px; padding:10px 14px;
     font-size:13px; line-height:17px; color:var(--ink);
     border:1px solid rgba(20,30,45,.13); box-shadow:0 1px 2px rgba(20,30,45,.07);
     cursor:grab; user-select:none; overflow:hidden; word-break:break-word;
@@ -4010,9 +4080,7 @@
       <button class="deed" id="mmUndo" type="button" title="撤销（⌘/Ctrl + Z）">撤</button>
       <button class="deed" id="mmRedo" type="button" title="重做（⌘/Ctrl + ⇧ + Z）">重</button>
       <span class="grow"></span>
-      <button class="deed" id="mmZoomOut" type="button">−</button>
-      <span id="mmZoom">100%</span>
-      <button class="deed" id="mmZoomIn" type="button">+</button>
+      <span id="mmZoom" title="双指捏合缩放；桌面端按住 ⌘/Ctrl 滚轮，或触控板双指捏合">100%</span>
       <button class="deed" id="mmZoomFit" type="button" title="缩到能看全">适应</button>
       <span id="ntMapInfo"></span>
     </div>
@@ -4108,7 +4176,7 @@
 <script>
 const $ = s => document.querySelector(s);
 
-let running = false, runningBook = '', runningKind = '', lastStarted = null, tick = null, busyLog = false;
+let running = false, runningBook = '', runningKind = '', runningAt = 0, lastStarted = null, tick = null, busyLog = false;
 // 订阅/视频这两屏的「上一次长什么样」：轮询里拿来比对，变了才重铺，不然每 2.6 秒白刷一遍
 let feedStamp = '';
 let local = {};            // 已导出的书：bookId → 统计（含 total，用来算百分比）
@@ -4549,6 +4617,31 @@ function spineHue(seed) {
   return h;
 }
 
+/** 远端封面图（微信读书 / QQ 图床那一条 URL）统一从这里造。
+ *
+ *  两个坑都在这一处收口，别每建一张卡再抄一遍：
+ *  · 图床看 Referer：页面是从 127.0.0.1 打开的外站，微信 / QQ 图床对陌生来路
+ *    会直接 403 —— 表现就是「有些书的封面加载不出来」（正文图那条路 rdFixMedia
+ *    早就把来路去掉了，封面也该去）；
+ *  · 协议相对地址（//cdn…）：浏览器会拿本地服务当参照，结果必然是 404，补成 https。
+ */
+function extCoverImg(src) {
+  const im = document.createElement('img');
+  im.alt = '';
+  im.loading = 'lazy';
+  im.decoding = 'async';           // 解码放到别的线程，滚动时不被大图卡住主线程
+  im.referrerPolicy = 'no-referrer';
+  im.src = coverSrc(src);
+  return im;
+}
+
+/** 封面地址归一：协议相对（//cdn…）补成 https —— 不补的话浏览器会拿本地服务
+ *  当参照，必然 404。拼 HTML 字符串那条路（详情页大图）也要用。 */
+function coverSrc(src) {
+  const u = String(src || '').trim();
+  return u.startsWith('//') ? 'https:' + u : u;
+}
+
 /** 「最近读过」说成人话，别丢一串日期给用户自己算 */
 function daysAgo(ts) {
   if (!ts) return '';
@@ -4659,11 +4752,9 @@ function shelfCard(b, bits) {
     return d;
   };
   if (coverUrl) {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';   // 解码放到别的线程，滚动时不被大图卡住主线程
-    img.src = coverUrl;
+    // 走 extCoverImg：远端封面去掉 Referer（图床拒外站来路就是「有些封面加载不出来」
+    // 的那一半原因），协议相对地址也顺手补成 https。
+    const img = extCoverImg(coverUrl);
     // 官方那条 URL 打不开就悄悄换成 /api/cover 再试一次（有些图床拒外链），
     // 两条都落空才给生成式封面。
     let alt = t.coverAlt || '';
@@ -4841,7 +4932,7 @@ let sideFootStamp = '';
    没重启。2026-10-07 用户报「左侧没有安娜的档案」就是它：导航那几格是后端 NAV_ITEMS
    给的，进程还是上一版，界面再怎么新也铺不出这一格，而两个版本号看着完全一样。
    后端因此多报一个 code_disk（磁盘上此刻的指纹），和它自己的 code 一比就露馅。 */
-const GUIZANG_PAGE = "1.1.0";
+const GUIZANG_PAGE = "1.2.0";
 const GZ = {back: "", code: "", disk: "", drift: false, stale: false,
             hid: false, swapping: false, why: "", prof: ""};
 
@@ -4998,6 +5089,9 @@ async function drawState(force) {
   // 正好关了页面），卡片就永远显示「正在取」且再也点不动 —— 用户说的「终止后不能再取」。
   runningBook = running ? String(t.book || '') : '';
   runningKind = running ? String(t.kind || '') : '';
+  // 这一趟任务的开工时刻：日志是环形缓冲，上一支的 [done 100%] 还挂在尾部，
+  // 不按时间截一刀，新任务会被读成「已经转完」（进度条要么不走、要么一上来就 100%）。
+  runningAt = running ? Number(t.started_at || 0) : 0;
   loggedIn = !!(s.login && s.login.logged_in);
   keySet = !!(s.weread && s.weread.key_set);
   flomoSet = !!(s.flomo && s.flomo.url_set);
@@ -6300,9 +6394,11 @@ const WR_ROOT_BLOCK = {P: 1, DIV: 1, SECTION: 1, UL: 1, OL: 1, BLOCKQUOTE: 1,
     正文的根上偶尔挂着「没有家的字」：浏览器直接往 contenteditable 里塞的那一串，
     没包成段落。它们不在 children（只收元素）里，按元素走一遍就等于没看见 ——
     屏幕上有字、稿子里没有，那是最恶劣的一种丢稿。所以零散的行内内容先攒成一段再算。 */
-function wrGet() {
-  const ed = wrEd();
-  if (!ed) return WR.text || "";
+function wrGet(root) {
+  // root 可选：便签那一格的富文本编辑器不是写作页那块 #wrTextIn，但用的是同一把尺
+  // （块判据、行内标记、转义全走 wrBlock），所以把「哪一块」当参数传进来，别复制一份。
+  const ed = root || wrEd();
+  if (!ed) return root ? "" : (WR.text || "");
   const parts = [];
   let loose = null;
   const emit = one => { if (one.length) parts.push(one.join("\n")); };
@@ -11039,8 +11135,11 @@ async function importFiles(files) {
 let clipItems = [];      // [{url, state, title, sub, preview, book}]，state: pending/doing/ready/done/bad
 let clipBusy = false;    // 串行抓取时锁住按钮：同一链接点两遍会白跑一趟
 let clipGridSig = '';    // 「最近剪的」网格指纹：书目不变就不重画，切回来不闪
+let clipText = '';       // 从剪贴板读到的原始链接文本（界面顶部不再有常驻粘贴框，存这里）
+let clipRingT = null;    // 环形进度收尾（转满一圈后停一会儿再复位）的定时器
 const CLIP_MAX = 20;     // 与后端 MAX_CLIP_URLS 对齐，超出的先不排队（一次抓太多容易被限流）
-const CLIP = {ta: null, list: null, shelf: null, cnt: null, all: null, parse: null};
+const CLIP = {list: null, shelf: null, cnt: null, all: null, pick: null, hint: null};
+const CLIP_RING_C = 2 * Math.PI * 33;   // 与 SVG 里 r=33 对齐：解析完成正好转满一圈
 const CLIP_ST = {pending: '待抓', doing: '抓取中', ready: '已解析', done: '已入库', bad: '没抓到'};
 
 /** 粘贴框里常有的脏东西：前后的引号、书名号、序号点。两端剥干净再判断。 */
@@ -11067,10 +11166,12 @@ function clipHost(url) {
   try { return decodeURIComponent(seg[2] || ''); } catch (e) { return seg[2] || ''; }
 }
 
-/** 粘贴框 → 待办列表。已经抓过的链接保留它的状态和结果，
- *  新贴进来的排在后面；文本删掉就等于这条不要了（不必单独点「移除」）。 */
-function clipSync() {
-  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+/** 链接文本 → 待办列表。已经抓过的链接保留它的状态和结果，
+ *  新来的排在后面；文本删掉就等于这条不要了（不必单独点「移除」）。
+ *  传了 text 就换一份底稿（剪贴板那一下），不传就按现有底稿重算。 */
+function clipSync(text) {
+  if (text !== undefined) clipText = String(text || '');
+  const links = clipLinks(clipText);
   const prev = new Map(clipItems.map(x => [x.url, x]));
   clipItems = links.slice(0, CLIP_MAX)
     .map(u => prev.get(u) || {url: u, state: 'pending'});
@@ -11133,13 +11234,18 @@ async function clipStep(i, mode, forced) {
   return res;
 }
 
-/** 批量：从头到尾串行，一条落定再动下一条，表头写着「第 3 / 7 条」。 */
-async function clipRunAll(mode) {
-  if (clipBusy) return;
+/** 批量：从头到尾串行，一条落定再动下一条，表头写着「第 3 / 7 条」。
+ *  quiet 是给「点手指自动解析」用的：那边收尾要弹一个「解析已完成」的框，
+ *  不必再让顶部的小纸条说一遍同样的话。返回这一趟的成效，交给调用方去说话。 */
+async function clipRunAll(mode, quiet) {
+  if (clipBusy) return null;
   const todo = clipItems.map((x, i) => ({x, i}))
     .filter(o => (mode === 'save' ? o.x.state !== 'done'
                                   : o.x.state !== 'ready' && o.x.state !== 'done'));
-  if (!todo.length) { whisper(mode === 'save' ? '都入库了，没有要处理的' : '都解析过了'); return; }
+  if (!todo.length) {
+    if (!quiet) whisper(mode === 'save' ? '都入库了，没有要处理的' : '都解析过了');
+    return {okc: 0, failc: 0, n: 0};
+  }
   clipBusy = true;
   renderClipRows();                       // 先把按钮锁住，别让批量途中再点出一条并发的
   const was = clipItems.map(x => x.state);
@@ -11154,9 +11260,113 @@ async function clipRunAll(mode) {
   const failc = clipItems.filter((x, i) => x.state === 'bad' && was[i] !== 'bad').length;
   renderClipRows();
   if (mode === 'save') await drawState(true);   // 新书落架：徽章、最近剪的、本地书库一起接手
-  whisper(mode === 'preview'
-    ? (failc ? `解析好 ${okc} 篇，${failc} 篇没抓出来` : `解析好 ${okc} 篇`)
-    : (failc ? `入库 ${okc} 篇，${failc} 篇没成` : `入库 ${okc} 篇`));
+  if (!quiet) {
+    whisper(mode === 'preview'
+      ? (failc ? `解析好 ${okc} 篇，${failc} 篇没抓出来` : `解析好 ${okc} 篇`)
+      : (failc ? `入库 ${okc} 篇，${failc} 篇没成` : `入库 ${okc} 篇`));
+  }
+  return {okc, failc, n: todo.length};
+}
+
+/* 顶部那颗手指：复制链接后点一下，自己去读剪贴板并开始解析。
+   解析那几秒外圈有环形进度，走到头正好是解析收尾（clipRingDone 把最后一段补满）。 */
+async function clipPick() {
+  if (clipBusy) return;
+  let text = '';
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard');
+    text = await navigator.clipboard.readText();
+  } catch (e) {
+    clipPasteFallback();
+    return;
+  }
+  const links = clipLinks(text);
+  if (!links.length) {
+    whisper('剪贴板里没找到链接：先把文章链接复制上，再点这颗手指');
+    if (CLIP.hint) CLIP.hint.textContent = '剪贴板里没找到链接';
+    return;
+  }
+  await clipAutoParse(links);
+}
+
+/** 浏览器不放行读剪贴板时的退路：弹一栏让人手动粘。
+ *  这是弹层，不是屏顶那个常驻输入框 —— 常驻的位置只留给手指按钮。 */
+function clipPasteFallback() {
+  sheet({
+    title: '读不到剪贴板',
+    text: '浏览器没放行读剪贴板。把链接粘到下面这一栏，一行一个，点「解析正文」就开始。',
+    body: '',
+    editable: true,
+    one: true,
+    ph: '粘贴文章链接，一行一个',
+    actions: [{
+      label: '解析正文', lead: true,
+      run: () => {
+        const links = clipLinks(sBody.value);
+        if (!links.length) { whisper('这一栏里没找到链接'); return; }
+        clipAutoParse(links);
+      },
+    }],
+  });
+}
+
+/** 拿到链接之后的同一条路：填进列表 → 起环形进度 → 串行解析 → 弹框收尾。
+ *  「解析已完成」这个框是需求点名要的：文章这时已经铺在下方列表里等着入库。 */
+async function clipAutoParse(links) {
+  clipSync(links.join('\n'));
+  renderClipRows();
+  if (CLIP.hint) CLIP.hint.textContent = `认出 ${clipItems.length} 条，正在解析正文…`;
+  clipRingStart();
+  const r = await clipRunAll('preview', true);
+  clipRingDone();
+  const good = clipItems.filter(x => x.state === 'ready' || x.state === 'done').length;
+  const bad = clipItems.filter(x => x.state === 'bad').length;
+  if (CLIP.hint) {
+    CLIP.hint.textContent = good
+      ? `解析好 ${good} 篇，在下面等着入库`
+      : '这次没抓出正文，点那一行的「解析」可以再试';
+  }
+  sheet({
+    title: '解析已完成',
+    text: !r || !r.n
+      ? '这些链接之前已经解析过了，文章就在下方列表里。'
+      : good
+        ? `抓出 ${good} 篇正文${bad ? `，另有 ${bad} 篇没抓出来` : ''}。文章已在下方列表里，确认后点「全部入库」。`
+        : '这一趟没抓出正文：对方可能放了验证页。换一条链接再试，或稍后再来。',
+    actions: [{label: '知道了', lead: true}],
+  });
+}
+
+/** 环形进度起步：先把弧归零，再用一段长过渡慢慢挪到 ~92%。
+ *  剩下那一点留给 clipRingDone 在解析真收尾时补满 —— 完成正好转满一圈。 */
+function clipRingStart() {
+  const bar = document.getElementById('cRing');
+  if (!bar) return;
+  clearTimeout(clipRingT);
+  if (CLIP.pick) { CLIP.pick.classList.remove('done'); CLIP.pick.classList.add('busy'); }
+  bar.style.transition = 'none';
+  bar.style.strokeDasharray = CLIP_RING_C;
+  bar.style.strokeDashoffset = CLIP_RING_C;   // 0%：整条弧收在起点
+  void bar.getBoundingClientRect();           // 强制落一下，不然过渡会从上一趟的终点接着跑
+  bar.style.transition = 'stroke-dashoffset 14s cubic-bezier(.16,.68,.35,1)';
+  bar.style.strokeDashoffset = CLIP_RING_C * 0.08;   // 慢慢走到 92%
+}
+
+function clipRingDone() {
+  const bar = document.getElementById('cRing');
+  if (!bar) return;
+  bar.style.transition = 'stroke-dashoffset .35s ease-out';
+  bar.style.strokeDashoffset = 0;             // 补满：正好一圈
+  clearTimeout(clipRingT);
+  clipRingT = setTimeout(() => {
+    bar.style.transition = 'none';
+    bar.style.strokeDashoffset = CLIP_RING_C;
+    if (CLIP.pick) {
+      CLIP.pick.classList.remove('busy');
+      CLIP.pick.classList.add('done');
+      setTimeout(() => CLIP.pick.classList.remove('done'), 800);
+    }
+  }, 900);
 }
 
 /** 一行：左边说清「这是哪篇」，中间一枚状态，右边三个动作。
@@ -11214,10 +11424,8 @@ function clipRemove(i) {
   const it = clipItems[i];
   if (!it) return;
   clipItems.splice(i, 1);
-  if (CLIP.ta) {
-    const kept = clipItems.map(x => x.url).join('\n');
-    CLIP.ta.value = kept;
-  }
+  // 底稿跟着列表走：移除一条就等于那一条链接也不要了，下次「全部入库」不会又冒出来
+  clipText = clipItems.map(x => x.url).join('\n');
   renderClipRows();
 }
 
@@ -11247,13 +11455,13 @@ function renderClipRows() {
   } else {
     CLIP.list.replaceChildren(...clipItems.map((x, i) => clipRowEl(x, i)));
   }
-  // 「解析 / 入库」看的是粘贴框里有没有链接，不是列表：列表要按了才铺出来，
+  // 「全部入库」看的是手上有没有链接，不是列表：列表要解析完才铺出来，
   // 用它来决定能不能点就成了「先点才亮、亮了才能点」。
-  const links = clipLinks(CLIP.ta ? CLIP.ta.value : '');
+  const links = clipLinks(clipText);
   const left = clipItems.filter(x => x.state !== 'done').length;
   const busy = clipItems.filter(x => x.state === 'doing').length;
   CLIP.cnt.textContent = !links.length
-    ? '还没贴链接'
+    ? '还没读到链接'
     : !clipItems.length
       ? `认出 ${Math.min(links.length, CLIP_MAX)} 条链接`
         + (links.length > CLIP_MAX ? `（一次最多 ${CLIP_MAX} 条，其余的先留着）` : '')
@@ -11261,7 +11469,7 @@ function renderClipRows() {
              : `${clipItems.length} 条 · 待处理 ${left}`;
   const lock = clipBusy;
   if (CLIP.all) CLIP.all.disabled = lock || !links.length;
-  if (CLIP.parse) CLIP.parse.disabled = lock || !links.length;
+  if (CLIP.pick) CLIP.pick.disabled = lock;
 }
 
 /** 剪藏那一格的文章：卡片与本地书架同款（阅读 / 原文 / 分类 / 标签 / 定位 / 删除）。
@@ -11313,12 +11521,12 @@ function renderClipShelf() {
 }
 
 function wireClip(p) {
-  CLIP.ta = p.querySelector('#cTa');
   CLIP.list = p.querySelector('#cList');
   CLIP.shelf = p.querySelector('#cShelf');
   CLIP.cnt = p.querySelector('#cCnt');
   CLIP.all = p.querySelector('#cAll');
-  CLIP.parse = p.querySelector('#cParse');
+  CLIP.pick = p.querySelector('#cPick');
+  CLIP.hint = p.querySelector('#cHint');
 
   const open = p.querySelector('#cOpen');
   // 剪藏的文章住在自己那一格：打开的就是这一格的文件夹，不是整个书库
@@ -11334,27 +11542,16 @@ function wireClip(p) {
       t = setTimeout(() => { clipGridSig = ''; renderClipShelf(); }, 160);
     });
   }
-  CLIP.parse.onclick = () => { clipSync(); renderClipRows(); clipRunAll('preview'); };
+  // 手指按钮：读剪贴板 → 自动解析。这是这一屏唯一的入口。
+  CLIP.pick.onclick = clipPick;
   CLIP.all.onclick = () => { clipSync(); renderClipRows(); clipRunAll('save'); };
   p.querySelector('#cClear').onclick = () => {
     if (clipBusy) return;
     clipItems = [];
-    CLIP.ta.value = '';
+    clipText = '';
+    if (CLIP.hint) CLIP.hint.textContent = '复制文章链接，点手指自动解析正文';
     renderClipRows();
   };
-  // 贴完直接 Cmd/Ctrl+Enter 开抓，不必再把鼠标移到按钮上
-  CLIP.ta.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (!clipBusy) { clipSync(); renderClipRows(); clipRunAll('preview'); }
-    }
-  });
-  let timer = null;
-  CLIP.ta.addEventListener('input', () => {
-    clearTimeout(timer);
-    // 只数不抓：贴的过程里就把「认出几条」和按钮亮灭跟上，按下去才真的动网络
-    timer = setTimeout(renderClipRows, 220);
-  });
 }
 
 function renderClipView() {
@@ -11362,12 +11559,26 @@ function renderClipView() {
     `<button class="deed" id="cOpen" style="height:30px">打开这一格的文件夹</button>`, 'clip'));
   if (fresh) {
     body.innerHTML = `<div class="clipin">
-        <textarea class="clipta" id="cTa" spellcheck="false"
-          placeholder="粘贴文章链接，一行一个。微信公众号认得最准；知乎、小红书、X（推特）有专门解析 —— X 的推文能直接取到，知乎和小红书要对方先放行（没登录时常常只回验证页，那就拿不到）。&#10;例：https://mp.weixin.qq.com/s/…"></textarea>
+        <div class="clipdrop">
+          <button class="clipfinger" id="cPick" type="button"
+            title="复制文章链接后点一下：自动读取剪贴板并解析正文"
+            aria-label="读取剪贴板并解析正文">
+            <svg class="cf-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9.6 11.2V4.9a1.7 1.7 0 0 1 3.4 0v6.3"/>
+              <path d="M13 11V9.7a1.55 1.55 0 0 1 3.1 0V11"/>
+              <path d="M16.1 11.3v-.6a1.55 1.55 0 0 1 3.1 0v4.2a6.1 6.1 0 0 1-6.1 6.1h-1.2a5.2 5.2 0 0 1-3.7-1.5l-3.1-3.1a1.6 1.6 0 0 1 2.3-2.3l1.6 1.6"/>
+            </svg>
+            <svg class="cf-ring" viewBox="0 0 72 72" aria-hidden="true">
+              <circle class="cf-track" cx="36" cy="36" r="33"/>
+              <circle class="cf-bar" id="cRing" cx="36" cy="36" r="33"/>
+            </svg>
+          </button>
+          <div class="cliphelp" id="cHint">复制文章链接，点手指自动解析正文</div>
+        </div>
         <div class="stools">
           <span class="cnt" id="cCnt"></span>
           <span class="grow"></span>
-          <button class="deed" id="cParse" style="height:30px">解析正文</button>
           <button class="deed sure" id="cAll" style="height:30px">全部入库</button>
           <button class="deed" id="cClear" style="height:30px">清空</button>
         </div>
@@ -12718,7 +12929,8 @@ function renderFeedView() {
 let fmMemos = [], fmTotal = 0, fmTags = [], fmStats = {}, fmErr = '';
 let fmBusy = false;
 const fmFilter = {tag: '', q: ''};
-const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null, new: null, add: null, newCnt: null};
+const FM = {scr: null, cnt: null, tags: null, foot: null, q: null, file: null,
+            bar: null, new: null, add: null, newCnt: null};
 /* 一次铺这么多条：几百条一把铺完要给每张卡算一次 Markdown，首屏就慢下来了。时间线的用法
    是「从上往下扫」，扫到底再要下一批完全够用。 */
 const FM_PAGE = 120;
@@ -12817,6 +13029,7 @@ function fmCard(m) {
   if (m.book) acts.append(feBtn('去书库', () => openReader(m.book, fmName(m), 'flomo')));
   else acts.append(feBtn('收进书架', () => fmShelf(m)));
   acts.append(feBtn('标签', () => fmEditTags(m)));
+  acts.append(feBtn('复制', () => fmCopyMd(m)));
   acts.append(feBtn('忘掉', () => fmForget(m)));
   hd.append(acts);
 
@@ -12979,10 +13192,148 @@ function flomoReload() {
   flomoLoad(0);
 }
 
+/* ── 左栏那支笔：富文本编辑（1.2.0）──────────────────────────
+   用户要的是「富文本格式的笔记编辑」与「复制粘贴导出时保留 Markdown」。这一格因此
+   从 textarea 换成一整块 contenteditable，工具条点一下就落格式；存盘前经 wrGet
+   转回 Markdown（和写作页、导入的 flomo 笔记同一种写法），复制时把 text/plain
+   换成 Markdown，粘回去再把 Markdown 渲染成富文本 —— 里外都是一个口径，不出现
+   「界面上是粗体、导出去一堆 <b>」。 */
+
+/** 这块编辑器现在的 Markdown（存盘 / 复制都读它）。 */
+function fmDraftMd() {
+  return FM.new ? (wrGet(FM.new) || '').trim() : '';
+}
+
+/** 空块给占位语：CSS 画的那一句，不进 DOM，也就不会被当成正文存下。 */
+function fmPh() {
+  const box = FM.new;
+  if (!box) return;
+  const bare = !(box.textContent || '').replace(/\s/g, '')
+    && !box.querySelector('img,table,hr,pre,ul,ol,blockquote');
+  box.classList.toggle('fmbare', bare);
+}
+
+/** 工具条那几个「现在是不是这一种」的灯。取不到就都灭着，不硬猜。 */
+function fmBarState() {
+  const bar = FM.bar;
+  if (!bar) return;
+  const on = {};
+  try { on.bold = document.queryCommandState('bold'); }
+  catch (e) { on.bold = false; }
+  try { on.italic = document.queryCommandState('italic'); }
+  catch (e) { on.italic = false; }
+  bar.querySelectorAll('button[data-do]').forEach(b => {
+    const k = b.dataset.do;
+    if (k === 'bold' || k === 'italic') b.classList.toggle('on', !!on[k]);
+  });
+}
+
+/** 编辑之后的三件事：占位语、字数、工具条状态。顺序别换，字数读的是改完的 DOM。 */
+function fmAfterEdit() {
+  const box = FM.new;
+  if (!box) return;
+  box.normalize();
+  fmPh();
+  fmNewCount();
+  fmBarState();
+}
+
+/** 把一块 Markdown 涂进编辑器（换一篇 / 清空后都用它）。 */
+function fmSetHtml(md) {
+  if (!FM.new) return;
+  FM.new.innerHTML = wrParse(md || '') || '<p><br></p>';
+  FM.new.normalize();
+  fmAfterEdit();
+}
+
+/** 行内代码：execCommand 没有这一条命令，自己把选中的字包进 <code>。 */
+function fmWrapCode() {
+  const box = FM.new;
+  const sel = window.getSelection();
+  if (!box) return;
+  if (!sel || !sel.rangeCount) { box.focus(); return; }
+  const r = sel.getRangeAt(0);
+  if (r.collapsed || !box.contains(r.commonAncestorContainer)) {
+    whisper('先选中要当成代码的那几个字，再点这个');
+    return;
+  }
+  const code = document.createElement('code');
+  try { code.appendChild(r.extractContents()); } catch (e) { return; }
+  r.insertNode(code);
+  const back = document.createRange();
+  back.selectNodeContents(code);
+  sel.removeAllRanges();
+  sel.addRange(back);
+  fmAfterEdit();
+}
+
+/** 一条格式化命令：先确保焦点在正文里（不在的话 execCommand 会打到别的框上）。 */
+function fmExec(what) {
+  const box = FM.new;
+  if (!box) return;
+  box.focus();
+  if (what === 'code') { fmWrapCode(); return; }
+  const cmd = {bold: ['bold'], italic: ['italic'], h2: ['formatBlock', 'h2'],
+    ul: ['insertUnorderedList'], ol: ['insertOrderedList'],
+    quote: ['formatBlock', 'blockquote']}[what];
+  if (!cmd) return;
+  let ok = false;
+  try { ok = document.execCommand(cmd[0], false, cmd[1] === undefined ? null : cmd[1]); }
+  catch (e) { ok = false; }
+  if (!ok) whisper('这个格式在这里用不了');
+  fmAfterEdit();
+}
+
+/** 选中的那一段：Markdown 与 HTML 各来一份（复制时两样都放上剪贴板）。 */
+function fmSelection() {
+  const box = FM.new;
+  const sel = window.getSelection();
+  if (!box || !sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  if (!box.contains(r.commonAncestorContainer)) return null;
+  const tmp = document.createElement('div');
+  tmp.appendChild(r.cloneContents());
+  const md = (wrGet(tmp) || '').trim();
+  return md ? {md, html: tmp.innerHTML} : null;
+}
+
+/** 复制：text/plain 换成 Markdown —— 粘到别的编辑器 / 导出流水线里也是记号，不是一坨标签。 */
+function fmCopyHandler(e) {
+  const sel = fmSelection();
+  if (!sel || !e.clipboardData) return;
+  e.clipboardData.setData('text/plain', sel.md);
+  e.clipboardData.setData('text/html', sel.html);
+  e.preventDefault();
+}
+
+/** 粘贴：从别的编辑器带过来的 Markdown 先渲染成富文本，认不出记号的就当纯文本落进来。 */
+function fmPasteHandler(e) {
+  const dt = e.clipboardData;
+  if (!dt || !FM.new) return;
+  const text = dt.getData('text/plain') || '';
+  if (!text) return;
+  e.preventDefault();
+  const rich = /^ {0,3}(#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|\|)/m.test(text)
+    || /\*\*[^*]+\*\*|`[^`]+`/.test(text);
+  try {
+    if (rich) document.execCommand('insertHTML', false, wrParse(text));
+    else document.execCommand('insertText', false, text);
+  } catch (err) { return; }
+  fmAfterEdit();
+}
+
+/** 卡片上那颗「复制」：把这一条的 Markdown 原样放进剪贴板，粘去别处仍是 Markdown。 */
+async function fmCopyMd(m) {
+  const md = String((m && m.md) || '').trim();
+  if (!md) { whisper('这条没有可复制的正文'); return; }
+  try { await navigator.clipboard.writeText(md); whisper('Markdown 已复制'); }
+  catch (e) { whisper('这台机器不让页面写剪贴板'); }
+}
+
 /** 左栏那支笔的字数：跟卡头同一个口径（去空白与记号），写的时候心里有个数。 */
 function fmNewCount() {
   if (!FM.newCnt) return;
-  const s = FM.new ? (FM.new.value || '') : '';
+  const s = FM.new ? (FM.new.textContent || '') : '';
   FM.newCnt.textContent = s.trim() ? (s.replace(/\s+/g, '').length + ' 字') : '';
 }
 
@@ -12992,15 +13343,14 @@ function fmNewCount() {
 async function fmAdd() {
   const box = FM.new;
   if (!box) return;
-  const md = (box.value || '').trim();
+  const md = fmDraftMd();
   if (!md) { whisper('还没写内容'); box.focus(); return; }
   const btn = FM.add;
   if (btn) { btn.disabled = true; btn.classList.add('busy'); }
   const r = await flomoPost({act: 'add', md});
   if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
   if (!r || !r.ok) { whisper((r && r.msg) || '这条没记上'); return; }
-  box.value = '';
-  fmNewCount();
+  fmSetHtml('');
   whisper(r.dupe ? '这条刚记过，没重复存' : `记下了 · 本机 ${r.total || 0} 条`);
   drawState(true).then(() => flomoReload());
 }
@@ -13134,6 +13484,7 @@ function wireFlomo(p) {
   FM.cnt = p.querySelector('#fmCnt');
   FM.q = p.querySelector('#fmQ');
   FM.file = p.querySelector('#fmFile');
+  FM.bar = p.querySelector('#fmBar');
   FM.new = p.querySelector('#fmNew');
   FM.add = p.querySelector('#fmAdd');
   FM.newCnt = p.querySelector('#fmNewCnt');
@@ -13141,11 +13492,26 @@ function wireFlomo(p) {
   // 左栏那支笔：点「记下来」或 Ctrl / ⌘ + Enter 都记一条；打字时只更字数，不打后端。
   if (FM.add) FM.add.onclick = () => fmAdd();
   if (FM.new) {
-    FM.new.addEventListener('input', fmNewCount);
+    FM.new.addEventListener('input', fmAfterEdit);
+    FM.new.addEventListener('keyup', fmBarState);
+    FM.new.addEventListener('mouseup', fmBarState);
+    FM.new.addEventListener('copy', fmCopyHandler);
+    FM.new.addEventListener('paste', fmPasteHandler);
     FM.new.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fmAdd(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fmAdd(); return; }
+      if (e.key === 'Tab') e.preventDefault();   // 这一格不接 Tab 缩进，别把焦点弹去按钮上
     });
   }
+  // 工具条按钮点下去不许把正文的选区抢走（抢走了「选中几个字点代码」就没了对象）。
+  if (FM.bar) {
+    FM.bar.addEventListener('mousedown', e => e.preventDefault());
+    FM.bar.addEventListener('click', e => {
+      const b = e.target.closest('button[data-do]');
+      if (b) fmExec(b.dataset.do);
+    });
+  }
+  if (FM.new && !FM.new.innerHTML) FM.new.innerHTML = '<p><br></p>';
+  fmAfterEdit();
   fmNewCount();
 
   const imp = p.querySelector('#fmImport');
@@ -13179,8 +13545,18 @@ function renderFlomoView() {
           <aside class="fmleft">
             <div class="fmcompose">
               <div class="ttl">记一条灵感</div>
-              <textarea id="fmNew" spellcheck="false"
-                placeholder="想到什么就写下来…&#10;支持 Markdown 与 #标签，Ctrl / ⌘ + Enter 记下"></textarea>
+              <div class="fmbar" id="fmBar">
+                <button type="button" data-do="bold" title="加粗"><b>B</b></button>
+                <button type="button" data-do="italic" title="斜体"><i>I</i></button>
+                <span class="sep"></span>
+                <button type="button" data-do="h2" title="小标题">H</button>
+                <button type="button" data-do="ul" title="无序列表">•</button>
+                <button type="button" data-do="ol" title="有序列表">1.</button>
+                <button type="button" data-do="quote" title="引用">引</button>
+                <button type="button" data-do="code" title="行内代码">&lt;/&gt;</button>
+              </div>
+              <div class="fmed" id="fmNew" contenteditable="true" spellcheck="false"
+                data-ph="想到什么就写下来…&#10;支持 Markdown 与 #标签，Ctrl / ⌘ + Enter 记下"></div>
               <div class="bar">
                 <span class="cnt" id="fmNewCnt"></span>
                 <span class="grow"></span>
@@ -13216,6 +13592,7 @@ function renderFlomoView() {
    这条线是分钟级长任务：进度从「进展」日志里读那一行 [阶段 45%] 说明，收尾用##GUIZANG##那行
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
+let vidStopping = false;   // 「停止」已经点下、收尾还没走完：按钮立刻改成「正在停」
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
 let annaDomDirty = false;   // 安娜的档案域名输入被改过、还没保存（同上，别被轮询盖回）
 // 安娜的档案那一栏的状态账本（窗口开没开、接住几份、进书架几本）。
@@ -13251,6 +13628,23 @@ function vidHrs(sec) {
   const m = Math.floor(s / 60), r = s % 60;
   if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`;
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+}
+
+/* 正在转的那一支记在本机：刷新后左栏要能把它摆回来、标成「转写中」，而不是整条消失。
+   真源仍是后端那句 running —— 任务一停，这一行立刻收掉，localStorage 只补标题。 */
+const VID_PENDING_KEY = 'gz_video_pending';
+function vidPendingSet(title) {
+  try {
+    localStorage.setItem(VID_PENDING_KEY,
+      JSON.stringify({title: String(title || '').slice(0, 120), at: Date.now()}));
+  } catch (e) {}
+}
+function vidPendingGet() {
+  try { return JSON.parse(localStorage.getItem(VID_PENDING_KEY) || 'null') || null; }
+  catch (e) { return null; }
+}
+function vidPendingClear() {
+  try { localStorage.removeItem(VID_PENDING_KEY); } catch (e) {}
 }
 
 /** 「能不能跑」那一行：一项一个小灯。缺什么、要不要点「补齐组件」，进来一眼就知道。 */
@@ -13386,14 +13780,26 @@ async function vidStart() {
     return;
   }
   vidShowProg(5, '正在起任务');
+  vidPendingSet((vidPlan && vidPlan.title) || url);
+  vidProgSig = '';        // 上一支的进度指纹作废，新任务从「正在起任务」重新走
   whisper('已经开始，转完自动进书架');
   vidTools();
   drawState(true);
 }
 
 async function vidStop() {
+  if (vidStopping) return;
+  // 点击即停：先当场把按钮锁住、回一句「正在停」，不让界面干等后端那趟停任务请求
+  // （它以前要等进程退出或 10 秒超时才回话）。收尾完成后由轮询那条线翻面、走进 vidFinish。
+  vidStopping = true;
+  vidTools();
+  whisper('已请求停止，马上退，下好的音频会留着');
   const r = await videoPost({act: 'stop'});
-  whisper(r.msg || '已请求停止');
+  if (!r.ok) {
+    vidStopping = false;
+    vidTools();
+    whisper(r.msg || '没能停下来，再点一次试试');
+  }
 }
 
 /** 进度条：从日志里读最后一行 [阶段 45%] 说明。阶段拿不到就报「正在准备」。 */
@@ -13430,23 +13836,34 @@ function vidShowProg(pct, note, stage) {
 async function vidTick() {
   if (!VIDEO.prog || shownPane !== 'video') return;
   let lines = [];
-  try { lines = ((await (await fetch('/api/log?tail=60')).json()).lines) || []; }
+  try { lines = ((await (await fetch('/api/log?tail=80')).json()).lines) || []; }
   catch (e) { return; }
   let hit = null;
+  // /api/log 回的是 [{t, s}] 而不是裸字符串：以前这里直接拿对象去 exec，正则永远不中，
+  // 进度条于是停在「正在起任务 5%」再也不动（用户报的「进度条状态未更新」）。
   for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /^\[(\S+)\s+(\d*)%\]\s*(.*)$/.exec(lines[i]);
+    // 只认这一趟任务开工之后的进度行：环形缓冲里还留着上一支的收尾那一行，
+    // 不按时间截一刀，新任务会被读成「已经转完」。
+    if (runningAt && Number((lines[i] || {}).t || 0) < runningAt) continue;
+    const text = String((lines[i] || {}).s || '');
+    const m = /^\[(\S+)\s+(\d*)%\]\s*(.*)$/.exec(text);
     if (m) { hit = {stage: m[1], pct: m[2] === '' ? -1 : +m[2], note: m[3]}; break; }
   }
-  const sig = hit ? `${hit.stage}|${hit.pct}|${hit.note}` : '';
+  // 刷新后任务还在跑、但日志里一时还没有 [阶段 N%] 那一行：也把条子亮出来，别让这一块空着。
+  const live = !!(running && runningKind === 'video');
+  const sig = hit ? `${hit.stage}|${hit.pct}|${hit.note}` : (live ? 'pending' : '');
   if (sig === vidProgSig) return;
   vidProgSig = sig;
   if (hit) vidShowProg(hit.pct, hit.note, hit.stage);
+  else if (live) vidShowProg(-1, '正在准备，马上就有进度', 'plan');
 }
 
 /** 完成：进度条换成结果，能直接开读；书架那面网格也一起接手。 */
 function vidFinish(r) {
   const box = VIDEO.prog;
   if (!box) return;
+  vidPendingClear();      // 转完了（或失败 / 被停）：左栏那行「转写中」可以撤了
+  vidProgSig = '';
   box.classList.add('on');
   box.replaceChildren();
   const hd = document.createElement('div');
@@ -14132,26 +14549,33 @@ function renderVideoShelf() {
     const q = u.q.trim().toLowerCase();
     all = all.filter(b => ((b.title || '') + (b.uploader || '')).toLowerCase().includes(q));
   }
+  // 正在转的那一支：后端 running 就是唯一真源。刷新之后它也照旧摆在这一栏最上面，
+  // 标成「转写中」，而不是整条从书架里消失、让人以为白点了。
+  const live = !!(running && runningKind === 'video');
+  const pend = live ? vidPendingGet() : null;
   if (VIDEO.shelfHead) {
-    VIDEO.shelfHead.textContent = all.length
-      ? (all.length === VT.books.length ? '一共 ' + all.length + ' 本'
-        : '筛出 ' + all.length + ' / 共 ' + VT.books.length + ' 本')
-      : '转出来的书 · 还没有';
+    const bits = [];
+    if (all.length) bits.push(all.length === VT.books.length ? '一共 ' + all.length + ' 本'
+      : '筛出 ' + all.length + ' / 共 ' + VT.books.length + ' 本');
+    if (live) bits.push('1 支转写中');
+    VIDEO.shelfHead.textContent = bits.length ? bits.join(' · ') : '转出来的书 · 还没有';
   }
   // 指纹带上条数：一本没有时信号是空串，而初值也是空串 —— 不带上就永远铺不出空态那句说明
   // 导出那份也算进指纹：刚导完一份，「没导」那盏灯要立刻变「导 1」，不能等下一次轮询
-  const sig = u.folder + '|' + u.tag + '|' + u.q + '|' + all.length + '|'
+  // 「转写中」那行也算进去：任务一起一停、换了一支，左栏得立刻跟着改。
+  const sig = (live ? 'live:' + ((pend && pend.title) || '转写中') : '-') + '|'
+    + u.folder + '|' + u.tag + '|' + u.q + '|' + all.length + '|'
     + all.map(b => b.id + ':' + (b.updated_at || 0)
       + ':' + (b.segments || 0) + ':' + ((b.exports || []).length)
       + ':' + ((mine(b.id).tags || []).join('/'))).join(',') + '|'
     + (VT.book ? VT.book.id : '-') + '|' + vtEdits();
   if (sig === vidShelfSig) return;
   vidShelfSig = sig;
-  if (!all.length) {
+  if (!all.length && !live) {
     VIDEO.shelf.replaceChildren(modEmpty('video'));
     return;
   }
-  VIDEO.shelf.replaceChildren(...all.map(b => {
+  const rows = all.map(b => {
     const row = feEl('div', 'vtbook' + (VT.book && VT.book.id === b.id ? ' on' : ''));
     row.title = (b.title || b.id) + '　·　点开它的转写';
     row.onclick = () => vtOpenBook(b.id);
@@ -14183,7 +14607,20 @@ function renderVideoShelf() {
     row.append(mk);
     row.append(feBtn('读', () => openReader(b.id, b.title || b.id, 'video'), 'rd'));
     return row;
-  }));
+  });
+  if (live) {
+    const p = feEl('div', 'vtbook pending');
+    p.title = '这支视频正在转写，转完自动进左边书架；刷新也照样在这儿';
+    const mk = feEl('div', 'mk');
+    mk.append(feEl('span', 'nm', (pend && pend.title) || '视频转写'));
+    const ct = feEl('span', 'ct');
+    ct.append(feEl('i', 'spin'), document.createTextNode(' 转写中'
+      + (pend && pend.at ? ' · ' + when(pend.at / 1000) + ' 起' : '')));
+    mk.append(ct);
+    p.append(mk);
+    rows.unshift(p);
+  }
+  VIDEO.shelf.replaceChildren(...rows);
 }
 
 /** 起没起得来、能不能点，全看后端那一句 running。运行中按钮换成「停止」。
@@ -14192,9 +14629,14 @@ function renderVideoShelf() {
 function vidTools() {
   const busy = !!(running && runningKind === 'video');
   const other = !!(running && runningKind !== 'video');
+  if (!busy) vidStopping = false;   // 任务翻面了，重新给「停止」让路
   if (VIDEO.start) VIDEO.start.disabled = vidBusy || running;
   if (VIDEO.plan) VIDEO.plan.disabled = vidBusy || running;
-  if (VIDEO.stop) VIDEO.stop.hidden = !busy;
+  if (VIDEO.stop) {
+    VIDEO.stop.hidden = !busy;
+    VIDEO.stop.disabled = vidStopping;
+    VIDEO.stop.textContent = vidStopping ? '正在停…' : '停止';
+  }
   if (VIDEO.cnt) {
     const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
     VIDEO.cnt.textContent = other ? '有别的任务在跑，等它完了再转视频'
@@ -14378,6 +14820,7 @@ function renderVideoView() {
   }
   vidRenderPlan();
   vidReloadCap();
+  vidTick();      // 进来就先把当前进度摆上，别等下一拍轮询（切屏时进度块不该空着）
   vtBooks().then(() => { renderVideoShelf(); vtTools(); });
 }
 
@@ -15564,7 +16007,8 @@ async function renderDetailView(storeId, readerId, title) {
 
   let t = '<div class="dtop">';
   t += '<div class="cv">' + (coverUrl
-    ? `<img src="${esc(coverUrl)}" alt="" onerror="this.remove()">` : '') + '</div>';
+    ? `<img src="${esc(coverSrc(coverUrl))}" alt="" referrerpolicy="no-referrer"
+         onerror="this.remove()">` : '') + '</div>';
   t += '<div class="tx"><h2>' + esc(info.title || title || id) + '</h2>';
   const byline = [info.author, info.publisher, info.publishTime ? String(info.publishTime).slice(0, 10) : '']
     .filter(Boolean).join(' · ');
@@ -17992,6 +18436,49 @@ function mmFit() {
   mmSetZ(Math.max(.4, Math.floor(k * 100) / 100));
   wrap.scrollLeft = 0; wrap.scrollTop = 0;
 }
+/** 绕手势中心缩放（1.2.0 起代替右上角那对加减号）。
+ *  只改 MM.z 谁都会，难的是「手指按住的那块内容别跑」：放大还以左上角为原点的话，
+ *  用户想看清的角落会被推出视口。所以缩完按 画布坐标 = (滚动量 + 视口内坐标) / 比例
+ *  把滚动量补回去，让手势中心下的那个点原地不动 —— 跟地图、看图的手感一致。 */
+function mmZoomAt(z, cx, cy) {
+  const wrap = document.getElementById('mmWrap');
+  const old = MM.z, next = Math.max(.4, Math.min(2, z));
+  if (!wrap || next === old) return;
+  const px = (wrap.scrollLeft + cx) / old, py = (wrap.scrollTop + cy) / old;
+  mmSetZ(next);
+  wrap.scrollLeft = px * next - cx;
+  wrap.scrollTop = py * next - cy;
+}
+/** 导图的缩放手势：真触屏两指捏合，桌面端触控板捏合（浏览器报成带 ctrl 的滚轮）。
+ *  普通滚轮不抢 —— 那是滚动。单指触摸也不抢，交给 .mmwrap 自己滚。 */
+function mmZoomWire() {
+  const wrap = document.getElementById('mmWrap');
+  if (!wrap) return;
+  wrap.addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const r = wrap.getBoundingClientRect();
+    mmZoomAt(MM.z * Math.exp(-e.deltaY / 240), e.clientX - r.left, e.clientY - r.top);
+  }, {passive: false});
+  let pinch = null;
+  const span = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+  const mid = (t, r) => [(t[0].clientX + t[1].clientX) / 2 - r.left,
+                         (t[0].clientY + t[1].clientY) / 2 - r.top];
+  wrap.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2) return;
+    const r = wrap.getBoundingClientRect();
+    pinch = {d: span(e.touches), z: MM.z, m: mid(e.touches, r)};
+  }, {passive: true});
+  wrap.addEventListener('touchmove', e => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const r = wrap.getBoundingClientRect();
+    mmZoomAt(pinch.z * (span(e.touches) / pinch.d), mid(e.touches, r)[0], mid(e.touches, r)[1]);
+  }, {passive: false});
+  const stop = e => { if (!e.touches || e.touches.length < 2) pinch = null; };
+  wrap.addEventListener('touchend', stop);
+  wrap.addEventListener('touchcancel', () => { pinch = null; });
+}
 async function ntMapOpen() {
   if (!NT.book) { whisper('先打开一本书'); return; }
   document.getElementById('ntMapLayer').classList.add('open');
@@ -18875,11 +19362,10 @@ function ntFloatsWire() {
   document.getElementById('mmEmptyRoot').onclick = () => mmAdd('', '');
   document.getElementById('mmEmptyFrom').onclick = mmFromNotes;
   document.getElementById('mmMd').onclick = mmCopyMd;
-  document.getElementById('mmZoomIn').onclick = () => mmSetZ(MM.z + .15);
-  document.getElementById('mmZoomOut').onclick = () => mmSetZ(MM.z - .15);
   document.getElementById('mmZoomFit').onclick = mmFit;
   askWire('mmAsk');
   mmStageWire();
+  mmZoomWire();          // 缩放走手势：两指捏合 / 触控板捏合，不再有加减号按钮
   window.addEventListener('scroll', edGridHide, true);
 }
 /** 导图的撤销 / 重做：整份 doc 进快照栈，回来以后照样让后端重排一次 ——

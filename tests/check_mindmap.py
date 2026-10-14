@@ -458,6 +458,48 @@ chk("layout()：空图也有正数画布和空 boxes（前端不至于塌成一�
     and empty_lay["width"] > 0 and empty_lay["height"] > 0
     and empty_lay["counts"]["nodes"] == 0, empty_lay)
 
+# ── 5.5 间距：1.2.0 用户报「节点文字一多，框就挤在一起」 ──────────────
+# 放宽不是把画布数字改大就算数，得量得出来：自动排的括号图里任意两个框不许压在一起，
+# 同一列上下相邻的框之间还要留下看得见的缝。这两条钉住「字变长也不挤」。
+def _overlaps(a, b):
+    return (a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"]
+            and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"])
+
+
+def _overlap_pairs(lay):
+    bs = lay["boxes"]
+    return [(bs[i]["id"], bs[j]["id"]) for i in range(len(bs)) for j in range(i + 1, len(bs))
+            if _overlaps(bs[i], bs[j])]
+
+
+def _same_col_gaps(lay):
+    """同一列（同 depth、横向重叠）按 y 排完，相邻两框之间的最小缝。"""
+    gaps = []
+    for depth in {b["depth"] for b in lay["boxes"]}:
+        col = sorted([b for b in lay["boxes"] if b["depth"] == depth],
+                     key=lambda b: b["y"])
+        for a, b in zip(col, col[1:]):
+            if a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"]:
+                gaps.append(b["y"] - (a["y"] + a["h"]))
+    return gaps
+
+
+_tree = LAYS["tree"]
+chk("间距：括号图里任意两个框都不重叠",
+    not _overlap_pairs(_tree), _overlap_pairs(_tree)[:3])
+chk("间距：括号图同列相邻框至少留 20px 的缝（1.2.0 放宽前的 12px 会贴着）",
+    bool(_same_col_gaps(_tree)) and min(_same_col_gaps(_tree)) >= 20.0 - 0.01,
+    _same_col_gaps(_tree))
+# 长句子也不该被压成一条竖线：折行上限之内，宽度要真的用起来。
+_long = mm.layout(mm.normalize({"nodes": [
+    node("这一条节点的文字特别特别长，长到不折行就会顶出画布外面去", id="long")]}))
+_lb = boxes_by_id(_long)["long"]
+chk("间距：长文字折行不超过三行，且框宽没超过上限、没被挤成一条线",
+    len(_lb["lines"]) <= mm._MAX_LINES
+    and _lb["w"] <= mm._BOX_MAX_W + 0.01
+    and _lb["x"] > 0 and _lb["y"] > 0, _lb)
+
+
 # ── 6. 跨形态差分：四种形态必须是四套真算法，不是一块招牌 ──────────
 t, r, fb = LAYS["tree"], LAYS["radial"], LAYS["fishbone"]
 rt, rr, rf = center(head(t)), center(head(r)), center(head(fb))
@@ -500,7 +542,7 @@ PINNED = mm.normalize({"title": "钉好的概念图", "form": "concept",
                                                       id="p1"), node("乙", id="p2")],
                                       id="p0")]})
 GRID = {"p0": (820.0, 410.0), "p1": (300.0, 120.0), "p2": (1500.0, 700.0),
-        "p3": (620.0, 60.0)}
+        "p3": (620.0, 80.0)}
 for _nd in mm.walk(PINNED):
     if _nd["id"] in GRID:
         _nd["x"], _nd["y"] = GRID[_nd["id"]]

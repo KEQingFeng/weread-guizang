@@ -643,6 +643,14 @@ with sync_playwright() as pw:
     chk("侧边栏的便签角标没有残留旧数字", badge.strip() in ("", "0"), badge)
 
     # 左栏那支笔：布局照 Memos / flomo 来 —— 左边写，右边看，写完的一条落在时间线最上面。
+    # 1.2.0 起这块从 textarea 换成 contenteditable 的富文本区，fill/input_value 用不了，
+    # 得真点进去敲（这也正好把 input 事件与字数那条路一起走了）。
+    def write_memo(text):
+        page.click("#fmNew")
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        page.keyboard.type(text)
+
     chk("便签是左右两栏：记笔记那一栏在时间线左边",
         page.evaluate("""() => {
           const ta = document.querySelector('#fmNew'), sc = document.querySelector('#fmScr');
@@ -650,7 +658,13 @@ with sync_playwright() as pw:
           const a = ta.getBoundingClientRect(), b = sc.getBoundingClientRect();
           return a.right <= b.left + 1 && a.width > 80;
         }"""))
-    page.fill("#fmNew", "手记一条：把书架按颜色排一排  #灵感")
+    chk("便签：左栏是一块可编辑的富文本区，工具条也在",
+        page.evaluate("""() => {
+          const ta = document.querySelector('#fmNew');
+          return !!ta && ta.getAttribute('contenteditable') === 'true'
+            && !!document.querySelector('#fmBar button[data-do="bold"]');
+        }"""))
+    write_memo("手记一条：把书架按颜色排一排  #灵感")
     chk("写字时左栏只更字数，不打后端", page.inner_text("#fmNewCnt").endswith("字"),
         page.inner_text("#fmNewCnt"))
     page.click("#fmAdd")
@@ -662,16 +676,55 @@ with sync_playwright() as pw:
         and page.evaluate("() => !!document.querySelector('#fmScr .fmtg i')"),
         page.inner_text("#fmScr")[:140])
     chk("记完清空输入框、回执说的是本机几条",
-        page.input_value("#fmNew") == "" and "记下了" in w,
-        (page.input_value("#fmNew"), w))
+        page.evaluate("() => document.querySelector('#fmNew').textContent.trim()") == ""
+        and "记下了" in w,
+        (page.evaluate("() => document.querySelector('#fmNew').textContent"), w))
     st_new = get("mode=stats").get("stats") or {}
     chk("手记真的落进本机账（计数行与后端统计一起变）",
         "1 条" in page.inner_text("#fmCnt") and st_new.get("memos") == 1,
         (page.inner_text("#fmCnt"), st_new))
-    page.fill("#fmNew", "再记一条：Ctrl 加回车也能存")
+    write_memo("再记一条：Ctrl 加回车也能存")
     page.press("#fmNew", "Control+Enter")
     ok = settle(page, "() => document.querySelectorAll('#fmScr .fmcard').length === 2", ms=12000)
     chk("Ctrl + Enter 也记一条（不打断写字的连贯）", ok, cards(page))
+
+    # 富文本与 Markdown 口径（1.2.0）：工具条点出的粗体，落到账上是 `**…**`；
+    # 粘进来的 Markdown 先渲染成富文本；复制出去的 text/plain 又是 Markdown。
+    # 这一条钉的是「界面 / 账本 / 剪贴板」三处是不是同一把尺。
+    page.click("#fmNew")
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
+    page.click('#fmBar button[data-do="bold"]')
+    page.keyboard.type("加粗的字")
+    page.click('#fmBar button[data-do="bold"]')
+    md = page.evaluate("() => wrGet(document.querySelector('#fmNew'))")
+    chk("便签：工具条点出的粗体，落成 Markdown 记号", "**加粗的字**" in md, md)
+    page.evaluate("""() => {
+      const box = document.querySelector('#fmNew');
+      box.focus();
+      const dt = new DataTransfer();
+      dt.setData('text/plain', '贴进来的一段 **重点**');
+      box.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}));
+    }""")
+    page.wait_for_timeout(150)
+    chk("便签：粘进来的 Markdown 渲染成富文本（不是原样的星号）",
+        page.evaluate("() => !!document.querySelector('#fmNew strong')")
+        and "**" not in page.inner_text("#fmNew"),
+        page.evaluate("() => document.querySelector('#fmNew').innerHTML")[:160])
+    copied = page.evaluate("""() => {
+      const box = document.querySelector('#fmNew');
+      const r = document.createRange();
+      r.selectNodeContents(box);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+      const dt = new DataTransfer();
+      box.dispatchEvent(new ClipboardEvent('copy', {clipboardData: dt, bubbles: true, cancelable: true}));
+      return dt.getData('text/plain');
+    }""")
+    chk("便签：复制出去的 text/plain 是 Markdown", "**重点**" in copied, copied)
+    page.click("#fmNew")
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
 
     # 窄屏：这一格工具条有输入框、两颗按钮和一行小字，最容易在 390 上挤成一列字。
     for wdt, hgt, tag in ((720, 860, "便签 720"), (390, 780, "便签 390")):
