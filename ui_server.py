@@ -4808,6 +4808,28 @@ def _req_target(raw):
         return None
 
 
+def _encode_body(text):
+    """响应正文唯一的那道字节口：落单的半个代理码点编不进 utf-8，不许把连接甩掉。
+
+    `\\ud800`（U+D800–U+DFFF 单独出现、不成对）在 Python 里是个正经的 str 字符：
+    `json.load` 读得下 `"\\ud800"` 这种转义，`json.dumps(..., ensure_ascii=False)`
+    也原样把它留在 JSON 文本里 —— 可 `.encode("utf-8")` 当场 UnicodeEncodeError。
+    而账本不只本进程在写（手改、云同步落盘、旧版本写回）：一条便签 / 一条划线的
+    正文里带上它，`_json` 就在编码这一步抛穿 `do_GET`。`BaseHTTPRequestHandler`
+    不会替你回 500，它只是把连接关掉 —— 用户看到的是整屏「打不开」，不是「某一条
+    显示不全」。
+
+    所有响应正文（JSON / HTML / Markdown / SSE 每一行）都从 `_send` / `_chunk`
+    出去，所以编码收在这一处，坏字符按书库那把同样的尺子摘掉
+    （`book_layout.drop_lone_surrogates`：成对的代理码点在 `json.load` 那一步早就
+    合成真字符，落单的才是垃圾）。干净的路走的还是原来那句 encode。
+    """
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError:
+        return book_layout.drop_lone_surrogates(text).encode("utf-8")
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -4816,7 +4838,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code, ctype, body, extra=None):
         if isinstance(body, str):
-            body = body.encode("utf-8")
+            body = _encode_body(body)
         extra = extra or {}
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -4848,7 +4870,7 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def _chunk(self, text):
-        b = text.encode("utf-8")
+        b = _encode_body(text)
         self.wfile.write(b"%x\r\n" % len(b) + b + b"\r\n")
         self.wfile.flush()
 

@@ -641,6 +641,14 @@ run "订阅 / 便签翻页参数收口（脏 limit / offset 不再把整页读�
 # 真字符串，认不出当没写。纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，
 # 不联网、不碰真实数据，归静态段。
 run "请求体字符串字段脏形状（state / q / mode / Key 写脏不再断连）" "$PY" tests/check_post_body_str.py
+# 请求体、查询串、请求行都收过口了，还剩响应这一头：账本里的字符串可能带着落单的
+# 半个代理码点（手改 / 云同步落盘 / 旧版本写回），`json.dumps(ensure_ascii=False)`
+# 原样留在正文里，`_send` 的 `body.encode("utf-8")` 当场抛。异常穿出 do_GET /
+# do_POST，BaseHTTPRequestHandler 不回 500、只是把连接关掉 —— 便签那一屏整个打不开，
+# 而不是「某一条显示不全」。收口是 ui_server._encode_body：干净的路照旧 encode，
+# 编不动时才按书库那把尺子摘掉落单代理码点，`_send` / `_chunk`（SSE）两个出口都走它。
+# 纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据。
+run "响应正文坏字符（半个代理码点不再把整屏甩成空响应）" "$PY" tests/check_response_utf8.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
