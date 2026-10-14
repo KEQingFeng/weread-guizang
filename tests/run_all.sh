@@ -89,6 +89,16 @@ run "取书续传锚点" "$PY" tests/check_resume.py
 # 这一条把「脏形状当没目录 / 没记录」「好数据一个字不改」与一条「旧读法确实会抛」的
 # 对照一起钉住。纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
 run "取书目录账本脏形状（脏形状当没目录 / 好数据不改 / 对照）" "$PY" tests/check_export_catalog.py
+# 目录账本收完了，引擎**自己**的另外三个读口还留着同样的旧读法，而且踩得更靠前：
+#   _progress.json → write_progress 里 data.update 在 try 之外，`[]` / `"书名"` / 数字
+#                    一句 AttributeError 就在取书开头（running=True）或收尾带走整趟任务；
+#   meta.json      → main 开头 meta.get、收尾 meta.update，脏形状让「书名读不出来」，
+#                    或书都取完了 done 却写不进去（界面永远显示没取完）；
+#   raw/*.json     → 续传开头清点已抓图时 json.load(...).get + img["url"]，一条脏记录
+#                    让这本书再也取不动，与 collect_tasks「只跳不牵连」相反。
+# 这一条把三个读口各钉一圈（脏形状不抛 / 好数据不改 / 旧读法确实会抛的对照 / 接线走
+# book_layout.read_meta 同一把尺子）。纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
+run "取书引擎脏读口（进度 / meta / raw 页记录不带走整趟取书）" "$PY" tests/check_export_dirty_read.py
 # 与续传锚点配成一对：锚点管「卡住后再取能从断点往前」，这一条管「卡住这件事本身」
 # —— 引擎进程退了但孙子进程攥着 stdout、或读输出抛异常时，任务必须照样收尾，
 # 不许把 TASK["running"] 永远钉在 True（界面「正在取」、再取被「已有任务在运行」顶回）。
