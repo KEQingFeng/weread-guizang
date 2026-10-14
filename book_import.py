@@ -174,9 +174,66 @@ def split_plain(text):
     return _chunk_titles(text)
 
 
+# 带 BOM 的按 BOM 认。长 BOM 必须排在短 BOM 前面（UTF-32 的小端 BOM 也以 FF FE 开头，
+# 先撞上 utf-16 就会把一半字节解成别的字）。utf-8-sig 顺手把 BOM 本身摘掉。
+_BOMS = (
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xfe\xff", "utf-16"),
+    (b"\xff\xfe", "utf-16"),
+)
+
+
+def _looks_utf16(data):
+    """无 BOM 时唯一能拿来认 utf-16 的旁证：整篇高位字节都 ≤ 0x9F。
+
+    汉字在 UTF-16LE 里是两个字节一个字，常用汉字的第二个字节（高位）落在 0x4E–0x9F；
+    而 GBK / GB18030 常用汉字的第二个字节（尾字节）最小也是 0xA1。所以「数据是偶数字节，
+    且所有奇数位字节都 ≤ 0x9F」既认得整篇中文的 utf-16，又撞不上 GBK。单靠这一条不够
+    （ASCII 的 utf-16 满篇 0x00，见 _decode_text 里先走的那道闸），但两者合起来，
+    无 BOM 的 utf-16 中文就不必再被 gb18030 抢走。
+    """
+    if len(data) < 2 or len(data) % 2:
+        return False
+    return max(data[1::2]) <= 0x9F
+
+
 def _decode_text(data):
-    """按常见中文编码依次试，全不行就按 utf-8 强解（宁可个别字坏，不整本丢）。"""
-    for enc in ("utf-8", "utf-16", "gb18030", "big5"):
+    """按常见中文编码依次试，全不行就按 utf-8 强解（宁可个别字坏，不整本丢）。
+
+    为什么不能像以前那样把 `utf-16` 直接排进候选列表：**无 BOM 的 utf-16 解码几乎
+    不会报错**，它会拿两个字节当一个字硬解，而 GBK / Big5 的中文正文刚好都是偶数长度，
+    于是整篇被抢先解成别的字。这不是「个别字坏」，是满屏乱码 —— 例如「中文测试」
+    (8 字节 gb18030) 会被解成「탖쓎」，用户导入一本 GBK 的 TXT 看到的就是这个。
+
+    所以顺序是：BOM → 含 0x00 的 utf-16 → utf-8 → 像 utf-16 的 → gb18030 → big5。
+    两道 utf-16 的闸都必要：含 0x00 那条管带 ASCII / 换行的（无 BOM 的 utf-16 只要有
+    一个换行就带 0x00），_looks_utf16 那条管整篇纯汉字、一个 0x00 都没有的。
+    """
+    if not data:
+        return ""
+    for bom, enc in _BOMS:
+        if data.startswith(bom):
+            try:
+                return data.decode(enc)
+            except (UnicodeDecodeError, LookupError):
+                break
+    if b"\x00" in data:
+        try:
+            return data.decode("utf-16")
+        except (UnicodeDecodeError, LookupError):
+            pass
+    try:
+        return data.decode("utf-8")
+    except (UnicodeDecodeError, LookupError):
+        pass
+    if _looks_utf16(data):
+        try:
+            return data.decode("utf-16")
+        except (UnicodeDecodeError, LookupError):
+            pass
+    for enc in ("gb18030", "big5"):
         try:
             return data.decode(enc)
         except (UnicodeDecodeError, LookupError):
