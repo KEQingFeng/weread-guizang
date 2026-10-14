@@ -164,6 +164,15 @@ def _render_table(head, aligns, rows):
 _ESC_CHAR = re.compile(r"\\([\\`*_{}\[\]()#+\-.!>~|])")
 _STASH_MARK = re.compile(r"\x01(\d+)\x01")
 
+# 占位机制（_inline 的 \x00N\x00 与 _stash_line 的 \x01N\x01）拿 C0 控制字节当记号，
+# 而正文是外部内容：导入的书、剪藏回来的网页、用户手改或云同步写回的章节，里面真
+# 可能出现这两个字节（0x00 / 0x01 都是合法 UTF-8，read_chapters 一个字都不换）。那
+# 时正文里凑巧一段「\x01 + 几位数字 + \x01」就会被当成自己的占位：序号越界是
+# IndexError 把整趟导出打抛（界面上「导不出来」），序号落回范围内则更阴 —— 一段
+# 正文被悄悄替换成另一个转义字符。C0 控制符（\t \n \r 除外）本来也不合法于
+# XHTML / EPUB，落进成品还可能被阅读器拒收，所以入口一次洗掉，占位与正文再无交集。
+_CTRL_DROP = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 
 def _stash_line(line, keep):
     """把这一行里的 \\X 收进 keep，原地留一个 \\x01 序号 \\x01 的占位。
@@ -199,7 +208,8 @@ def _restore(text, keep):
 
 def md_to_html(md):
     """块级语法。返回一段一段的 HTML，句首句尾都不带换行，方便拼。"""
-    raw = (md or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    raw = (_CTRL_DROP.sub("", md or "")
+           .replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     keep = []
     lines = []
     fenced = False
