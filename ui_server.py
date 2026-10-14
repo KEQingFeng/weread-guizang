@@ -492,6 +492,19 @@ def _write_json(path, obj, mode=None):
             pass
 
 
+def _meta_dict(d):
+    """读书目录里的 meta.json，只认「对象」这一种形状；读不开 / 不是对象都回空表。
+
+    meta.json 会被手工编辑、被云同步落半截、被旧版本写成别的形状：``[]`` /
+    ``"书名"`` / ``123`` / ``null`` 都是合法 JSON，``json.load`` 照收，可接着的
+    ``meta.get(...)`` / ``meta.update(...)`` 就当场 AttributeError。同一个仓库里
+    合并稿 / 打包 / 导出 / 目录 / 改书名 / 清残稿 / 书架清单各有各的读法，这里收成
+    一把尺子 —— 而且这把尺子只有一份：直接复用 book_layout.read_meta（走书库那几条
+    路的人早就在用它），不给「同一条规矩抄两遍、日后只改一处」留机会。
+    """
+    return book_layout.read_meta(d)
+
+
 def save_lib(d):
     with _WRITE_LOCK:
         _write_json(LIB_PATH, d)
@@ -2950,18 +2963,10 @@ def list_books(module=None):
                                                     encoding="utf-8")).get("text_len") or 0)
                     except Exception:
                         pass
-        meta = {}
-        mp = os.path.join(d, "meta.json")
-        if os.path.exists(mp):
-            try:
-                meta = json.load(open(mp, encoding="utf-8"))
-            except Exception:
-                meta = {}
         # 读得开不等于是个对象：meta.json 被手改成 `[]` / `"书名"` 也照样是合法 JSON，
         # 而下面每一处都是 meta.get(...)，一处 AttributeError 就让整份书架清单抛出去
-        # （书架是「一本书脏、全部书看不见」）。book_meta 早就是这么兜的，这里对齐口径。
-        if not isinstance(meta, dict):
-            meta = {}
+        # （书架是「一本书脏、全部书看不见」）。收口统一在 _meta_dict 一处。
+        meta = _meta_dict(d)
         # 导入的本地书没有 raw/，字数落在 meta.chars 上（取回来的书才有 raw/）
         if not chars:
             try:
@@ -3076,13 +3081,7 @@ def merged_markdown(book_id):
         if os.path.isdir(ch_dir) else []
     if not files:
         return None
-    meta = {}
-    mp = os.path.join(d, "meta.json")
-    if os.path.exists(mp):
-        try:
-            meta = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            pass
+    meta = _meta_dict(d)
     title = meta.get("title") or book_id
     author = meta.get("author") or ""
     buf = io.StringIO()
@@ -3104,13 +3103,7 @@ def build_zip(book_id):
         return None
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     dest = os.path.join(DOWNLOAD_DIR, f"{book_id}.zip")
-    meta = {}
-    mp = os.path.join(d, "meta.json")
-    if os.path.exists(mp):
-        try:
-            meta = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            pass
+    meta = _meta_dict(d)
     safe = re.sub(r'[<>:"/\\|?*]', "_", meta.get("title") or book_id)
     img_dir = os.path.join(d, "images")
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
@@ -3123,16 +3116,7 @@ def build_zip(book_id):
 
 
 def meta_title(book_id):
-    d = safe_book_dir(book_id)
-    if not d:
-        return book_id
-    mp = os.path.join(d, "meta.json")
-    if os.path.exists(mp):
-        try:
-            return json.load(open(mp, encoding="utf-8")).get("title") or book_id
-        except Exception:
-            pass
-    return book_id
+    return _meta_dict(safe_book_dir(book_id)).get("title") or book_id
 
 
 def export_book(kind, book_id):
@@ -3151,13 +3135,7 @@ def export_book(kind, book_id):
     if not (os.path.isdir(ch_dir)
             and any(f.endswith(".md") for f in os.listdir(ch_dir))):
         return None
-    meta = {}
-    mp = os.path.join(d, "meta.json")
-    if os.path.exists(mp):
-        try:
-            meta = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            pass
+    meta = _meta_dict(d)
     title = meta.get("title") or book_id
     author = meta.get("author") or ""
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -3225,13 +3203,7 @@ def book_outline(book_id):
     files = sorted(f for f in os.listdir(ch_dir) if f.endswith(".md"))
     if not files:
         return None
-    meta = {}
-    mp = os.path.join(d, "meta.json")
-    if os.path.exists(mp):
-        try:
-            meta = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    meta = _meta_dict(d)
     catalog = []
     cp = os.path.join(d, "_catalog.json")
     if os.path.exists(cp):
@@ -3328,12 +3300,7 @@ def write_meta(book_id, title, author, done):
     if not d:
         return
     mp = os.path.join(d, "meta.json")
-    cur = {}
-    if os.path.exists(mp):
-        try:
-            cur = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            cur = {}
+    cur = _meta_dict(d)
     cur.update({"title": title or cur.get("title") or book_id,
                 "author": author or cur.get("author") or "",
                 "done": bool(done), "updated_at": time.time()})
@@ -3407,12 +3374,7 @@ def reset_book_output(book_id):
     # 合并稿有两份可能的名字：按书名的和早期按书号的，都清掉，免得留一份过期的全本假象
     removed += drop_stray_md(book_id, meta_title(book_id))
     mp = os.path.join(d, "meta.json")
-    meta = {}
-    if os.path.exists(mp):
-        try:
-            meta = json.load(open(mp, encoding="utf-8"))
-        except Exception:
-            meta = {}
+    meta = _meta_dict(d)
     meta.update({"done": False, "updated_at": time.time()})
     _write_json(mp, meta)
     log(f"清掉《{meta.get('title') or book_id}》上次没跑完的残稿：{removed} 个文件")
@@ -3593,15 +3555,7 @@ MAX_CLIP_URLS = 20        # 一次最多剪这么多篇，多了容易被对方�
 
 def book_meta(book_id):
     """读一本书的 meta.json。读不到回空表，兜底交给调用方（列表页允许没 meta）。"""
-    d = safe_book_dir(book_id)
-    if not d:
-        return {}
-    try:
-        with open(os.path.join(d, "meta.json"), encoding="utf-8") as f:
-            m = json.load(f)
-        return m if isinstance(m, dict) else {}
-    except Exception:
-        return {}
+    return _meta_dict(safe_book_dir(book_id))
 
 
 def book_deep_link(book_id, meta):
