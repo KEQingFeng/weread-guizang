@@ -183,6 +183,12 @@ run "导出落盘编码（文本 open 都要 encoding / ASCII 环境下中文照
 # 画像只由数字与标签算出（它是唯一会被反复喂给 Agent 的东西，带原文就是漏）。
 # 笔记内容全部现编在 tests/flomo_fixture.py 里，用户的真实笔记一个字不进仓库。
 run "flomo 便签后端（解析 / 去重 / 附件 / 收成书 / 画像）" "$PY" tests/check_flomo_notes.py
+# 上面那条管「账本坏了当空读」，管不到「账本里某个字段写脏」。notes.json 用户会手工
+# 编辑、旧版本也落过别的形状：words 写成 "abc" 让 stats 与画像抛 ValueError，ts 写成
+# "oops" 让列表页排序抛穿请求，tags 写成裸字符串会被逐字拆成「读」「书」两个假标签。
+# 这条把坏形状逐样喂进 load，要求列表 / 标签 / 画像 / 收成书 / 再导入都不抛，且认得出
+# 的数字照认、条目不丢。纯离线，全在临时目录里跑。
+run "flomo 脏账本兜底（脏字段不翻车 / 认得出照认 / 条目不丢）" "$PY" tests/check_flomo_dirty.py
 # 转写这条线 1.0.8 整体云化：本地那套（mlx-whisper / faster-whisper、权重缓存、镜像回退）
 # 全砍了，只留云端一路。条约是「引擎恒为 cloud、老配置里的 mlx / faster 静默归正不报错、
 # 地址与 Key 存得下也读得回、回显只给末四位不许吐明文」，外加「本地模型那一问必须明说移除
