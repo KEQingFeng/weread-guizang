@@ -137,15 +137,58 @@ def _norm_entry(e):
     return e
 
 
+def _clean_store(raw):
+    """把整份账本的四个顶层键各按各自的形状认一遍，认不出的一律换成空的重来。
+
+    这份 feed.json 不只这个进程在写：用户会手工编辑、旧版本写下过别的形状、云同步
+    也可能落下一份半截的。以前 _load 只 `setdefault` 了键名，**值坏掉就原样带出去**：
+    `entries` 被写成列表 / 字符串时，`_normalize` 里的 `.values()` 直接抛
+    AttributeError，界面「订阅」整页打不开，而且这条异常在 _load 外面、连空账都回不去；
+    `feeds` 被写成对象时，后面逐条 `f.get(...)` 同样炸。坏的是账本不是命令 ——
+    能救回来的条目照留，救不回的丢掉，别让一个坏值把整屏带走。
+    """
+    src = raw if isinstance(raw, dict) else {}
+    out = dict(src)
+
+    feeds = src.get("feeds")
+    # 没有 id 的源谁也点不到、也没有 entries 能对上，逐条 `f.get("id")` 的读法还会让
+    # `entries()` 整页 KeyError —— 它和「值坏掉」一样属于认不出的行，丢掉。
+    out["feeds"] = [f for f in feeds
+                    if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"]] \
+        if isinstance(feeds, list) else []
+
+    entries = src.get("entries")
+    clean_entries = {}
+    if isinstance(entries, dict):
+        for fid, lst in entries.items():
+            if isinstance(fid, str) and isinstance(lst, list):
+                clean_entries[fid] = [e for e in lst if isinstance(e, dict)]
+    out["entries"] = clean_entries
+
+    seen = src.get("seen")
+    clean_seen = {}
+    if isinstance(seen, dict):
+        for fid, marks in seen.items():
+            if isinstance(fid, str) and isinstance(marks, dict):
+                clean_seen[fid] = marks
+    out["seen"] = clean_seen
+
+    settings = _copy_settings(src.get("settings"))
+    # groups 是「建过但暂时没源的组」的清单。被写成字符串时 list("abc") 会拆成
+    # 三个假组，界面上就多出 a / b / c 三个空夹子 —— 只认字符串列表。
+    settings["groups"] = [g for g in settings.get("groups")
+                          if isinstance(g, str)] if isinstance(settings.get("groups"), list) else []
+    out["settings"] = settings
+    return out
+
+
 def _normalize(data):
-    for i, f in enumerate(data.get("feeds") or []):
-        if isinstance(f, dict):
-            _norm_feed(f, i)
-    for lst in (data.get("entries") or {}).values():
-        for e in lst or []:
-            if isinstance(e, dict):
-                _norm_entry(e)
-    data["settings"] = _copy_settings(data.get("settings"))
+    data = _clean_store(data)
+    for i, f in enumerate(data["feeds"]):
+        _norm_feed(f, i)
+    for lst in data["entries"].values():
+        for e in lst:
+            _norm_entry(e)
     return data
 
 
@@ -155,11 +198,6 @@ def _load():
             data = json.load(f)
     except Exception:
         return _blank()
-    if not isinstance(data, dict):
-        return _blank()
-    data.setdefault("feeds", [])
-    data.setdefault("entries", {})
-    data.setdefault("seen", {})
     return _normalize(data)
 
 
@@ -316,15 +354,13 @@ def undo(token=None):
         raise ValueError("这份快照坏了，还原不了")
     if not isinstance(data, dict):
         raise ValueError("这份快照坏了，还原不了")
-    data.setdefault("feeds", [])
-    data.setdefault("entries", {})
-    data.setdefault("seen", {})
+    data = _normalize(data)
     if data["feeds"] and not (_load().get("feeds") or []):
         # 快照里有源、盘上却一个不剩：多半是「退订全部」之后拿老令牌来撤。那种情况用户要的是
         # 重新订阅，不是一份和现在对不上号的旧库 —— 不还原，但把快照留着，他还能改主意。
         _SNAPS[key] = snap
         raise ValueError("这份快照已经失效（订阅列表后来被清空过），就不还原了")
-    _save(_normalize(data))
+    _save(data)
     return {"ok": True, "token": key, "label": snap["label"], "at": snap["at"],
             "feeds": len(data["feeds"]),
             "entries": sum(len(v or []) for v in data["entries"].values())}
