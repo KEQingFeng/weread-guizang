@@ -65,6 +65,11 @@ def pages_at(chapters, at, frac=0.0):
     frac = max(0.0, min(1.0, frac))
     if at == 0 and frac <= 0:
         return 0
+    # 末章章末就是全书末尾：这一处的口径必须与 total_pages 的向上取整对齐。总字数
+    # 不是整千时（如 3100 字 → 4 页），一般位置用四舍五入，读到最后一个字只算
+    # round(3.1)=3 页 < 4 页，于是「已读完」永远触发不了，底栏永远写着还剩 1 页。
+    if at == len(chapters) - 1 and frac >= 1.0:
+        return total_pages(chapters)
     before = 0
     for i in range(at):
         try:
