@@ -263,6 +263,13 @@ run "flomo 脏账本兜底（脏字段不翻车 / 认得出照认 / 条目不丢
 # 书树 / 存盘 / 快照 / 挪章都不抛、认得出的数字照认、裸字符串收成一个元素、条目不丢，并把
 # rev 冲突协议与「存一次盘账本自己修好」一起钉住。纯离线，全在临时沙盒书库里跑。
 run "写作脏账本兜底（脏字段不翻车 / 存得进 / 裸字符串不拆字）" "$PY" tests/check_writer_dirty.py
+# 上一条管「脏字段折不成数」，这一条管「脏字符写不进 utf-8」。写作这一格的正文按
+# utf-8 写、meta.json 与 _books.json 按 ensure_ascii=False 写，而浏览器把 JS 字符串
+# 拦腰截断时会留下落单的半个代理码点（json.loads 收得下 "\ud83d"）：老代码在
+# `f.write(body)` / `json.dump(meta, ...)` 那一步当场 UnicodeEncodeError ——
+# 用户写了一大段、一按保存就没了，回执本身也发不出去。mindmap / board / person /
+# anna 早都按同一口径收了口，这一条把写作这一格补齐。纯离线，临时沙盒书库。
+run "写作坏字符（半个代理码点不把保存打成失败 / emoji 不动 / 旧账自愈）" "$PY" tests/check_writer_utf8.py
 # 转写这条线 1.0.8 整体云化：本地那套（mlx-whisper / faster-whisper、权重缓存、镜像回退）
 # 全砍了，只留云端一路。条约是「引擎恒为 cloud、老配置里的 mlx / faster 静默归正不报错、
 # 地址与 Key 存得下也读得回、回显只给末四位不许吐明文」，外加「本地模型那一问必须明说移除
