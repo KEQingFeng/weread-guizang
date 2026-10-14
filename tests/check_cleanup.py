@@ -11,6 +11,7 @@
 """
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -29,6 +30,7 @@ os.environ["GUIZANG_BOOKS"] = str(BOOKS)
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(PW)
 os.environ["HF_HUB_CACHE"] = str(HF)
 
+import book_notes as bn  # noqa: E402
 import cleanup as cl  # noqa: E402
 import platform_compat as pc  # noqa: E402
 
@@ -53,6 +55,10 @@ def seed():
     (DATA / "cache" / "tools" / "ffmpeg").write_text("x")
     (DATA / "cache" / "feed.json").write_text('{"subs": []}')
     (DATA / "cache" / "config.json").write_text("{}")
+    # 阅读计划与自建笔记模板：都被「清除本地数据」管着，曾经漏在两份白名单外
+    # （用户点完「清除」以为清干净了，打开个人页计划还在、模板还在）。
+    (DATA / "cache" / "readplan.json").write_text('{"version": 1, "plans": {}}')
+    (DATA / "cache" / bn.TPL_FILE).write_text('{"items": []}')
     (DATA / "cache" / "anna_profile" / "Cookies").write_text("x")
     (DATA / "cache" / "downloads" / "anna" / "一本现编的书.md").write_text("x")
     (DATA / "cache" / "anna.json").write_text('{"window": "closed"}')
@@ -97,6 +103,10 @@ def main():
          "data-cache-anna_profile", "data-cache-downloads",
          "data-cache-anna.json", "data-cache-anna_cmd.json"} <= {i["key"] for i in groups["data"]["items"]},
         [i["key"] for i in groups["data"]["items"]])
+    chk("试算：阅读计划账与本机笔记模板也在数据组里",
+        {"data-cache-readplan.json", "data-cache-" + bn.TPL_FILE}
+        <= {i["key"] for i in groups["data"]["items"]},
+        [i["key"] for i in groups["data"]["items"]])
     chk("试算不动任何东西（cache 大小没变）", cl._size(DATA / "cache") == before)
     # 1.0.8 起转写不再下本地模型，HF 缓存整个退出清理范围 —— 所以那条路径底下
     # 一份文件都不该出现在清单里（自己那份也好、别人家的仓库也好）。
@@ -116,6 +126,9 @@ def main():
         and not (DATA / "cache" / "anna_profile").exists()
         and not (DATA / "cache" / "downloads" / "anna").exists())
     chk("清数据：端口回执也没了", not (DATA / "runtime.json").exists())
+    chk("清数据：阅读计划与本机笔记模板也没了",
+        not (DATA / "cache" / "readplan.json").exists()
+        and not (DATA / "cache" / bn.TPL_FILE).exists())
     chk("清数据：书一个字没动", (BOOKS / "某本书.md").read_text() == "这是用户的书")
     chk("清数据：虚拟环境还留着（那是「卸载组件」的事）", (DATA / ".venv").is_dir())
     chk("清数据：ffmpeg 还留着", (DATA / "cache" / "tools" / "ffmpeg").exists())
@@ -150,6 +163,14 @@ def main():
     srv = (ROOT / "ui_server.py").read_text(encoding="utf-8")
     chk("后端：接了 cleanup 这个动作", '"cleanup"' in srv and "cleanup.plan" in srv
         and "cleanup.run" in srv)
+    # 「一处真相」：后端往 cache/ 里写的每一样都得在清理白名单里，否则新加一个
+    # cache 文件时「清除本地数据」会安静地漏掉它（readplan.json 就是这么漏的）。
+    declared = {n for n, _ in cl.CACHE_ITEMS} | {n for n, _ in cl.CACHE_FILES}
+    written = set(re.findall(r'os\.path\.join\(CACHE_DIR, "([^"]+)"\)', srv))
+    chk("接线：后端写进 cache/ 的每一样都在清理白名单里（新文件不许漏）",
+        written and written <= declared, sorted(written - declared))
+    chk("接线：本机笔记模板账（book_notes.TPL_FILE）也在清理白名单里",
+        bn.TPL_FILE in declared, bn.TPL_FILE)
     build = (ROOT / "shell" / "build_macos.sh").read_text(encoding="utf-8")
     chk("打包清单里有 cleanup.py", "\n  cleanup.py\n" in build)
     chk("打包清单里有 anna_browser.py 与 anna_state.py（开窗下载那两样要一起进包）",
