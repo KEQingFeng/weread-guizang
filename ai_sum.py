@@ -202,7 +202,13 @@ def map_messages(title, text, scope):
 
 def _json_object(raw):
     """从模型输出里抠出最外层那个 JSON 对象。先去 think 标签和代码围栏，
-    再按花括号配对取第一段完整对象 —— 模型爱在 JSON 前后加一句「好的」。"""
+    再按花括号配对取第一段**解得开**的完整对象 —— 模型爱在 JSON 前后加一句「好的」。
+
+    为什么不能只看第一对配平的花括号：那句开场白里也常带花括号
+    （`好的，{先说明一下} 结果如下 {…真 JSON…}`）。第一对配平的是说明那几个字，
+    json.loads 解不动；旧代码在这里直接 return None，后面那段真 JSON 明明完好，
+    也会被判成「模型没给出导图」而退回原文目录树。所以逐段试：哪一对花括号先解出
+    对象就用哪一对，全都解不开才回 None（半截未闭合的仍按「不硬猜」回 None）。"""
     text = str(raw or "")
     text = re.sub(r"<think[^>]*>.*?</think\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = text.strip()
@@ -210,33 +216,37 @@ def _json_object(raw):
         lines = text.splitlines()
         lines = [ln for ln in lines if not ln.strip().startswith("```")]
         text = "\n".join(lines)
-    start = text.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(text)):
-        c = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(text[start:i + 1])
-                except Exception:
-                    return None
+    pos = text.find("{")
+    while pos >= 0:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(pos, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(text[pos:i + 1])
+                    except Exception:
+                        obj = None
+                    if isinstance(obj, dict):
+                        return obj
+                    # 这一段配平了但不是 JSON（`{先说明}`）：挪到下一个 `{` 再试。
+                    break
+        pos = text.find("{", pos + 1)
     return None
 
 
