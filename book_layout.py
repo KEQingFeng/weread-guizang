@@ -48,6 +48,30 @@ PREFIX_OF = {"clip_": "clip", "feed_": "feed", "video_": "video",
 # 书号只允许这些字符（与 ui_server.safe_book_dir 同一道闸，两边都把一次不算多）
 ID_RE = re.compile(r"[A-Za-z0-9_\-]+\Z")
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：浏览器的 JS 字符串被拦腰
+# 截断时会留下它，而 `json` 里的 `"\ud800"` 转义照样能被 `json.load` 读成这个码点
+# —— 于是它能住进 meta.json（云同步从别处落盘、手改、旧版本都可能）。它不是能编码
+# 的字符：写 utf-8 抛 UnicodeEncodeError，`urllib.parse.quote` 也抛。同一道收口在
+# 个人资料 / 画板 / 导图 / 安娜那边各有一份，这里管的是「一本书的身份」。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def drop_lone_surrogates(v):
+    """把文本值上落单的半个代理码点摘掉；形状与别的类型一个字不改。
+
+    `read_meta` 是读一本书身份的唯一入口，所以 meta 这道收口放这里：书名 / 作者 /
+    来路干净了，导出、打包、改名、书架清单与 HTTP 下载头那些下游就不必各自再防
+    一遍。它是纯函数，别的「外部文本要落进 utf-8」的地方也能直接拿它用。
+    """
+    if isinstance(v, str):
+        return SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {k: drop_lone_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [drop_lone_surrogates(x) for x in v]
+    return v
+
+
 # 什么才算「一本书的目录」：有三样里的一样就算，缺 meta 的半成品也认，
 # 免得迁移时把取到一半的书留在根上，下次又当陌生目录搬一遍。
 MARKERS = ("meta.json", "chapters", "_catalog.json")
@@ -137,13 +161,19 @@ def is_book_dir(path):
 
 
 def read_meta(book_dir):
-    """读一本书的 meta.json；坏了、没有都给空 dict（调用方各有一套兜底）。"""
+    """读一本书的 meta.json；坏了、没有都给空 dict（调用方各有一套兜底）。
+
+    只认「对象」这一种形状之外，字符串值再过一遍 `drop_lone_surrogates`：落单的半个
+    代理码点在 JSON 里能存、utf-8 里编不出来，留着它就会在打包 / 导出 / 拼 HTTP
+    下载头那一刻才炸（实测 `/api/zip` 直接甩连接）。收口放这一处，因为这是读
+    meta 的唯一入口。
+    """
     import json
     try:
         # utf-8-sig：手改 / 另存过的账本可能带 BOM，按 utf-8 读会整份解不动（被当空账）。
         with open(os.path.join(book_dir, "meta.json"), encoding="utf-8-sig") as f:
             d = json.load(f)
-        return d if isinstance(d, dict) else {}
+        return drop_lone_surrogates(d) if isinstance(d, dict) else {}
     except Exception:
         return {}
 

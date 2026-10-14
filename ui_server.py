@@ -3151,8 +3151,15 @@ def export_book(kind, book_id):
 
 
 def content_disp(name, ext):
-    """HTTP 头只能放 latin-1，中文文件名必须走 RFC 5987 的 filename*。"""
+    """HTTP 头只能放 latin-1，中文文件名必须走 RFC 5987 的 filename*。
+
+    `name` 是书名 / 稿名，可能夹着落单的半个代理码点（JSON 里存得下、utf-8 编不出），
+    也可能压根不是字符串 —— `quote()` 碰到半个代理码点当场抛 UnicodeEncodeError，
+    而这一句是在发响应头的路上：抛出去就是连接被甩，用户看到的只是「下载点了没反应」。
+    所以名字在这道边界上先收成一个能编码的字符串；正常名字一个字不改。
+    """
     from urllib.parse import quote
+    name = book_layout.drop_lone_surrogates(str(name if name is not None else ""))
     ascii_name = re.sub(r"[^A-Za-z0-9_.\-]", "_", name) or "book"
     return ("attachment; filename=\"%s.%s\"; filename*=UTF-8''%s"
             % (ascii_name, ext, quote(f"{name}.{ext}")))
