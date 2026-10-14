@@ -4780,6 +4780,27 @@ def _body_str(body, key, default=""):
     return v.strip() if isinstance(v, str) else default
 
 
+def _req_target(raw):
+    """请求行里的目标地址 → ParseResult；解不出来回 None。
+
+    `urlparse` 会**自己**抛 ValueError：绝对形式的请求目标里带半个 IPv6 方括号
+    （`http://[::1`、`http://[`、`https://[fe80::1`），或者 netloc 里有 NFKC 归一化
+    认不出的字符（全角斜杠 `http://／host`），它当场抛 `Invalid IPv6 URL` /
+    `contains invalid characters under NFKC normalization`。这不是任何一条路由的
+    输入，而是请求行本身写坏了，可这行解析在 `do_GET` / `do_POST` 的最前面、
+    没有第二道 try —— 异常一路穿到 `BaseHTTPRequestHandler`，客户端收到的是
+    **空响应**（连接被掐），与 `Content-Length: abc` 那次同一个症状。
+
+    所以这里收成 None，由调用方回 400 人话，绝不把裸 ValueError 往外抛。注意
+    `http.server` 只把以 `//` 开头的裸路径（`//[::1`）折成 `/[::1`，绝对形式那一种
+    它不碰。
+    """
+    try:
+        return urlparse(raw)
+    except ValueError:
+        return None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -4875,7 +4896,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(writer_ai_after(mode, raw, body))
 
     def do_GET(self):
-        u = urlparse(self.path)
+        u = _req_target(self.path)
+        if u is None:
+            # 请求行本身写坏了（绝对形式目标里的方括号 / NFKC 字符）：原来这里
+            # 抛裸 ValueError，客户端收到空响应。回 400 人话，别把连接默默掐掉。
+            return self._json({"ok": False, "msg": "请求地址解不出来（URL 写坏了）"}, 400)
         # keep_blank_values：空的 group= / tag= 是「未分组」「不限标签」这一档筛选，
         # 默认的 parse_qs 会把空值整个丢掉，键就不存在了 —— 前端点「未分组」于是筛成「不限」。
         q = parse_qs(u.query, keep_blank_values=True)
@@ -5477,7 +5502,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, "text/plain; charset=utf-8", "not found")
 
     def do_POST(self):
-        u = urlparse(self.path)
+        u = _req_target(self.path)
+        if u is None:
+            # 请求行本身解不出来：body 长度无从谈起，回 400 并断连（同 _body_len
+            # 那条脏值的收尾法），不带着一个解不出的目标往下走路由。
+            self.close_connection = True
+            return self._json({"ok": False, "msg": "请求地址解不出来（URL 写坏了）"}, 400)
         n = _body_len(self.headers.get("Content-Length"))
         if n is None:
             # 认不出该读多少字节：不带着猜出来的长度往下走，也不把 body 留在流里
