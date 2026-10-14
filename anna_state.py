@@ -52,6 +52,17 @@ MAX_NAME_CHARS = 120
 MAX_NAME_BYTES = 180
 MAX_EXT_CHARS = 16       # 长过这个的「扩展名」不是扩展名
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：浏览器的 JS 字符串被拦腰
+# 截断时会留下它，json.loads 收得下（形如 "\ud83d"），于是它一路走到这一路两个
+# 「量字节 / 落盘」的地方：
+#   · safe_name 里 `name.encode("utf-8")` 量长度时抛 UnicodeEncodeError —— 表现是
+#     「点了下载，窗口里什么也没接住」；
+#   · 账本与口令条是 ensure_ascii=False 落盘的，json.dump 抛同一个错 —— 表现是
+#     「点了搜索没反应 / 域名改不了」。
+# 它是坏输入不是内容，摘掉比让整份东西存不下去强。成对的码点不必管：json 解码时
+# 已经合成一个真字符，这里只会摘到落单的那个。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
 
 # ── 归一化 ────────────────────────────────────────────────────────
 
@@ -75,7 +86,17 @@ def _blank():
 
 def _note(v):
     s = re.sub(r"\s+", " ", str(v or "")).strip()
+    s = SURROGATE.sub("", s)
     return s[:NOTE_MAX]
+
+
+def clean_term(term):
+    """搜书关键词：去落单的半个代理码点、压空白、夹到 60 字。
+
+    口令条、状态账里的 keyword、以及界面回话都用这一份。一个半截码点不能既写进
+    账本（json.dump 会抛）、又把回包序列化打崩 —— 所以洗的口径只留在这里。
+    """
+    return _note(term)[:60]
 
 
 def _as_int(v):
@@ -95,7 +116,7 @@ def normalize(raw):
     st["domain"] = dom or DEFAULT_DOMAIN
     win = str(raw.get("window") or "").strip().lower()
     st["window"] = win if win in ("closed", "opening", "open", "failed") else "closed"
-    st["keyword"] = _note(raw.get("keyword"))[:60]
+    st["keyword"] = clean_term(raw.get("keyword"))
     for k in ("caught", "imported", "skipped"):
         st[k] = _as_int(raw.get(k))
     seen = raw.get("seen")
@@ -128,7 +149,25 @@ def read_state(data_dir):
         return _blank()
 
 
+def _drop_surrogates(v):
+    """把要落盘的东西里落单的半个代理码点摘干净（dict / list / str 逐层走）。
+
+    这是写盘前最后一道：账本里的文本来自界面 POST、书目元数据与远端文件名，谁
+    都可能夹一个半截码点，而 ensure_ascii=False 的 json.dump 碰到它就抛。文本以外
+    的值原样回去，不改类型。
+    """
+    if isinstance(v, str):
+        return SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {k: _drop_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_drop_surrogates(x) for x in v]
+    return v
+
+
 def _atomic_write(path, payload):
+    """原子落盘，并把摘过坏字符的那份回给调用方（界面回话要用它，不能各说各的）。"""
+    payload = _drop_surrogates(payload)
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
@@ -136,6 +175,7 @@ def _atomic_write(path, payload):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
+    return payload
 
 
 def write_state(data_dir, patch):
@@ -148,8 +188,7 @@ def write_state(data_dir, patch):
     if isinstance(patch, dict):
         st.update(patch)
     st["updated_at"] = int(time.time())
-    _atomic_write(state_path(data_dir), st)
-    return st
+    return _atomic_write(state_path(data_dir), st)
 
 
 # ── 口令条（界面 → 窗口）────────────────────────────────────────────
@@ -160,9 +199,8 @@ def cmd_path(data_dir):
 
 def write_cmd(data_dir, term):
     """把「该搜这个词」立个牌子给窗口看。回洗过的口令条。"""
-    payload = {"term": _note(term)[:60], "ts": time.time()}
-    _atomic_write(cmd_path(data_dir), payload)
-    return payload
+    payload = {"term": clean_term(term), "ts": time.time()}
+    return _atomic_write(cmd_path(data_dir), payload)
 
 
 def read_cmd(data_dir):
@@ -179,6 +217,7 @@ def read_cmd(data_dir):
 def clean_domain(domain):
     """把用户填的域名洗成一个干净的 host：剥协议、剥路径、补默认。"""
     d = str(domain or "").strip().lower()
+    d = SURROGATE.sub("", d)
     d = re.sub(r"^https?://", "", d)
     d = d.split("/")[0].strip().strip(":")
     return d or DEFAULT_DOMAIN
@@ -244,9 +283,13 @@ def safe_name(filename):
     就是三个字节。按「字符数」截出来的名字看着不长，落盘那一下却直接
     ENAMETOOLONG（`open()` 抛 OSError，下载接不住）。所以两条上限同时管住：
     字符数（ASCII 怪名）与 UTF-8 字节数（中文长标题）。
+
+    落单的半个代理码点先摘掉再量长度：`name.encode("utf-8")` 碰到它会抛
+    UnicodeEncodeError，那一下是在「接住下载」的回调里，用户看到的是「点了没反应」。
     """
     name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
     name = re.sub(r"[\x00-\x1f\x7f]", "", name)
+    name = SURROGATE.sub("", name)
     name = re.sub(r"[ /]+", "_", name)
     if len(name) > MAX_NAME_CHARS or len(name.encode("utf-8")) > MAX_NAME_BYTES:
         stem, dot, tail = name.rpartition(".")

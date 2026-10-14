@@ -72,6 +72,12 @@ def chk(name, cond, extra=""):
     print(("PASS  " if cond else "FAIL  ") + name + ("" if cond else "   " + str(extra)[:240]))
 
 
+def esc(s):
+    """坏输入里可能带着落单的半个代理码点：直接 print 会自己抛
+    UnicodeEncodeError，把一条断言失败伪装成整个套件崩。转义成 \\ud83d 再打。"""
+    return str(s).encode("unicode_escape").decode("ascii")
+
+
 def fresh_state():
     """把账本擦回「没用过」，让每一段断言从同一起点开始。"""
     anna._atomic_write(anna.state_path(DD), anna._blank())
@@ -188,6 +194,40 @@ st = anna.write_state(DD, {"caught": 3})
 chk("改账本是先读后并：窗口状态没被下一次写抹掉",
     st["window"] == "open" and st["caught"] == 3, st)
 chk("原子写不留 .tmp 垃圾", not os.path.exists(anna.state_path(DD) + ".tmp"))
+fresh_state()
+
+# ── 1b 落单的半个代理码点：账本与口令条不许被它写崩 ─────────────
+# 界面 POST 上来的 JSON 里可以带 "\ud83d"（json.loads 收得下），而这一路的账本与
+# 口令条都是 ensure_ascii=False 落盘的 —— 不摘掉的话 json.dump 抛
+# UnicodeEncodeError，用户看到的是「点了搜索没反应 / 域名存不下」。
+HALF = "\ud83d"
+cmd = anna.write_cmd(DD, "搜" + HALF + "书")
+chk("口令条：坏字符不当场抛，也不写进账", HALF not in cmd["term"], esc(cmd["term"]))
+chk("口令条：回洗过的那份（调用方拿它回话也不会炸）",
+    anna.read_cmd(DD)["term"] == cmd["term"], esc(anna.read_cmd(DD).get("term")))
+chk("口令条：没坏字符的词一个字不动", anna.clean_term("三体") == "三体")
+chk("口令条：整串都是坏字符就当空词（路由退成「先写个书名」）",
+    anna.clean_term(HALF * 5) == "", esc(anna.clean_term(HALF * 5)))
+st = anna.write_state(DD, {"keyword": "书" + HALF + "名", "note": "接住" + HALF,
+                           "last_error": HALF, "domain": HALF + "annas-archive.gd"})
+chk("状态账：回给调用方的那份已经不含坏字符",
+    HALF not in json.dumps(st, ensure_ascii=False), esc(st))
+chk("状态账：keyword / note / domain 都摘干净了",
+    st["keyword"] == "书名" and st["note"] == "接住" and st["domain"] == "annas-archive.gd",
+    esc(st))
+with open(anna.state_path(DD), encoding="utf-8") as f:
+    disk = f.read()
+chk("状态账：盘上这份是合法 UTF-8、读得回来（不留连不上的半截）",
+    HALF not in disk and anna.read_state(DD)["keyword"] == "书名")
+st = anna.write_state(DD, {"books": [{"name": "书" + HALF + "名.md", "at": 1}]})
+chk("状态账：列表行里的坏字符也在落盘前摘掉",
+    HALF not in json.dumps(st["books"], ensure_ascii=False), esc(st["books"]))
+st = anna.counted(DD, {"caught_delta": 1, "note": "接住" + HALF})
+chk("counted 走的也是同一道落盘闸",
+    HALF not in json.dumps(st, ensure_ascii=False) and st["caught"] == 1, esc(st))
+chk("域名：坏字符摘掉后再落地（只剩坏字符就回默认域）",
+    anna.clean_domain(HALF + "annas-archive.org") == "annas-archive.org"
+    and anna.clean_domain(HALF) == anna.DEFAULT_DOMAIN, esc(anna.clean_domain(HALF)))
 fresh_state()
 
 # ── 2 名字与格式：远端给的东西一律先洗 ──────────────────────────
@@ -516,6 +556,17 @@ chk("点搜索或按回车，前端都走 mode=search 这一条（用户要的�
     "e.key === 'Enter'" in _wr and "mode: 'search'" in _wr, _wr[:160])
 chk("后端 search 分支在窗口没开时自动把 anna_browser 任务领起来（不必先点开窗）",
     re.search(r'mode == "search"[\s\S]{0,1800}?start_task\("anna_browser"', srv) is not None)
+# 搜书口令来自界面输入框，可能夹着落单的半个代理码点：它必须先过 clean_term，
+# 否则写口令条 / 写状态账 / 回话三处各带一个坏字符，一次点击能在三个地方炸。
+anna_src = (REPO / "anna_state.py").read_text(encoding="utf-8")
+chk("搜书口令先过 clean_term 再写（口令条 / 状态账 / 回包共用洗过的那份）",
+    'anna_state.clean_term(b.get("q") or b.get("term"))' in srv
+    and "def clean_term" in anna_src and "SURROGATE" in anna_src)
+chk("落盘最后一道闸在 _atomic_write 里（以后新加的写入口也自动收口）",
+    re.search(r"def _atomic_write[\s\S]{0,240}?_drop_surrogates\(payload\)", anna_src) is not None)
+chk("safe_name 先摘坏字符再量字节（encode 不再有机会抛）",
+    re.search(r"def safe_name[\s\S]{0,900}?SURROGATE\.sub\(\"\", name\)[\s\S]{0,400}?encode\(\"utf-8\"\)",
+              anna_src) is not None)
 chk("门禁开关在：GUIZANG_ANNA_NO_WINDOW 时只写口令不起窗口",
     "GUIZANG_ANNA_NO_WINDOW" in srv
     and "GUIZANG_ANNA_NO_WINDOW" in

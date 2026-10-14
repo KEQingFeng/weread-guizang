@@ -8,10 +8,12 @@
 却什么也没有」。这一条不联网、不开浏览器：坏名字现编，落盘写在系统临时目录里，
 跑完整棵删掉。
 
-钉住四条：
+钉住五条：
   · 字节与字符两条上限同时管住（结果一定写得进磁盘）；
   · 真扩展名（≤ MAX_EXT_CHARS）留得住，长点号尾巴不冒充扩展名；
   · 截断不切出半个字（结果里不许出现替换符）；
+  · 落单的半个代理码点先摘掉再量长度（`name.encode("utf-8")` 碰到它会抛，
+    那一下发生在接住下载的回调里，用户看到的是「点了没反应」）；
   · 洗过的名字再洗一遍不变（幂等），且给 anna_browser 追加 `-<时间戳>-<序号>`
     之后仍在 255 字节以内。
 """
@@ -37,6 +39,16 @@ def chk(name, ok, extra=""):
     else:
         FAIL.append(name)
         print(" FAIL " + name + (("  <- " + str(extra)[:220]) if extra else ""))
+
+
+def esc(s):
+    """bad-name 的 extra 里可能带着落单的半个代理码点：直接 print 会自己抛
+    UnicodeEncodeError，把一条断言失败伪装成整个套件崩。转义成 \\ud83d 再打。"""
+    return str(s).encode("unicode_escape").decode("ascii")
+
+
+def has_surrogate(s):
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in str(s))
 
 
 TMP = tempfile.mkdtemp(prefix="guizang-anna-name-")
@@ -123,6 +135,47 @@ try:
     chk("`长` × 100（300 字节）的名字被收下了，不是原样放行",
         len(anna.safe_name("长" * 100).encode("utf-8")) <= anna.MAX_NAME_BYTES,
         len(anna.safe_name("长" * 100).encode("utf-8")))
+
+    # ── 8 落单的半个代理码点：先摘掉再量长度，别把这一份下载打回去 ─────
+    # 浏览器的 JS 字符串被拦腰截断时会留下 U+D800–U+DFFF 里落单的一个，它会从
+    # `download.suggested_filename` 一路走到 `name.encode("utf-8")` 上抛
+    # UnicodeEncodeError —— 接住下载的回调里没人兜，表现是「点了下载什么也没有」。
+    HALF = "\ud83d"
+    SHORT = [
+        ("短名中间夹一个", "a%sb.epub" % HALF, "ab.epub"),
+        ("只剩名字开头一个", "%s.epub" % HALF, ".epub"),
+        ("中文名中间夹一个", "书%s名.pdf" % HALF, "书名.pdf"),
+        ("整串都是坏字符", HALF * 300, "未命名"),
+    ]
+    for label, raw, want in SHORT:
+        try:
+            got = anna.safe_name(raw)
+        except Exception as e:                       # 修好之前这里就是 UnicodeEncodeError
+            chk("坏字符不当场抛（%s）" % label, False, "%s: %s" % (type(e).__name__, e))
+            continue
+        chk("坏字符不抛、并原样摘掉（%s）" % label, got == want, esc(got))
+        chk("坏字符不留代理码点（%s）" % label, not has_surrogate(got), esc(got))
+
+    # 长名会走「按字节截断」那一段：坏字符必须先摘，否则 encode 在量长度时就抛。
+    for label, raw in (("长中文名", "长" * 300 + HALF + ".pdf"),
+                       ("长英文名开头", HALF + "a" * 400),
+                       ("长英文名结尾", "x" * 200 + HALF)):
+        try:
+            got = anna.safe_name(raw)
+        except Exception as e:
+            chk("坏字符长名量得动（%s）" % label, False, "%s: %s" % (type(e).__name__, e))
+            continue
+        ok_disk, err = creatable(got)
+        chk("坏字符长名仍在字节上限内（%s）" % label,
+            len(got.encode("utf-8")) <= anna.MAX_NAME_BYTES, len(got.encode("utf-8")))
+        chk("坏字符长名真建得出来（%s）" % label, ok_disk, err)
+        chk("坏字符长名不留代理码点（%s）" % label, not has_surrogate(got), esc(got))
+        chk("坏字符长名幂等（%s）" % label, anna.safe_name(got) == got, esc(anna.safe_name(got)))
+
+    # 成对的码点（真字符）不是坏字符，不能顺手删掉：emoji 是 4 字节、仍是合法文本。
+    chk("真的 emoji 原样留着（只摘落单的那半）",
+        anna.safe_name("书\U0001F600.epub") == "书\U0001F600.epub",
+        esc(anna.safe_name("书\U0001F600.epub")))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
