@@ -1802,8 +1802,11 @@
     position:absolute; left:50%; top:0; width:var(--sw);
     margin-left:calc(var(--sw) / -2); opacity:0; pointer-events:none;
     animation:none; box-shadow:var(--shadow);
-    transition:transform .56s var(--spring), opacity .4s ease, box-shadow .4s ease;
-    will-change:transform, opacity}
+    transition:transform .56s var(--spring), opacity .4s ease, box-shadow .4s ease}
+  /* 合成层只在下手翻的那一下要。原先每张卡常驻 will-change，扇形一摊上百张就是
+     上百层，翻得越急、重合成越堵 —— 这就是用户说的「叠卡快速切书卡顿」。
+     翻动那一下由 applyStack 在舞台上挂 .anim 临时提层，动画收尾就摘掉。 */
+  .sstage.anim>.wcard{will-change:transform, opacity}
   .sstage>.wcard.pre,.sstage>.wcard.unfurl,.sstage>.wcard.rev{animation:none}
   .sstage>.wcard.s0{opacity:1; pointer-events:auto; z-index:20;
     transform:translate3d(0,0,0) rotateY(0deg) scale(1)}
@@ -10160,18 +10163,40 @@ function setShelfMode(m) {
 /** 每张卡摆哪儿，只看它离当前那张有几张 —— 没有第几种状态，位置就是距离。
  *  左右对称：d=±1..±3 都摊在画内看得见、点得着，越界的才甩到画外（d>3 右、d<-3 左）。 */
 const STACK_CLS = ['s0', 's1', 's2', 's3', 'b1', 'b2', 'b3', 'sgone', 'saway'];
+/** 每张卡上一次落在哪一档。位置没变的卡一个字节都不碰它 —— 原来每翻一本就把整台卡
+ *  的 9 个状态类全删再全加回去，上百张一起触发样式重算，快速连翻就是用户看到的
+ *  「卡顿 + 闪」。存在 WeakMap 里，不进 DOM，节点被替换就跟着归零，不会留旧账。 */
+const stackPos = new WeakMap();
+let stackAnimT = null;
+/** 翻书那一下才给舞台挂合成提示（.anim → will-change），连着翻就顺延，收尾摘掉。 */
+function markStackAnim(stage) {
+  if (!stage) return;
+  stage.classList.add('anim');
+  if (stackAnimT) clearTimeout(stackAnimT);
+  stackAnimT = setTimeout(() => {
+    stackAnimT = null;
+    document.querySelectorAll('.sstage.anim').forEach(s => s.classList.remove('anim'));
+  }, 680);
+}
 function applyStack(stage) {
   const kids = [...stage.children];
+  let touched = false;
   kids.forEach((c, i) => {
     const d = i - shelfCursor;
-    c.classList.remove(...STACK_CLS);
-    c.classList.add(d === 0 ? 's0' : d === 1 ? 's1' : d === 2 ? 's2' : d === 3 ? 's3'
+    const cls = d === 0 ? 's0' : d === 1 ? 's1' : d === 2 ? 's2' : d === 3 ? 's3'
       : d === -1 ? 'b1' : d === -2 ? 'b2' : d === -3 ? 'b3'
-      : d > 3 ? 'saway' : 'sgone');
+      : d > 3 ? 'saway' : 'sgone';
+    // 位置没动就整段跳过：不删类、不加类、不写 aria，也不起补间。
+    if (stackPos.get(c) === cls) return;
+    stackPos.set(c, cls);
+    c.classList.remove(...STACK_CLS);
+    c.classList.add(cls);
     // 只有「看不见」的那几张（甩到画外的）从无障碍树里摘掉；
     // 两侧摊开的六张看得见也能点，标成 aria-hidden 就成了「读屏里不存在却能点」。
     c.setAttribute('aria-hidden', Math.abs(d) <= 3 ? 'false' : 'true');
+    touched = true;
   });
+  if (touched) markStackAnim(stage);
   const pos = stage.parentNode && stage.parentNode.querySelector('#stPos');
   if (pos) pos.textContent = kids.length ? (shelfCursor + 1) + ' / ' + kids.length : '';
   const pv = stage.parentNode && stage.parentNode.querySelector('#stPrev');
@@ -10190,15 +10215,29 @@ function shelfStep(dir) {
   if (!stage || !stage.children.length) return;
   const want = Math.max(0, Math.min(stage.children.length - 1, shelfCursor + dir));
   if (want === shelfCursor) return;
-  closeAllCards();
+  // 「翻页先收抽屉」只在真有抽屉摊着时才去扫 DOM。以前每翻一本都
+  // querySelectorAll('.wcard.open') 走一遍，连翻时全是白花的样式查询。
+  if (document.querySelector('.wcard.open')) closeAllCards();
   shelfCursor = want;
   applyStack(stage);
-  // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）
+  // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）。
+  // 补一批是 O(已铺数量) 的活，连翻时不能每一下都同步干 —— 攒到这一串翻完再补，
+  // 否则「翻到批尾」那几下会卡。翻页本身已经先走完，观感不受影响。
   const all = shelfAll();
   if (all.length > shelfShown && shelfCursor >= shelfShown - 2) {
     shelfShown += SHELF_BATCH;
-    renderShelfGrid();
+    growStackSoon();
   }
+}
+
+let growStackT = null;
+/** 把「补进下一批卡」压到连翻停下之后再做；只在叠卡这一面、还在书架时才补。 */
+function growStackSoon() {
+  if (growStackT) clearTimeout(growStackT);
+  growStackT = setTimeout(() => {
+    growStackT = null;
+    if (shelfMode === 'stack' && v === 'shelf') renderShelfGrid();
+  }, 90);
 }
 
 /* 叠卡那面的键盘：只在书架看得见、不在阅读时、焦点不在输入框里才接手，

@@ -165,6 +165,9 @@ run "内置浏览器（内网拦截 / base 与跳转脚本 / 透传 / 接线）"
 # --main-w 一处定义、main 的 max-width 只认它、任何按页给 main 另开宽度的口子都判失败，
 # 顺带守住滚动条常驻槽位与「视图常驻、只挪 hidden」这两条不闪的前提。
 run "切页一致性（一块舞台 / 无横跳 / 常驻视图）" "$PY" tests/check_pane_uniform.py
+# 叠卡快速切书那条 bug（R4-4）：常驻 will-change 堆合成层、applyStack 无条件重刷整台卡、
+# 批尾每翻一步同步重铺 —— 这三条都随书量放大成卡顿，且都能在源码里一眼钉死。只读 ui.html。
+run "叠卡性能（只在翻动提层 / 位置没变不碰卡 / 批尾补卡去抖）" "$PY" tests/check_stack_perf.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
