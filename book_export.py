@@ -225,7 +225,10 @@ def md_to_html(md):
                 buf.append(lines[i])
                 i += 1
             i += 1
-            cls = ' class="lang-%s"' % _esc(lang) if lang else ""
+            # 围栏的语言串也来自外部内容（导入书 / 剪藏原文），落点又是 class="…"
+            # 这个属性，所以和图片地址一样得先过 _attrq：`_esc` 只转 &<>，双引号
+            # 留着就能关掉属性再挂一个 onmouseover=…。
+            cls = ' class="lang-%s"' % _attrq(_esc(lang)) if lang else ""
             out.append("<pre><code%s>%s</code></pre>" % (cls, _esc("\n".join(buf))))
             continue
         # 分隔线（合并稿里章与章之间就是靠它分段的）
