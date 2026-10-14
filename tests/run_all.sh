@@ -563,6 +563,14 @@ run "配置脏字段（内层形状不对不再让 /api/state 整页失联）" "
 # 认不出回 None，do_POST 回 400 并主动断连，绝不带着猜出来的长度往下走。纯函数 + 源码接线
 # + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据，归静态段。
 run "请求体长度脏值（abc / 负数不再断连或挂住，脏值回 400）" "$PY" tests/check_post_length.py
+# 还有一处同类脏值在更前面：请求行本身。`do_GET` / `do_POST` 第一行都是
+# `urlparse(self.path)`，绝对形式的请求目标（代理就是这么发的）里带半个 IPv6 方括号
+# （`http://[::1`）或 NFKC 认不出的字符，urlparse 会当场抛 ValueError；这行没有第二道
+# try，异常穿到 BaseHTTPRequestHandler 就是把连接关掉，客户端收到的是空响应 —— 与上一条
+# 的 `Content-Length: abc` 同一个症状。注意 http.server 只折裸 `//[::1`，绝对形式它不碰。
+# 收口是 ui_server._req_target：解不出回 None，两个入口回 400 人话。纯函数 + 源码接线 +
+# in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据，归静态段。
+run "请求行目标地址收口（绝对形式的坏方括号回 400，不是空响应）" "$PY" tests/check_request_target.py
 # 账本被记事本 / 云同步「另存」过时文件头会多三个字节 BOM，原先按 utf-8 读会整份
 # 解不动、被每个读取者兜底成空账 —— 然后下一次保存把空账写回去，手改前的数据就没了。
 # 这一条给每本账做「干净 → 加 BOM → 再读」的往返：夹具本身得先读得出（不许两边都是空
