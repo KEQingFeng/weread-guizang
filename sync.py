@@ -93,6 +93,39 @@ def _norm(cfg):
     return out
 
 
+def _absorb_tokens(dst, src):
+    """把这次刷新出来的 OneDrive 令牌写回调用方那份配置。
+
+    `_norm` 每次都新建一份 dict，于是 `_ms_token` 换来的 access_token /
+    refresh_token 只活在这次运行的副本里。界面那半边的写法是「跑完把归一化的
+    配置存回磁盘」（ui_server.sync_run_now），不写回就等于**把旧令牌原样盖回
+    去**：下一次同步又得重新换一遍，而微软会轮换 refresh_token —— 旧的那枚
+    迟早失效，用户看到的是「明明授权过，过阵子又要重新授权」。
+
+    只有 src（归一化那份）里非空的令牌才覆盖 dst，所以没刷新时一个字都不动。
+    """
+    if not isinstance(dst, dict) or not isinstance(src, dict):
+        return
+    s = src.get("onedrive")
+    if not isinstance(s, dict):
+        return
+    # 只有真的换到令牌（access_token 非空）才动 dst：否则等于把 `_norm` 补的
+    # 空壳写回去，本来没有 onedrive 那块的配置会凭空多出一个空块。
+    fresh = {}
+    if s.get("access_token"):
+        fresh["access_token"] = s["access_token"]
+        fresh["access_exp"] = s.get("access_exp") or 0
+    if s.get("refresh_token"):
+        fresh["refresh_token"] = s["refresh_token"]
+    if not fresh:
+        return
+    d = dst.get("onedrive")
+    if not isinstance(d, dict):
+        d = {}
+        dst["onedrive"] = d
+    d.update(fresh)
+
+
 def state(cfg):
     """给页面的那份状态。密码/令牌只回「填没填」，不回值。"""
     c = _norm(cfg)
@@ -446,6 +479,9 @@ def run(cfg, cache_dir, books_dir, log=None):
             if not first_err:
                 first_err = str(e)[:160]
             say("同步跳过 %s：%s" % (remote, str(e)[:120]))
+    # 传文件时可能顺手换过令牌（`_ms_token` 在副本上刷新）：写回调用方那份，
+    # 界面接着 save_cfg 才能把新令牌落盘，而不是把旧的盖回去。
+    _absorb_tokens(cfg, c)
     parts = []
     if up:
         parts.append("上传 %d" % up)
@@ -471,3 +507,6 @@ def test(cfg):
         return False, "连不上（%s %s）" % (e.code, e.reason)
     except Exception as e:
         return False, str(e)[:200]
+    finally:
+        # 测一下也可能顺手换过令牌，同样要写回调用方那份（否则下次又白换一遍）。
+        _absorb_tokens(cfg, c)
