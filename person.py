@@ -24,6 +24,27 @@ _MAGIC = (
     (b"GIF8", "image/gif"),
 )
 
+# 从别处粘过来的名字 / 简介里常混着「看不见的字符」：零宽空格、BOM、双向文本
+# 控制符。它们不是空白，`ord(ch) >= 32` 拦不住，最后会显示成「名字看起来是空的」
+# 或让整行字倒着排。这里只清这一类、以及 DEL / C1 这两个老控制区。
+#
+# 注意 U+200C（ZWNJ）/ U+200D（ZWJ）**不在此列**：它们是 emoji 与印度系文字的
+# 组成笔画，删掉会把 🧑‍💻 拆成两半，属于「越洗越坏」。
+_INVISIBLE = (
+    "\u200b",                                      # 零宽空格
+    "\u200e", "\u200f",                            # LRM / RLM
+    "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",   # 双向嵌入 / 覆盖
+    "\u2060",                                      # word joiner
+    "\u2066", "\u2067", "\u2068", "\u2069",        # 双向隔离
+    "\ufeff",                                      # BOM / 零宽不换行空格
+)
+
+
+def _is_control(ch):
+    """C0（\\n 另算）、DEL、C1 都算控制字符 —— C1 那一段常被漏掉。"""
+    o = ord(ch)
+    return o < 32 or o == 127 or 128 <= o <= 159
+
 
 def sniff_image(raw):
     """按魔数认图片类型，认不出来给 None（宁可拒收，不要存个打不开的文件）。"""
@@ -38,9 +59,10 @@ def sniff_image(raw):
 
 
 def clean_text(s, limit):
-    """去控制字符 + 夹长度。"""
+    """去控制字符（含零宽与双向控制符）+ 夹长度。"""
     s = str(s if s is not None else "")
-    s = "".join(ch for ch in s if ch == "\n" or ord(ch) >= 32)
+    s = "".join(ch for ch in s
+                if ch == "\n" or (not _is_control(ch) and ch not in _INVISIBLE))
     s = s.replace("\n", " ").strip()
     # 尖括号一律换掉：这一份内容会被好几处拼进 HTML
     s = s.replace("<", "〈").replace(">", "〉")
@@ -48,14 +70,19 @@ def clean_text(s, limit):
 
 
 def normalize(cfg):
-    """把 config 里那几项整理成界面要的形状。"""
+    """把 config 里那几项整理成界面要的形状。
+
+    存的时候已经洗过一道，这里**再洗一道**：config.json 是用户能直接改的文本文件，
+    也可能留着旧版本写下的脏值，而这几项会被好几处拼进 HTML。清洗是幂等的，
+    对正常值不做任何改动，所以这道兜底没有代价。
+    """
     cfg = cfg if isinstance(cfg, dict) else {}
-    return {"name": str(cfg.get("profile_name") or ""),
-            "bio": str(cfg.get("profile_bio") or "")}
+    return {"name": clean_text(cfg.get("profile_name") or "", NAME_MAX),
+            "bio": clean_text(cfg.get("profile_bio") or "", BIO_MAX)}
 
 
 def set_profile(cfg, name, bio):
-    """存名字与简介，返回 (改了什么, 新 cfg)。空串表示「这项保持原样」。
+    """存名字与简介，返回 (改了什么, 新 cfg)。None = 这项保持原样，"" = 清空。
 
     界面上是两个独立输入框，但保存是一次 POST：不区分「没改」和「清空」的话，
     用户只想改简介就会把名字一起抹掉。
