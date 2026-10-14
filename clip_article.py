@@ -15,6 +15,7 @@
 
 import html
 import html.parser
+import ipaddress
 import json
 import os
 import re
@@ -37,6 +38,86 @@ ALLOWED_SCHEMES = ("http", "https")
 BLOCKED_HOSTS = re.compile(
     r"^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\."
     r"|172\.(1[6-9]|2\d|3[01])\.|::1|\[::1\])", re.I)
+
+
+def _legacy_ipv4(host):
+    """inet_aton 认的那种老式 IPv4 写法，收成一个 32 位整数；不是就回 None。
+
+    纯数字（2130706433）、十六进制（0x7f000001）、八进制（0177.0.0.1）、少写几段
+    （127.1）这四种，浏览器和 getaddrinfo 都照样发到那个地址去，但
+
+        urllib.parse 把它当成一个普通主机名，BLOCKED_HOSTS 那条按「点分十进制」
+        写的正则一条都匹配不上 —— 内网那道门就从这儿漏过去了。
+
+    域名里不会全是数字，所以「每一段都解析成数字」就可以放心当作 IPv4 收下。
+    """
+    parts = (host or "").split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    nums = []
+    for p in parts:
+        if not p:
+            return None
+        try:
+            if p[:2].lower() == "0x":
+                n = int(p, 16)
+            elif len(p) > 1 and p[0] == "0":
+                n = int(p, 8)
+            else:
+                n = int(p, 10)
+        except ValueError:
+            return None
+        nums.append(n)
+    # 前几段各占 8 位，最后一段占满剩下的位（单段写法就是整个 32 位）
+    tail_bits = 8 * (5 - len(nums))
+    if any(n > 255 for n in nums[:-1]) or nums[-1] > (1 << tail_bits) - 1:
+        return None
+    val = 0
+    for n in nums[:-1]:
+        val = (val << 8) | n
+    return (val << tail_bits) | nums[-1]
+
+
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")     # 运营商级 NAT，同样不该由本机去敲
+
+
+def _ip_blocked(ip):
+    """这个 IP 该不该拒绝：回环 / 内网 / 链路本地 / 保留 / 组播 / 未指定一律算。"""
+    if ip.version == 4 and ip in _CGNAT:
+        return True
+    return bool(ip.is_loopback or ip.is_private or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def host_blocked(host):
+    """这个主机名是不是本机 / 内网地址（拒绝替用户去敲）。
+
+    先按字面认 IPv4 / IPv6（含各种非常规写法与 IPv4 映射的 IPv6），认不出来再退回
+    那把按名字写的正则（localhost 这类）。域名带结尾的点（`localhost.`）也按同一个
+    名字判，别让一个点把门绕开。
+    """
+    h = (host or "").strip().lower()
+    if h.startswith("[") and h.endswith("]"):     # 方括号包着的 IPv6 字面量
+        h = h[1:-1]
+    h = h.rstrip(".")
+    if not h:
+        return True
+    if BLOCKED_HOSTS.match(h):
+        return True
+    h = h.split("%", 1)[0]          # IPv6 的 zone id（fe80::1%eth0）不算地址本体
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        mapped = ip.ipv4_mapped if ip.version == 6 else None
+        return _ip_blocked(mapped if mapped is not None else ip)
+    legacy = _legacy_ipv4(h)
+    if legacy is not None:
+        return _ip_blocked(ipaddress.ip_address(legacy))
+    return False
+
+
 # 站点反爬/要客户端的几种典型页面，认出来了直接说人话，别把提示页当正文剪进书库
 BLOCKED_PAGE = re.compile(r"(当前环境异常|请在微信客户端打开|完成验证后即可继续访问|"
                           r"该公众号因违规已停止使用|链接已经过期|参数错误)")
@@ -279,7 +360,7 @@ def safe_image_url(u):
     p = urllib.parse.urlparse((u or "").strip())
     host = (p.hostname or "").lower()
     return (p.scheme.lower() in ALLOWED_SCHEMES and bool(host)
-            and not BLOCKED_HOSTS.match(host))
+            and not host_blocked(host))
 
 
 def pick_cover(og_url, markdown, base):
@@ -503,7 +584,7 @@ def fetch(url):
     host = (p.hostname or "").lower()
     if not host:
         raise ValueError("这个链接没有主机名，打不开")
-    if BLOCKED_HOSTS.match(host):
+    if host_blocked(host):
         raise ValueError("这是本机或内网地址，归藏不替你访问")
     req = urllib.request.Request(u, headers={
         "User-Agent": UA,

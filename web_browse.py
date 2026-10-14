@@ -9,7 +9,7 @@ macOS 是 WKWebView），可外层直接给 iframe 一个外站地址照样是�
 
 这一层只干三件事，越少越好：
 
-  1. 取回来。本机与内网地址一个不放，用的是剪藏那一把尺子（`clip_article.BLOCKED_HOSTS`）
+  1. 取回来。本机与内网地址一个不放，用的是剪藏那一把尺子（`clip_article.host_blocked`）
      ——「替用户去敲内网的门」这条风险不分功能，剪藏不该犯，内置浏览器同样不该犯。
   2. 改一改。补一条 `<base>`，让相对路径的图片、样式、脚本还有一个根可循；页面末尾接
      一小段脚本，把「点链接 / 提交表单」翻译成给父页面的一条消息，父页面收到再让这一层
@@ -35,7 +35,6 @@ import clip_article
 
 # 与剪藏共用同一套判据：scheme 只认 http/https，本机与内网地址一律拒绝。
 ALLOWED_SCHEMES = clip_article.ALLOWED_SCHEMES
-BLOCKED_HOSTS = clip_article.BLOCKED_HOSTS
 UA = clip_article.UA
 
 # 内置浏览器不是下载器：超过这个量级的多半是拿链接当文件下，别把界面顶死。
@@ -108,7 +107,7 @@ def normalize(raw):
     host = (p.hostname or "").lower()
     if not host:
         raise Blocked("这个链接没有主机名，打不开")
-    if BLOCKED_HOSTS.match(host):
+    if clip_article.host_blocked(host):
         raise Blocked("这是本机或内网地址，归藏不替你访问")
     return urllib.parse.urlunparse(p)
 
