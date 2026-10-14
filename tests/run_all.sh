@@ -627,6 +627,14 @@ run "订阅 / 便签翻页参数收口（脏 limit / offset 不再把整页读�
 # 真字符串，认不出当没写。纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，
 # 不联网、不碰真实数据，归静态段。
 run "请求体字符串字段脏形状（state / q / mode / Key 写脏不再断连）" "$PY" tests/check_post_body_str.py
+# 字段级脏形状还剩最后一档：数字。`_body_str` / `_body_list` 之外的订阅整理参数一直是
+# 裸的 `int(body["index"])`。它们有 `feed_do` 的兜底 catch 接着，所以不是断连，而是
+# `str(e)` 把 `invalid literal for int() with base 10: 'abc'` 原样弹给用户 ——
+# 「点了挪顺序，弹一句 Python 报错」。收口是 ui_server._body_int（直接调 _qint，
+# 与查询串同一把尺子：认不出当没写 / 越界夹回边界）；reorder 的 index 认不出时当面
+# 回「没挪」，不落进「挪到末尾」。纯函数 + 源码 AST 走查 + in-process 真 Handler 三面
+# 都钉，不联网、不碰真实数据，归静态段。
+run "请求体数字字段脏形状（订阅整理的 index / limit / days 写脏不再回 Python 报错）" "$PY" tests/check_post_body_int.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"

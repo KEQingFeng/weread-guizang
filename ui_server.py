@@ -4158,8 +4158,14 @@ def feed_do(body):
             return {"ok": True, "groups": feed_mod.group_delete(
                 str(body.get("name") or ""), ungroup=not body.get("drop_feeds"))}
         if act == "reorder":
+            raw_index = body.get("index")
+            index = None if raw_index is None else _body_int(body, "index", None, lo=0)
+            # 点了「挪顺序」却给了一个认不出的 index：宁可当面说没挪，也不能当成
+            # 「index 没传」—— 那在 feed.reorder 里是「挪到末尾」，等于替用户乱动。
+            if raw_index is not None and index is None:
+                return {"ok": False, "msg": "顺序参数认不出来，这次没挪"}
             feed_mod.reorder(str(body.get("id") or ""),
-                             index=(int(body["index"]) if body.get("index") is not None else None),
+                             index=index,
                              after=(str(body.get("after")) if body.get("after") else None))
             return {"ok": True, "subs": feed_mod.subs(), "msg": "顺序已改"}
         if act == "fetch_content":
@@ -4168,7 +4174,8 @@ def feed_do(body):
                                        group=(str(body.get("group"))
                                               if body.get("group") is not None else None),
                                        only_missing=bool(body.get("only_missing", True)),
-                                       limit=max(1, min(200, int(body.get("limit") or 50))))
+                                       # 写脏当没写 → 默认 50；越界夹回 1..200。
+                                       limit=_body_int(body, "limit", 50, lo=1, hi=200))
             _FEED_SUMMARY["k"] = None
             r = r if isinstance(r, dict) else {}
             return {"ok": True, "result": r,
@@ -4187,9 +4194,10 @@ def feed_do(body):
             return {"ok": True, "settings": s, "msg": "偏好已存"}
         if act == "prune":
             feed_mod.snapshot("清理旧条目前")
-            r = feed_mod.prune(days=(int(body["days"]) if body.get("days") else None),
-                               max_entries=(int(body["max_entries"])
-                                            if body.get("max_entries") else None),
+            # days / max_entries 写脏（"abc" / 列表 / 对象）当没写：落到 feed.prune
+            # 就是回设置里那份保留策略，与旧写法 `body.get("days")` 为假值时的落点一致。
+            r = feed_mod.prune(days=_body_int(body, "days", None) or None,
+                               max_entries=_body_int(body, "max_entries", None) or None,
                                keep_starred=bool(body.get("keep_starred", True)),
                                feed_id=(str(body.get("id") or "") or None),
                                group=(str(body.get("group"))
@@ -4785,6 +4793,21 @@ def _body_str(body, key, default=""):
     """
     v = (body or {}).get(key)
     return v.strip() if isinstance(v, str) else default
+
+
+def _body_int(body, key, default=None, lo=None, hi=None):
+    """POST body 里**本该是数字**的字段：解不出（abc / 空串 / 小数 / inf / 半个对象）
+    回默认值，再按需夹住 —— 与查询串那条 `_qint` 是同一把尺子（这里直接调它）。
+
+    为什么单开一处：订阅整理那几个数字参数一直是裸的 `int(body["index"])`。脏形状
+    抛出的 ValueError / TypeError 虽然会被 `feed_do` 的兜底 catch 接住（不像
+    `_body_str` 管的那几条会把连接甩掉），但接住之后 `str(e)[:180]` 会**原样**递到
+    界面上 —— 用户点一下「挪顺序」，弹出来的是
+    `invalid literal for int() with base 10: 'abc'` 这种 Python 报错原文，而不是人话。
+    `_body_str` / `_body_list` 立下的口径是「字段级脏形状当没写」，数字字段照同一条
+    走：认不出回默认值，绝不把解释器的报错递出去。布尔与 `_qint` 同口径（不当 1 用）。
+    """
+    return _qint((body or {}).get(key), default, lo=lo, hi=hi)
 
 
 def _req_target(raw):
