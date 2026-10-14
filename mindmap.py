@@ -38,6 +38,14 @@ MAX_LINK_TEXT = 60
 MAX_ID = 40
 MAX_COORD = 20000.0           # 拖过的坐标只收这个范围内的数，否则画布会被顶成几万像素
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现，不成对）：浏览器的 JS 字符串被拦腰截断时
+# 会留下它，JSON 那边 `json.loads` 收得下（形如 "\ud83d"），于是它一路走到 mindmap.json
+# 落盘那一步 —— 而那份文件是 ensure_ascii=False 写的，写 utf-8 时当场 UnicodeEncodeError，
+# 用户看到的是「这张图存不下去」，画了半天的图因为一个坏字符白存。它是坏输入不是内容，
+# 洗掉比让整张图存不下去强。成对的代理码点不必管：json 解码时已经合成一个真字符，
+# 这里只会摘到落单的那个。与 board.py / person.py 同一口径。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
 # 四种形态：名字是给路由用的键，中文名是给人看的
 FORMS = (("tree", "括号图"), ("radial", "辐射图"),
          ("fishbone", "鱼骨图"), ("concept", "概念图"))
@@ -234,13 +242,17 @@ def _rough_size(raw, limit=MAX_NODES * 4):
 
 def _clip(v, n):
     s = "" if v is None else str(v)
-    return s.replace("\r\n", "\n").strip()[:n]
+    return SURROGATE.sub("", s.replace("\r\n", "\n").strip())[:n]
 
 
 def _trunc(v, n, state):
-    """带计数的裁剪：裁了就报，静默吞掉等于骗用户（他会以为备注还在）。"""
+    """带计数的裁剪：裁了就报，静默吞掉等于骗用户（他会以为备注还在）。
+
+    落单的半个代理码点先摘掉再量长度与裁剪：它是写不进 utf-8 的坏输入，留着它整张图
+    都存不下去（见 SURROGATE 那段）。真字符不受影响。
+    """
     s = "" if v is None else str(v)
-    s = s.replace("\r\n", "\n").strip()
+    s = SURROGATE.sub("", s.replace("\r\n", "\n").strip())
     if len(s) > n:
         state["dropped"] += 1
     return s[:n]
@@ -290,8 +302,12 @@ def _count(v):
 
 def _stamp(v):
     """时间戳原样保留（字符串、限长），绝不在这里盖当前时间 —— 否则 normalize
-    两次结果不同，幂等就破了。盖时间戳是 save_map 的活。"""
-    return v if isinstance(v, str) and len(v) <= 40 else ""
+    两次结果不同，幂等就破了。盖时间戳是 save_map 的活。
+
+    落单的半个代理码点仍要摘：created 会被存回去，带着它整张图就写不出去（同 SURROGATE）。
+    摘掉不算改口径 —— 时间戳本来就是正常的 ASCII 字符，坏码只可能来自手改过的 JSON。
+    """
+    return SURROGATE.sub("", v) if isinstance(v, str) and len(v) <= 40 else ""
 
 
 def _new_id(kind):
@@ -358,10 +374,22 @@ def save_map(book_dir, doc) -> dict:
 
 def _write_json(path, text):
     """先写 tmp 再 rename，覆盖前留一份 .prev：崩在写一半时盘上顶多留下 .tmp，
-    用户的图不会变成半截 JSON（这个仓库的笔记那边也是这么做的）。"""
+    用户的图不会变成半截 JSON（这个仓库的笔记那边也是这么做的）。
+
+    写入这一步失败（内容里还有写不进 utf-8 的东西）时把 .tmp 收掉：留着它既没用，
+    又会让书目录里多一个只有磁盘看得见的垃圾。**只在写这一步失败时收** ——
+    后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，删掉才是真丢东西。
+    """
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     if os.path.exists(path):
         try:
             os.replace(path, path + ".prev")
