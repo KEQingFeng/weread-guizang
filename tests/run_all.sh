@@ -168,6 +168,9 @@ run "切页一致性（一块舞台 / 无横跳 / 常驻视图）" "$PY" tests/c
 # 叠卡快速切书那条 bug（R4-4）：常驻 will-change 堆合成层、applyStack 无条件重刷整台卡、
 # 批尾每翻一步同步重铺 —— 这三条都随书量放大成卡顿，且都能在源码里一眼钉死。只读 ui.html。
 run "叠卡性能（只在翻动提层 / 位置没变不碰卡 / 批尾补卡去抖）" "$PY" tests/check_stack_perf.py
+# 划线笔记那一屏改成书籍卡片瀑布流，并把「取书」时在本机划的线也并进来（R4-6）。
+# 前端读源码钉瀑布流版式与两个来源的合并、后端直接落一份 notes.json 再读回来，全离线。
+run "划线笔记瀑布流（书卡版式 / 微信 + 取书合并 / 同一套功能）" "$PY" tests/check_notebooks.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
