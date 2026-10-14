@@ -4758,6 +4758,28 @@ def _body_list(raw):
     return raw if isinstance(raw, list) else []
 
 
+def _body_str(body, key, default=""):
+    """POST body 里**本该是字符串**的字段：只放行真字符串，别的形状一律当没写。
+
+    为什么单开一处：`do_POST` 开头立过「合法 JSON 也可能是数组 / 字符串 / 数字，
+    这里统一收成空对象」那一道，只管顶层对象。字段级的老写法是
+
+        ((body or {}).get("state") or "").strip()
+
+    —— `state` 写成数字 / 列表 / 对象时，`or ""` 换不掉它（非空值都是真），紧跟着的
+    `.strip()` 当场 AttributeError。这几个口（`/api/book_state` 的 state、
+    `/api/agent/chat` 的 q、`/api/agent/quick` 的 mode、`/api/config` 的两个地址）
+    都没有兜底 try/except，异常一路穿出 `do_POST`；`BaseHTTPRequestHandler` 不会
+    替你回 500，它只是把连接关掉，前端 `await fetch` 收到 RemoteDisconnected，
+    屏幕上就是「按下去毫无动静」。
+
+    口径与查询串那条 `_qint` / 请求体列表那条 `_body_list` 同一把尺子：认不出就当
+    没写，回默认值，绝不抛。真字符串一个字不改（只在两头去空白）。
+    """
+    v = (body or {}).get(key)
+    return v.strip() if isinstance(v, str) else default
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -5531,7 +5553,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/book_state":
             ids = _body_list((body or {}).get("books"))
-            st = ((body or {}).get("state") or "").strip()[:8]
+            st = _body_str(body, "state")[:8]
             want = str((body or {}).get("module") or "").strip()
             lib = load_lib()
             n = 0
@@ -5571,7 +5593,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": f"已删除 {n} 本的本地缓存"})
 
         if u.path == "/api/agent/chat":
-            q = ((body or {}).get("q") or "").strip()
+            q = _body_str(body, "q")
             if not q:
                 return self._json({"ok": False, "msg": "说点什么吧"})
             url, key, model = agent_cfg()
@@ -5594,7 +5616,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/agent/quick":
             # 划词翻译 / 点词查义：一次问完、一次看全，所以走普通 JSON 不走流式。
-            mode = ((body or {}).get("mode") or "translate").strip()
+            mode = _body_str(body, "mode") or "translate"
             if mode not in QUICK_SYS:
                 mode = "translate"
             ok, out = agent_quick(mode, (body or {}).get("text"),
@@ -5749,8 +5771,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json({"ok": False, "msg": str(e)[:300]})
         if u.path == "/api/config":
-            key = ((body or {}).get("weread_key") or "").strip()
-            flomo = ((body or {}).get("flomo_url") or "").strip()
+            key = _body_str(body, "weread_key")
+            flomo = _body_str(body, "flomo_url")
             cfg = load_cfg()
             if flomo is not None and ("flomo_url" in (body or {})):
                 if flomo and not re.match(r"^https://flomoapp\.com/iwh/[\w-]+/?$", flomo):

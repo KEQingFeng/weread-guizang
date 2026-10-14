@@ -603,6 +603,14 @@ run "账本 BOM（带 BOM 的手改账本不再被当成空账）" "$PY" tests/c
 # 这一条把两处的 _qint 收口钉住：纯行为（脏值回默认 / 好值与夹取边界不变）+ 源码走查
 # （全文件不许再有裸 int(q.get(...)) / int(one(...))）+ in-process 真机裸 HTTP。
 run "订阅 / 便签翻页参数收口（脏 limit / offset 不再把整页读成错误）" "$PY" tests/check_view_paging.py
+# 请求体里「本该是字符串」的字段还有一档没收：`((body or {}).get("state") or "").strip()`
+# 里那句 `or ""` 只换得掉假值，数字 / 列表 / 对象照样穿过去、在 `.strip()` 当场抛
+# AttributeError。这几个口（book_state 的 state、agent/chat 的 q、agent/quick 的 mode、
+# config 的两个地址）都没有兜底 try/except，异常穿出 do_POST 后连接被直接关掉，前端
+# 收到 RemoteDisconnected，表现又是「按下去没反应」。收口是 ui_server._body_str：只放行
+# 真字符串，认不出当没写。纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，
+# 不联网、不碰真实数据，归静态段。
+run "请求体字符串字段脏形状（state / q / mode / Key 写脏不再断连）" "$PY" tests/check_post_body_str.py
 
 if [ "$FAST" = "1" ]; then
   echo; echo "静态门禁：通过 $PASSED 项，失败 ${#FAILED[@]} 项"
