@@ -916,6 +916,12 @@ def material_block(items, limit=6000):
         if not s:
             continue
         if used + len(s) > limit:
+            # 单独一条就超过上限时旧写法直接 break，keep 还是空的，于是整段素材被
+            # 丢成 ""：用户明明挂着便签，模型却一个字都没收到。夹一段带上，至少让
+            # 开头那部分事实进得去。
+            if not keep:
+                keep.append(s[:limit])
+                used = limit
             break
         keep.append(s)
         used += len(s)
@@ -963,7 +969,13 @@ def parse_sparks(raw, n=3):
         s = line.strip()
         if not s:
             continue
-        s = re.sub(r"^[-*+•\d]+[.)、:：]?\s*", "", s)
+        # 只摘「真的像是列表标记」的那一小段：项目符号本身，或 1–2 位编号 + 分隔符。
+        # 旧写法 `[-*+•\d]+[.)、:：]?\s*` 里分隔符与空白都是可选的，于是任何以数字
+        # 开头的方向都会被啃掉一截 —— 「2024 年的数据说明了什么」变成「年的数据说明了
+        # 什么」、「3 个能立刻用的方法」变成「个能立刻用的方法」。方向是给人看的，开头
+        # 那个数字往往就是信息本身，不能当成编号吃掉。`{1,2}` 挡住年份；`(?!\d)` 挡住
+        # 「3.14」「1:30」这类以数字开头的正文。
+        s = re.sub(r"^(?:[-*+•]+\s*|\d{1,2}、\s*|\d{1,2}[).:：](?!\d)\s*)", "", s)
         s = re.sub(r"^[「《\"“'\[]+|[」》\"”'\]]+$", "", s).strip()
         s = s.replace("**", "").strip()
         if not s or s in out:
