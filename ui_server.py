@@ -4552,6 +4552,27 @@ def restart_backend():
             "msg": "后端正在换成新进程，页面几秒后自己刷新（在跑的任务会中断）"}
 
 
+def _qint(raw, default, lo=None, hi=None):
+    """查询串里的数字收成整数：解不出（abc / 空串 / 小数 / inf）就回默认值，再按需夹住。
+
+    为什么单开一处：`int(q.get("tail")[0])` 遇到手改过的地址（`?tail=abc`）会当场抛，
+    异常穿出 do_GET 后连接被直接掐断，前端 `await` 只看见 RemoteDisconnected ——
+    和「点了没反应」是同一种症状（参见 tests/test_server_fallback.py 立的规矩）。
+    脏值当没传、越界夹回边界，比回 500 或断连都好解释。非标量（同一个键传两遍）也当脏。
+    """
+    if isinstance(raw, (list, tuple, dict, set)):
+        return default
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -4866,12 +4887,13 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 base = LOG_BASE
                 total = len(LOG)
-                tail = q.get("tail", [None])[0]
+                # tail 脏值（?tail=abc）当没传，退回 since 那条路；since 脏值当 0。
+                tail = _qint(q.get("tail", [None])[0], None)
                 if tail is not None:
-                    k = max(0, min(int(tail), total))
+                    k = max(0, min(tail, total))
                     lines = LOG[total - k:] if k else []
                 else:
-                    since = int(q.get("since", ["0"])[0])
+                    since = _qint(q.get("since", ["0"])[0], 0)
                     lines = LOG[max(0, since - base):]
                 nxt = base + total
             return self._json({"base": base, "lines": lines, "next": nxt})
@@ -4910,7 +4932,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/notes_search":
             kw = (q.get("q", [""])[0] or "").strip()
-            lim = int(q.get("limit", ["80"])[0])
+            lim = _qint(q.get("limit", ["80"])[0], 80, lo=1)
             if not kw:
                 return self._json({"ok": True, "data": [], "total": 0})
             low = kw.lower()
@@ -4921,7 +4943,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "data": hit[:lim], "total": len(hit)})
 
         if path == "/api/notes_random":
-            n = max(1, min(int(q.get("n", ["6"])[0]), 30))
+            n = _qint(q.get("n", ["6"])[0], 6, lo=1, hi=30)
             # src=wx 只抽微信读书索引；src=local 只抽本机取书那一路；默认两边都抽。
             src = (q.get("src", ["all"])[0] or "all").strip().lower()
             wx = load_notes_index().get("items") or []
