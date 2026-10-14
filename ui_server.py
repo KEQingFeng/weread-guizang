@@ -3312,8 +3312,10 @@ def write_meta(book_id, title, author, done):
     cur.update({"title": title or cur.get("title") or book_id,
                 "author": author or cur.get("author") or "",
                 "done": bool(done), "updated_at": time.time()})
-    with open(mp, "w", encoding="utf-8") as f:
-        json.dump(cur, f, ensure_ascii=False, indent=2)
+    # 与引擎那一侧同一口径：meta.json 先写 .tmp 再改名。这个口是「改书名 / 标完成」
+    # 走的路，直写一旦撞上进程退出，盘上就只剩半截 JSON —— 读侧只能当没有 meta，
+    # 书名与完成标记一起丢。全后端的账本落盘只有 _write_json 一份实现。
+    _write_json(mp, cur)
 
 
 # 一次「没跑完」会留下什么：章节 md、raw 页缓存、图片、目录快照、进度快照、
@@ -3323,7 +3325,12 @@ def write_meta(book_id, title, author, done):
 RESIDUE_DIRS = ("chapters", "raw", "images")
 # _stuck.json 必须跟着清：那是「这一项连着两轮钉不住」的记账，章节都删光重取之后
 # 它还留着，新一轮就会跳过几章自己根本没读过的 —— 恰好又是「每次都缺同几章」。
-RESIDUE_FILES = ("_catalog.json", "_progress.json", "_stuck.json")
+# 三份账本都由 export_precise._dump_json 先写 `<名>.tmp` 再改名（原子落盘），所以在
+# 改名之前进程被强杀（停止键 / 关窗口）会留下一个 `.tmp` 半截件：它不属于任何读口，
+# 又不会被别的清理碰到，只能在这里跟着原文一起收掉，不然它会永远占着书目录。
+RESIDUE_FILES = ("_catalog.json", "_catalog.json.tmp",
+                 "_progress.json", "_progress.json.tmp",
+                 "_stuck.json", "_stuck.json.tmp")
 
 
 def drop_stray_md(book_id, title=""):
