@@ -616,6 +616,39 @@ def _publish_time(tree, raw):
     return _meta(tree, "article:published_time", "og:time")
 
 
+def safe_charset(charset, fallback="utf-8"):
+    """把外站声明的字符集收成一个 Python 真能用的编码名，认不出就退回 fallback。
+
+    这个声明来自对方站点，可能是手滑写错的名字（实测有页面写 `charset=x-unknown`），
+    也可能压根不是文本编码（`base64` / `hex`）。`bytes.decode` 对这两类名字抛的是
+    **LookupError** —— `errors="replace"` 管的是「有字节解不出来」，管不了「编码名本身
+    不存在」。所以不把这一步收口的话，取网页会以异常收场：剪藏冒出一句运行期错误，
+    内置浏览器那一屏直接 500，而不是把页面显示出来、或铺一页人话。
+    """
+    name = str(charset or "").strip().strip("\"'").lower()
+    for cand in (name, fallback):
+        if cand and _is_text_codec(cand):
+            return cand
+    return "utf-8"
+
+
+def _is_text_codec(name):
+    """这个名字能不能交给 `bytes.decode` 用：真解一个字节，别只查名字。
+
+    `codecs.lookup` 认得 `base64` 这类「字节↔字节」的编码，可它并不是文本编码，
+    `bytes.decode` 照样拒收；空字节的探测又会因为短路而放过任何名字，所以这里用一个
+    真的 ASCII 字节去试 —— 抛 UnicodeDecodeError 说明名字认得、只是这一字节不合它的
+    规矩（例如 utf-16 要偶数长度），那它仍然是文本编码。
+    """
+    try:
+        b"A".decode(name)
+    except UnicodeDecodeError:
+        return True
+    except (LookupError, ValueError, TypeError):
+        return False
+    return True
+
+
 def fetch(url):
     """取回页面原文，返回 (raw_text, final_url)。任何失败都抛带人话的 ValueError。"""
     u = (url or "").strip()
@@ -643,7 +676,7 @@ def fetch(url):
         raise ValueError("打不开这个页面：%s" % str(e)[:120])
     if len(blob) > MAX_BYTES:
         raise ValueError("页面太大了（超过 6MB），不像是一篇文章")
-    raw = blob.decode(charset or "utf-8", errors="replace")
+    raw = blob.decode(safe_charset(charset), errors="replace")
     if "<" not in raw:
         raise ValueError("取回来的东西不像网页")
     return raw, final

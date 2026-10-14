@@ -152,16 +152,20 @@ def _looks_html(blob, ctype):
 
 
 def shape(blob, ctype, charset, final_url):
-    """把取回来的字节收成 {ok, url, ctype, body}。纯函数，测起来不用连网。"""
+    """把取回来的字节收成 {ok, url, ctype, body}。纯函数，测起来不用连网。
+
+    服务端声明的字符集同样不可信：用的是 `clip_article.safe_charset`，
+    认不出的编码名退回 utf-8，而不是让一个手滑的 `charset=…` 把这一屏打成 500。
+    """
     ctype = (ctype or "").lower()
     if _looks_html(blob, ctype):
-        text = blob.decode(charset or "utf-8", errors="replace")
+        text = blob.decode(clip_article.safe_charset(charset), errors="replace")
         page = prepare(text, final_url)
         return {"ok": True, "url": final_url,
                 "ctype": "text/html; charset=utf-8", "body": page.encode("utf-8")}
     out = ctype or "application/octet-stream"
     if charset and out.startswith("text/"):
-        out = "%s; charset=%s" % (out, charset)
+        out = "%s; charset=%s" % (out, clip_article.safe_charset(charset))
     return {"ok": True, "url": final_url, "ctype": out, "body": blob}
 
 
