@@ -132,8 +132,14 @@ def _norm_entry(e):
     e.setdefault("content_md", "")
     e.setdefault("summary", "")
     e.setdefault("content_html", "")
-    if not e.get("published_ts"):
-        e["published_ts"] = _to_ts(e.get("published"))
+    # 时间字段统一成整数再往外走：feed.json 是手改得动的文本，老版本 / 手工编辑
+    # 会把 published_ts 或 fetched_at 写成字符串（"1759914000" 或 ISO 日期）。而
+    # 排序、since / older_than 过滤、按天数裁剪都拿它和整数比大小 —— 列表里只要
+    # 混进一个字符串，就是 `'<' not supported between 'str' and 'int'`，整份条目
+    # 列表连带筛选、批量标已读一起 500。认不出的当 0，不让一条脏数据带走一页。
+    e["published_ts"] = _as_ts(e.get("published_ts")) or _to_ts(e.get("published"))
+    if "fetched_at" in e:
+        e["fetched_at"] = _as_ts(e.get("fetched_at"))
     return e
 
 
@@ -1364,11 +1370,23 @@ def refresh(feed_id=None, force=False, group=None, progress=None, should_stop=No
 # ── 读取 ────────────────────────────────────────────────────────────
 
 def _as_ts(v):
-    """把「时间」参数统一成 epoch：数字直接用，字符串按 ISO / RFC 822 解，解不出算 0。"""
+    """把「时间」参数统一成 epoch：数字直接用，纯数字串按 epoch 认，
+    其余字符串按 ISO / RFC 822 解，解不出算 0。
+
+    纯数字串那一支是给账本兜底的：老版本 / 手改的 feed.json 里时间常被写成
+    "1759914000"，只按日期解会解成 0，把「有发布时间」的条目降级成没有。
+    """
     if isinstance(v, bool):
         return 0
     if isinstance(v, (int, float)):
         return int(v) if v > 0 else 0
+    if isinstance(v, str):
+        try:
+            n = int(float(v.strip()))
+        except (ValueError, OverflowError, TypeError):
+            n = None
+        if n is not None:
+            return max(0, n)
     return _to_ts(v)
 
 
