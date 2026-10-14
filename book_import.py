@@ -33,6 +33,8 @@ import uuid
 import zipfile
 from xml.etree import ElementTree as ET
 
+import md_fence
+
 # 单份导入的上限。base64 会胖三分之一，前端也按这个数先拦一道。
 MAX_BYTES = 200 * 1024 * 1024
 # EPUB 解压后的总量上限：防压缩炸弹把内存吃干
@@ -81,35 +83,18 @@ _H_PLAIN = re.compile(
     r"|Chapter\s+[0-9IVXLCivxlc]{1,6}"
     r"|CHAPTER\s+[0-9IVXLCivxlc]{1,6})\s*[^\n]{0,40}$")
 
-# 围栏代码块的开 / 收：行首最多三个空格，三个以上的 ` 或 ~，后面跟 info string。
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-
-
+# 围栏代码块的识别统一交给 md_fence（全仓唯一那把尺子）。这里只留一层薄壳：
+# 切章要把 mask 和 `text.split("\n")` 一行行对齐，所以行由调用方自己切、再交出去标。
 def _fenced_mask(text):
     """逐行标出「这一行属于围栏代码块」。True 的行不许再拿去认标题。
 
     代码块里的 `# 安装依赖` 是注释，不是章节 —— 不标出来的话，导入一本带代码示例的
     Markdown 书会照着注释行切章，目录里多出一批并不存在的章节、正文也被剪成碎块。
-    口径按 CommonMark：开栏三个以上同种字符，收栏必须同种、不短于开栏且后面只剩空白；
-    反引号开栏的 info string 里再出现反引号就不算开栏，没有收栏的块一直吃到文末。
+    口径（开栏三个以上同种字符、反引号 info string 里不许再有反引号、收栏同种且不短于
+    开栏并只剩空白、没有收栏的块一直吃到文末）只有一份实现，在 `md_fence`；这一层
+    只负责「按 \\n 切行」，好让返回的 mask 与 `text.split("\\n")` 逐行对得上。
     """
-    mask = []
-    fence = None                       # (字符, 长度)，None 表示不在块里
-    for ln in (text or "").split("\n"):
-        m = _FENCE.match(ln)
-        if m:
-            ch, run, info = m.group(1)[0], len(m.group(1)), m.group(2)
-            if fence is None:
-                if not (ch == "`" and "`" in info):
-                    fence = (ch, run)
-                    mask.append(True)
-                    continue
-            elif ch == fence[0] and run >= fence[1] and not info.strip():
-                fence = None
-                mask.append(True)
-                continue
-        mask.append(fence is not None)
-    return mask
+    return md_fence.fence_mask((text or "").split("\n"))
 
 
 def _split_at(text, pattern):

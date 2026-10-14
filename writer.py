@@ -31,6 +31,7 @@ import time
 import uuid
 
 import book_layout
+from md_fence import prose_lines
 
 MODULE = "write"
 PREFIX = "write_"
@@ -182,22 +183,16 @@ def words(text):
             "total": han + latin + digit, "chars": len(text or "")}
 
 
-# 围栏代码块：最多三格缩进 + 三个以上的反引号或波浪号（CommonMark 那两条）。
-# 写作页的工具条只插 ```，可粘贴进来的稿子什么写法都有，两种都得认。
-_FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+# 围栏代码块：规矩只有一处，在 md_fence（CommonMark 那几条，含「反引号起的围栏、
+# 信息串里不许再有反引号」）。写作页的工具条只插 ```，可粘贴进来的稿子什么写法都有。
+# 下面保留 `_prose_lines` 这个名字与一层薄壳：大纲、标题兜底与门禁都按它认「哪些行
+# 算正文」，实现一律转发 md_fence，不再自己抄一份状态机 —— 抄两份就会在这些边角上
+# 慢慢走散（导入切章那边早就按同一条规矩判，两处对不齐就会「切章看得见、大纲看不见」）。
 _FENCE_BARE = re.compile(r"[`~]{3,}\Z")
 
 
-def _fence_mark(line):
-    """这一行是围栏标记的话，给 (字符, 长度, 后面的信息串)；不是就给 None。"""
-    m = _FENCE.match(str(line or ""))
-    if not m:
-        return None
-    return m.group(2)[0], len(m.group(2)), m.group(3)
-
-
 def _prose_lines(text):
-    """把围栏代码块整段跳过，逐行给 (原始行号, 行内容)。
+    """把围栏代码块整段跳过，逐行给 (原始行号, 行内容)（口径见 md_fence）。
 
     **为什么标题与大纲必须跳代码块**：粘一段带 `# 注释` 的代码进稿子，若还照
     `^#+ ` 认标题，大纲里就多出并不存在的章节，稿子以代码开头时标题还会变成
@@ -207,20 +202,7 @@ def _prose_lines(text):
     行号仍按**原文**数，所以要 enumerate 原始行再筛，不能筛完再编号 ——「跳到这一节」
     靠的就是原文行号。
     """
-    mark = None
-    for i, line in enumerate((text or "").splitlines(), start=1):
-        f = _fence_mark(line)
-        if mark is None:
-            if f:
-                mark = (f[0], f[1])
-                continue
-            yield i, line
-            continue
-        # 在代码块里：只有「同种字符、不短于开头、后面没别的东西」才算收尾。
-        # 收尾那一行自己也是代码区的一部分，不往外吐。
-        if f and f[0] == mark[0] and f[1] >= mark[1] and not f[2].strip():
-            mark = None
-        continue
+    return prose_lines(text)
 
 
 def outline(text):
