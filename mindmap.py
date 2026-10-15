@@ -273,10 +273,21 @@ def _hex(v):
 
 def _coord(v):
     """拖过的坐标只认有限正数；其余当没拖过（走自动布局）。
-    负数会把内容顶出画布、非数字会让整张图算不出框，都不该往下传。"""
+    负数会把内容顶出画布、非数字会让整张图算不出框，都不该往下传。
+
+    越界整数与 inf / NaN 同档：`json` 认一长串数字（`"x": 1` 后面再跟四百个 0
+    也是合法 JSON），读回来是个 Python 大整数，而 `float(v)` 对超过约 1.8e308 的
+    int 抛的是 `OverflowError` —— 它不在 ValueError 里。不接住的话，一条手改的
+    坐标就让 `normalize` 当场抛：`save_map` 在进自己的 try 之前先洗图，于是
+    「写失败不抛」也守不住；`load_map` 那侧更糟，宽 except 把整份图吞成空账，
+    用户看到的是整张导图没了（连同别的节点）。当「没拖过」处理，图和别的节点
+    都还在。"""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    f = float(v)
+    try:
+        f = float(v)
+    except (OverflowError, ValueError, TypeError):
+        return None
     return f if math.isfinite(f) and 0.0 <= f <= MAX_COORD else None
 
 

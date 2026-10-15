@@ -270,6 +270,20 @@ chk("normalize()：坐标是 Infinity / nan 时当没钉过（否则画布被顶
     all(mm.normalize({"nodes": [dict(text="根", id="q1", x=x, y=y)]})["nodes"][0]["x"] is None
         for x, y in ((float("inf"), float("inf")), (float("nan"), 10.0), (10 ** 300, 5.0))),
     None)
+# 手改的 JSON 里「1」后面再跟四百个 0 也是合法数字：读回来是 Python 大整数，而 float()
+# 对超过约 1.8e308 的 int 抛的是 OverflowError —— 不在 ValueError 里。不接住的话，
+# 一条手改坐标就能让 normalize 当场抛。这里接住异常、报 FAIL，别把后面几百条断言带走。
+def _big_coord_ok():
+    try:
+        g = mm.normalize({"nodes": [dict(text="根", id="q2", x=10 ** 400, y=-10 ** 400)]})
+    except Exception:
+        return False
+    return (g["nodes"][0]["x"] is None and g["nodes"][0]["y"] is None
+            and mm.normalize(g) == g)
+
+
+chk("normalize()：坐标是超出 float 上限的大整数时当没钉过，不抛也不破幂等",
+    _big_coord_ok(), None)
 chk("normalize()：自环与指着不存在节点的连线都丢掉并报数（半截线让人以为图坏了）",
     a["links"] == [] and a["dropped"] >= 2, (a["links"], a["dropped"]))
 chk("normalize()：连着子孙（不是根）的线要留得下来，布局里也真有这条边",

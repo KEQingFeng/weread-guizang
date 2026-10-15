@@ -117,6 +117,24 @@ chk("load_map 后再存回去：ok 且不留 .tmp",
     mm.save_map(d2, loaded).get("ok") is True
     and not any(x.endswith(".tmp") for x in names(d2)), names(d2))
 
+# ── 3b. 手改文件里坐标是一长串数字：整张图还在，不吞成空账 ────────────
+# JSON 认 1 后面跟四百个 0；读回来是 Python 大整数，float() 对它抛的是 OverflowError。
+# 不接住的话 load_map 的宽 except 会把它吞成空图 —— 用户看到的是整张导图没了。
+d4 = mk()
+with open(mm.path_of(d4), "w", encoding="utf-8") as f:
+    json.dump({"title": "大坐标",
+               "nodes": [{"id": "a", "text": "根", "x": 10 ** 400, "y": -10 ** 400,
+                          "children": [{"id": "b", "text": "子", "children": []}]}]}, f)
+back4 = mm.load_map(d4)
+chk("load_map：坐标是超出 float 上限的大整数时整张图还在（不被吞成空账）",
+    back4["title"] == "大坐标" and mm.node_count(back4) == 2,
+    (back4["title"], mm.node_count(back4)))
+chk("load_map：那份大整数坐标被当成没钉过", back4["nodes"][0]["x"] is None,
+    back4["nodes"][0]["x"])
+chk("存回去：坐标带大整数也存得下、节点没丢、不留 .tmp",
+    mm.save_map(d4, back4).get("ok") is True and mm.node_count(mm.load_map(d4)) == 2
+    and not any(x.endswith(".tmp") for x in names(d4)), names(d4))
+
 # ── 4. _write_json：写崩时抛出去，但 .tmp 收干净 ─────────────────────
 t = mk()
 raised = False
@@ -136,7 +154,7 @@ chk("存档：覆盖保存仍留一份 .prev", os.path.exists(os.path.join(d3, "
 chk("存档：.prev 不是 .json，不会被当成本图重复读", mm.load_map(d3)["title"] == "二",
     mm.load_map(d3)["title"])
 
-for tmpdir in (d, d2, d3, t):
+for tmpdir in (d, d2, d3, d4, t):
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 print()
