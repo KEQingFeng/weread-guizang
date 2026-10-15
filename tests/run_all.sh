@@ -540,6 +540,15 @@ run "flomo 越界字数（一长串数字不再把记忆画像整页打不开）
 # drop_lone_surrogates 一把尺子钉住出生 / 读回 / 落盘 / CSV 四个口子，并真发一次
 # POST /api/flomo/notes。纯离线，沙盒在系统临时目录。
 run "flomo 便签半个代理码点（手记 / 脏账本 / 清空 / CSV 不整屏卡住）" "$PY" tests/check_flomo_surrogate.py
+# 上面几条都在管「账本里是什么」，这一条管「账本怎么写进去」。手记 / 打标签 / 忘一条 /
+# 清空 / 导入 / 收成书全从 flomo_notes.save() 过，而后端是 ThreadingHTTPServer ——
+# 同一进程里两个请求线程可以同时进来。旧写法的临时件只带进程号，两个线程于是落到
+# 同一个临时件上：一个把另一个写了一半的截断，最后顶上去的账两份内容交织（load 解不动
+# 就整份退回空账）；或者先收尾那个 replace 把共用的临时件搬走，后一个 replace 当场
+# FileNotFoundError。收口与 anna_state / ui_server._write_json 同一把尺子（进程号 +
+# 随机串），写失败先把临时件收干净再抛。纯函数 + 系统临时目录 + 两个真线程并写，
+# 不联网、不开浏览器、不起服务。
+run "flomo 账本落盘（两个线程不共用临时件 / 写失败不留 .tmp）" "$PY" tests/check_flomo_atomic.py
 # 写作那一格是同一个故事的另一本账：meta.json（rev / words / created / updated / 灵感角度）
 # 与 _books.json（每本书的 created / updated / chapters）同样会被手工编辑、被旧版本写成别的
 # 形状，而读它们的地方原来一律 `int(v or 0)`、`list(v or [])` 直读直用：一个 "很多" 让写作屏
