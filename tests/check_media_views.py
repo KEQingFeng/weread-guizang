@@ -174,6 +174,29 @@ with sync_playwright() as pw:
         chk(f"订阅：「{what}」在", page.locator(f'[data-pane="feed"] {sel}').count() == 1)
     chk("订阅：没订任何源时有空态话", page.evaluate(
         "() => (document.querySelector('#fSubs').innerText || '').includes('还没有订阅任何源')"))
+    # 用户原话是「文字为自适应 不再挤压 或者默认文字展示正常」：默认一行高、占位符是一句话，
+    # 贴进去一长串地址时这行自己往上长，而不是把字挤成一团看不见。
+    chk("订阅：默认就一行高（没被两行占位符撑开）", page.evaluate(
+        "() => { const t = document.querySelector('#fTa');"
+        " return !!t && !/&#10;|\\\\n/.test(t.getAttribute('placeholder') || '')"
+        " && t.getBoundingClientRect().height < 60; }"),
+        page.evaluate("() => { const t = document.querySelector('#fTa');"
+                      " return t ? [t.placeholder, Math.round(t.getBoundingClientRect().height)] : null; }"))
+    page.evaluate("() => { const t = document.querySelector('#fTa');"
+                  " t.value = 'https://example.com/" + "a" * 220 + "';"
+                  " t.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.wait_for_timeout(200)
+    grown = page.evaluate("() => { const t = document.querySelector('#fTa');"
+                          " return {h: t.getBoundingClientRect().height, sc: t.scrollHeight,"
+                          " over: t.scrollWidth > t.clientWidth + 2}; }")
+    chk("订阅：贴一长串地址，这行自己长高（不是把字挤没）",
+        grown["h"] >= 44 or grown["sc"] > 40, grown)
+    chk("订阅：长地址没有横向溢出（不换行才叫挤压）", not grown["over"], grown)
+    page.evaluate("() => { const t = document.querySelector('#fTa');"
+                  " t.value = ''; t.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.wait_for_timeout(150)
+    chk("订阅：清空后回到一行高", page.evaluate(
+        "() => document.querySelector('#fTa').getBoundingClientRect().height < 60"))
     sweep(page, "订阅")
     page.screenshot(path=str(selftest.SHOTS / "media-feed.png"))
 
@@ -184,13 +207,30 @@ with sync_playwright() as pw:
     chk("视频：pane 可见", page.evaluate(
         "() => { const p = document.querySelector('.vpane[data-pane=\"video\"]');"
         " return !!p && !p.hidden; }"))
-    for sel, what in (("#vTa", "链接输入框"), ("#vPlan", "识别"), ("#vStart", "开始转笔记"),
+    for sel, what in (("#vTa", "链接输入框"), ("#vStart", "手指（一点即转）"),
+                      ("#vRing", "手指外圈的环形进度"), ("#vCnt", "这一行的话"),
                       ("#vCap", "能力灯"), ("#vProg", "进度条"), ("#vShelf", "转出来的书"),
                       ("#vWrap", "两栏工作台"), ("#vPick", "看哪本"), ("#vQ", "关键词筛"),
                       ("#vFrom", "起点"), ("#vTo", "终点"), ("#vRows", "段落容器"),
                       ("#vSave", "保存转写"), ("#vRebuild", "重建章节"),
                       ("#vExport", "导出"), ("#vCntT", "段落计数"), ("#vFoldNav", "收起左栏")):
         chk(f"视频：「{what}」在", page.locator(f'[data-pane="video"] {sel}').count() == 1)
+    # 剪藏那一屏用的是同一颗手指：72px 圆钮 + 一只手 + 外圈那道环，一眼就知道点它。
+    chk("视频：手指就是剪藏那颗 .clipfinger（两屏共用一个动作形状）", page.evaluate(
+        "() => { const b = document.querySelector('#vStart');"
+        " return !!b && b.classList.contains('clipfinger')"
+        " && b.getBoundingClientRect().width > 60; }"),
+        page.evaluate("() => { const b = document.querySelector('#vStart');"
+                      " return b ? [b.className, Math.round(b.getBoundingClientRect().width)] : null; }"))
+    chk("视频：手指里面那只手和外圈那道环都画出来了", page.evaluate(
+        "() => !!document.querySelector('#vStart .cf-ico')"
+        " && !!document.querySelector('#vStart .cf-ring')"))
+    chk("视频：输入框 + 那句提示 + 停止，一起收在手指右边那一栏", page.evaluate(
+        "() => !!document.querySelector('.vthero .vthin #vTa')"
+        " && !!document.querySelector('.vthero .vthin .vline')"
+        " && !!document.querySelector('.vthero .cliphelp')"))
+    # 旧的那条「识别 / 开始」步骤条不能残着 —— 它和用户原话「一点即可」是同一件事。
+    chk("视频：旧的步骤条 .vtsteps 不在这屏了", page.locator('[data-pane="video"] .vtsteps').count() == 0)
     lights = page.evaluate(
         "() => [...document.querySelectorAll('#vCap .it')].map(e => e.className)")
     chk("视频：四盏灯都亮出来了（下载器 / ffmpeg / 云端转写 / 大模型）",
@@ -258,10 +298,12 @@ with sync_playwright() as pw:
     sweep(page, "视频")
     page.screenshot(path=str(selftest.SHOTS / "media-video.png"))
 
-    # 点了「开始转笔记」但没贴链接 → 只提示、不炸
+    # 这屏已经砍掉「识别」那颗钮：手指一点就是「认链接 + 开跑」。这里空着链接、沙盒里也没
+    # 给剪贴板权限，点下去只能落在一句提示上 —— 不许报错，也不许自己弹一层要人填东西。
     page.click('[data-pane="video"] #vStart')
     page.wait_for_timeout(400)
-    chk("视频：空链接点开始只出提示，不报错", not errors, errors[:4])
+    chk("视频：空链接点手指只出提示，不报错", not errors, errors[:4])
+    chk("视频：「识别」那颗钮已经砍掉（点手指就直接开跑）", page.locator('#vPlan').count() == 0)
 
     # ── 从这一屏点进设置里的「视频转写」 ──
     page.evaluate("() => { const b=[...document.querySelectorAll('#vCap button')]"

@@ -345,6 +345,24 @@ with sync_playwright() as pw:
     chk("切回瀑布：眼前这屏的卡都摊开了", rev["inView"] > 0 and rev["hidden"] == 0, rev)
     chk("瀑布：样式也记在本机", page.evaluate("() => localStorage.getItem('guizang_shelf_mode_v1')") == "grid")
 
+    # ── 5.1 换屏一律回到开头（用户报的「每次切换不同页面都会上下闪动」）──
+    # 上一版把上一页的滚动深度搬回来（「停在上次那一屏」），代价是交接动画跑到一半
+    # window 被滚走 —— 看着就是那下上下闪。现在归零在动画之前，进来就在开头。
+    # 先把这一页垫高：沙盒里只有几本书，不垫高就滚不出距离，这条会白过。
+    page.evaluate("() => { document.querySelector('main').style.minHeight = '2400px'; }")
+    page.evaluate("() => window.scrollTo(0, 1200)")
+    page.wait_for_timeout(260)
+    scrolled = page.evaluate("() => Math.round(window.scrollY)")
+    page.evaluate("() => setView('feed')")
+    page.wait_for_timeout(420)
+    landed = page.evaluate("() => Math.round(window.scrollY)")
+    chk("换屏前确实滚得出去（这条不是白跑的）", scrolled > 400, scrolled)
+    chk("换到别屏落在开头（不是停在上一屏那一半）", landed == 0,
+        {"scrolled": scrolled, "landed": landed})
+    page.evaluate("() => { document.querySelector('main').style.minHeight = ''; }")
+    page.evaluate("() => setView('shelf')")
+    page.wait_for_timeout(400)
+
     # ── 6. 详情页瘦身：只讲这本书，文件那五颗钮收进阅读器 ─────────
     page.evaluate("() => window.scrollTo(0, 0)")
     page.wait_for_timeout(200)

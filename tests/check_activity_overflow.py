@@ -19,12 +19,14 @@
 的对照防空转。全程在临时沙盒里跑（先把 GUIZANG_DATA 指过去再 import ui_server），
 不起服务、不联网、不开浏览器，不碰真实 cache/，故归 --fast 静态段。
 """
+import datetime as _dt
 import json
 import os
 import pathlib
 import shutil
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -64,7 +66,19 @@ def val(fn):
 BIG = 10 ** 400
 BIG_STR = str(BIG)
 INF = float("inf")
-DAY = "2026-10-15"
+# 这一条有四处走的是产品自己的读口（`ui_server.activity_summary` / `activity_brief`
+# 里那句 `time.strftime("%Y-%m-%d")`），它们认的是**真今天**：写死一个日期，第二天
+# 零点一过 P2 / P3 就自己红了（2026-10-16 实测栽过一次）。所以这里一律按「今天往前
+# 数几天」来摆账，哪天跑都是同一套。
+DAY = time.strftime("%Y-%m-%d")
+
+
+def _ago(n):
+    """今天往前数 n 天，用的就是 activity 自己那把日期尺（键格式不许猜）。"""
+    return A._ymd(_dt.date.today() - _dt.timedelta(days=n))
+
+
+D1, D2, D3, D4 = (_ago(n) for n in (1, 2, 3, 4))
 
 try:
     # ── 0. 前提：这些越界值真的进得来，旧写法真的会抛 ───────────────
@@ -79,8 +93,8 @@ try:
 
     # ── 1. load：大整数照认（不改口径），越界非整数照旧丢掉 ─────────
     dirty = {
-        "study": {"days": {DAY: BIG, "2026-10-14": BIG_STR, "2026-10-13": INF,
-                           "2026-10-12": 1e400, "2026-10-11": -BIG,
+        "study": {"days": {DAY: BIG, D1: BIG_STR, D2: INF,
+                           D3: 1e400, D4: -BIG,
                            "2026-13-40": BIG, "abc": BIG},
                   "total": BIG},
         "write": {"days": {DAY: 60}, "total": 60},
@@ -89,10 +103,10 @@ try:
     chk("L1 大整数原样留着（它是合法数字，不许被收口改口径）",
         d["study"]["days"].get(DAY) == BIG, d["study"]["days"].get(DAY))
     chk("L2 数字串认成同一个大整数",
-        d["study"]["days"].get("2026-10-14") == BIG)
+        d["study"]["days"].get(D1) == BIG)
     chk("L3 +inf / 1e400 解析出的 inf / -大整数 一律丢掉（不是一天的量）",
         all(k not in d["study"]["days"] for k in
-            ("2026-10-13", "2026-10-12", "2026-10-11")))
+            (D2, D3, D4)))
     chk("L4 坏日期 / 非日期键带着大整数也进不来",
         "2026-13-40" not in d["study"]["days"] and "abc" not in d["study"]["days"])
     chk("L5 大整数 total 原样留着，另一本账一字未动",
@@ -150,8 +164,7 @@ try:
     chk("S5 严格 JSON 解析得回来，那格还是同一个数",
         dumped is not RAISED and json.loads(dumped)["study"]["max"] == BIG)
 
-    clean = A.load({"study": {"days": {"2026-10-13": 600, "2026-10-14": 300,
-                                       "2026-10-15": 1200},
+    clean = A.load({"study": {"days": {D2: 600, D1: 300, DAY: 1200},
                               "total": 2100},
                     "write": {"days": {DAY: 900}, "total": 900}})
     csm = A.summary(clean, today=DAY)
