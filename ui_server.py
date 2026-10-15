@@ -4948,6 +4948,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(writer_ai_after(mode, raw, body))
 
     def do_GET(self):
+        # 第一道门也是唯一一道对读操作的门：DNS rebinding 会让攻击者的页面与这个后端
+        # 「同源」，Sec-Fetch-Site 写成 same-origin、跨源读取限制一起失效，账本就被整份
+        # 读走。浏览器必带 Host，所以这里按 Host 只认本机那几个写法。判定见 net_guard。
+        if not net_guard.host_allowed(self.headers.get("Host")):
+            return self._json({"ok": False, "msg": "这个请求不是冲本机地址来的，没有执行"}, 403)
         u = _req_target(self.path)
         if u is None:
             # 请求行本身写坏了（绝对形式目标里的方括号 / NFKC 字符）：原来这里
@@ -5586,6 +5591,13 @@ class Handler(BaseHTTPRequestHandler):
         # 这里统一收成空对象，省得每个分支各自判类型（畸形体不该把连接搞崩）。
         if not isinstance(body, dict):
             body = {}
+
+        # 与 do_GET 同一道 Host 门，只是位置靠后一点：这里 body 已经读完，直接回就行，
+        # 不必像 cross_site 那条分支再补一次 self.rfile.read(n)（keep-alive 不会错位）。
+        # 为什么非要有这一道：rebinding 那一发 Sec-Fetch-Site / Origin / Host 全是攻击者
+        # 自己的域名，cross_site 看它们是「同源」、一路放行，只有 Host 是不是本机还量得出来。
+        if not net_guard.host_allowed(self.headers.get("Host")):
+            return self._json({"ok": False, "msg": "这个请求不是冲本机地址来的，没有执行"}, 403)
 
         if u.path == "/api/notes_index":
             rebuild = bool((body or {}).get("rebuild"))
