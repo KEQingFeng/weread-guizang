@@ -140,6 +140,10 @@ def _norm_entry(e):
     e["published_ts"] = _as_ts(e.get("published_ts")) or _to_ts(e.get("published"))
     if "fetched_at" in e:
         e["fetched_at"] = _as_ts(e.get("fetched_at"))
+    # 「稍后读」存的是标记那一刻的 epoch（mark_later 写 `_now()`），也是时间字段：
+    # 它同样会被手改成字符串 / Infinity，而 _entry_view 里有一处 `int(later)` 和
+    # 别的时间字段一样直接 int()。过同一把尺子，入库即整数，那一处就不必各自防。
+    e["later"] = _as_ts(e.get("later"))
     return e
 
 
@@ -1420,7 +1424,16 @@ def _as_ts(v):
     if isinstance(v, bool):
         return 0
     if isinstance(v, (int, float)):
-        return int(v) if v > 0 else 0
+        # `json` 认 `Infinity` / `1e400` 这种越界值（解析成 inf）：账本里一条
+        # `"published_ts": Infinity` 走到这里，`int(inf)` 抛 OverflowError，而
+        # 这条异常是在 `_load` 的 json.load 之外、`_normalize` 里面抛的 —— 界面
+        # 「订阅」整页打不开，连空账都回不去。坏值当 0（没有发布时间）就够了。
+        # 超大整数（10**400）是认得出的整数，int() 装得下，口径照旧不动。
+        try:
+            n = int(v)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return n if n > 0 else 0
     if isinstance(v, str):
         try:
             n = int(float(v.strip()))

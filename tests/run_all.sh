@@ -126,6 +126,13 @@ run "订阅刷新合并（空正文不抹旧正文 / 真改动仍刷新 / 状态
 # 500。这一条把手改的脏 feed.json 喂进去，钉住「入库即整数、纯数字串不误判成 0、
 # 认不出的当 0 且不丢条目、未知字段照旧保留」，纯逻辑、离线。
 run "订阅条目时间字段脏值（排序 / since / 标已读 / 裁剪不抛）" "$PY" tests/check_feed_ts.py
+# 同一把尺子的另一半：上一条管「被写成字符串」，这一条管「越界数字」。`json` 认
+# `Infinity` / `1e400`（解析成 inf）且能原样落进 feed.json，而 `_as_ts` 的数字那支
+# 是 `int(v) if v > 0 else 0` —— `int(inf)` 抛 OverflowError，这条异常在 `_load` 的
+# json.load 之外，于是 published_ts / fetched_at / later 任一为 Infinity，`entries()` /
+# `subs()` / `summary()` 整页打不开。这一条钉住「越界归 0、超大整数照认、坏一条不
+# 带走整页、干净账本一个字不改、落盘后不再有 Infinity」，纯逻辑、离线。
+run "订阅条目时间字段越界数字（Infinity / 1e400 不打抛、不带走整页）" "$PY" tests/check_feed_overflow.py
 # 订阅正文的清洗是外站内容进成品的那道边界。原来那把尺子只量原始字节，浏览器却会
 # 先解一层 HTML 实体、再把 URL 里的 TAB / 换行删掉 —— `&#106;avascript:` 与
 # `java<TAB>script:` 在浏览器手里都是 javascript:；截断的 `<script>` 没有闭合标签，
