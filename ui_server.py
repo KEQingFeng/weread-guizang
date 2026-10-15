@@ -4336,10 +4336,11 @@ def video_books():
         m = book_meta(name)
         if (m.get("source") or "") != "video":
             continue
-        try:
-            upd = float(m.get("updated_at") or 0)
-        except (TypeError, ValueError, OverflowError):
-            upd = 0.0
+        # 与同一栏里其它数字走同一把尺子（见 _vnum）：`float("1e400")` 回的是 inf
+        # 而不是抛，只兜异常拦不住它（NaN 同理）。非有限值一旦落进回包，`json.dumps`
+        # 写出的是 JSON 规范不收的 `Infinity` / `NaN`，浏览器 `JSON.parse` 整份失败 ——
+        # 用户看到的是视频工作台这一屏整个空白，而不是某本书的排序差一点。
+        upd = _vnum(m.get("updated_at"))
         out.append({
             "id": name,
             "title": m.get("page_title") or m.get("title") or name,
