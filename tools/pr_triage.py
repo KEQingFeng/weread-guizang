@@ -325,6 +325,46 @@ def red_lines(hunks):
     return out
 
 
+# ── 自带证明：这条分支有没有带一条能自动验的离线门禁 ──────────────────
+#
+# 红线体检回答的是「该不该进来」（禁改路径 / 改弱测试 / 凭据 / 规模），这一栏回答的
+# 是另一个问题：**它有没有证明自己**。这个仓库的规矩是「修一处坑，补一条离线门禁」
+# —— 查历史提交，几乎每条产品修复的标题尾巴都写着「（补离线门禁）」。一批 auto/*
+# 里两条改动看着都对，差别往往就在一条能自动重放的证明上：带门禁的那条，坑再犯会红；
+# 没带的那条，只能靠人这次读仔细。
+#
+# 这里只摆证据，不下判决（和红线那一栏同一口径）：报「缺」不等于它错，只是提醒
+# 「这条没有可自动验的证明，读的时候多花两分钟」。
+PRODUCT_RE = re.compile(
+    r"^(?!tests/|tools/|docs/|shell/|skills/|安装包/)"
+    r"(?:[^/]+\.py|ui\.html|mcp/.*\.mjs)$")
+# 门禁文件只认仓库的两种命名：tests/check_*.py（离线体检）与 tests/test_*.py。
+# tests/run_all.sh 的登记行不算一条门禁 —— 它只是把已有的套件接上电（「漏登记」那
+# 件事由专门的门禁接线体检管），这里要看的是「有没有新的证明」。
+GATE_FILE_RE = re.compile(r"^tests/(?:check|test)_[A-Za-z0-9_]+\.py$")
+
+
+def gate_evidence(hunks):
+    """这批改动有没有带上一条能自动验的离线门禁。回 `(档位, 说明)`。
+
+      有    —— 动了 `tests/check_*.py` / `tests/test_*.py`，把文件名列出来
+      缺    —— 碰了产品代码（根目录 .py / ui.html / mcp 适配器）却一处门禁都没动
+      不适用 —— 只动了文档 / 工具 / 打包 / 门禁登记，按惯例本来就不带门禁
+    """
+    gates, product = set(), set()
+    for h in hunks:
+        if GATE_FILE_RE.match(h.path) and h.added:
+            gates.add(h.path)
+        if PRODUCT_RE.match(h.path) and (h.added or h.removed):
+            product.add(h.path)
+    if gates:
+        return ("有", "带门禁：%s" % "、".join(sorted(gates)[:4]))
+    if product:
+        return ("缺", "动了产品代码（%s）却没带 tests/check_*.py —— 建议补一条离线门禁"
+                % "、".join(sorted(product)[:3]))
+    return ("不适用", "只动了文档 / 工具 / 打包 / 门禁登记，按惯例不带离线门禁")
+
+
 # ── 以下是要跑 git / 联网的部分，判定逻辑已经在上面了 ──────────────────
 
 
@@ -479,9 +519,28 @@ def main(argv=None):
         print("  %-10s %-34s %d 处改动 / %d 个文件"
               % (label(b, prs), short(b), len(faces[b]),
                  len({h.path for h in faces[b]})))
+        tier, why = gate_evidence(faces[b])
+        print("             [门禁 %s] %s" % (tier, why))
         info = prs.get(short(b))
         if info:
             print("             %s" % (info[1] or "")[:76])
+
+    # ── 自带证明：先看「有没有带证明」，再看「该不该进来」「撞不撞」 ──
+    # 与红线体检分栏，是因为它们答的是两个问题：红线问「该不该进来」，这里问
+    # 「进来之后，坑再犯会不会自动红」。单独一段，免得埋在上面那堆行里被划过去。
+    print("\n■ 自带证明（这批改动有没有一条能自动重放的离线门禁）")
+    no_gate = []
+    for b in order:
+        tier, why = gate_evidence(faces[b])
+        if tier == "缺":
+            no_gate.append(label(b, prs))
+        print("  %-10s %-6s %s" % (label(b, prs), tier, why))
+    if no_gate:
+        print("  → %d 个分支改了产品代码却没带门禁：%s"
+              "（不是错，只是这几条没有能自动重放的证明，合之前多读两分钟）"
+              % (len(no_gate), "、".join(no_gate)))
+    else:
+        print("  → 改了产品代码的都有门禁；「不适用」那几条按惯例本来就不带。")
 
     # ── 红线体检：先看「该不该进来」，再看「撞不撞」 ───────────────
     print("\n■ 合入前的红线体检（禁改路径 / 改已有测试 / 疑似凭据 / 改动规模）")
