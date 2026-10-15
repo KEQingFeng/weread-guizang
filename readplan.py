@@ -66,6 +66,14 @@ def pages_at(chapters, at, frac=0.0):
         frac = float(frac or 0.0)
     except Exception:
         frac = 0.0
+    # `json` 认 `NaN` / `Infinity`（都是合法 JSON 字面量），`float("1e999")` 也回 inf。
+    # 这类值过不了下面那句 min：`min(1.0, nan)` 在 Python 里回的是 1.0（nan 的比较
+    # 一律为假，min 留着先到的那一个），于是「认不出的比例」被读成「读到章尾」——
+    # 与上面 `at` 那条口径正好相反。最坏的一种：心跳报在读到的最后一章，NaN 一夹到
+    # 章尾就凑满总页数，`record_pos` 当场把书判成读完、留档封存，用户只是翻着书，
+    # 计划却自己结束了。与 login / mindmap / video_note 同一把尺子：不有限当没读到。
+    if not math.isfinite(frac):
+        frac = 0.0
     frac = max(0.0, min(1.0, frac))
     if at == 0 and frac <= 0:
         return 0
@@ -179,6 +187,11 @@ def _clamp01(v):
     try:
         f = float(v)
     except Exception:
+        return 0.0
+    # 与 pages_at 同一个坑：盘上那份账本可能被手改 / 云同步写回一个 `NaN`，而
+    # `min(1.0, nan)` 回的是 1.0 —— 一条脏读数落进 `frac` 就等于「这一章读到头了」，
+    # 高水位与今日的账一起虚增。认不出的当 0（没读到），不拿它冒充进度。
+    if not math.isfinite(f):
         return 0.0
     return max(0.0, min(1.0, round(f, 4)))
 
