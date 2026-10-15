@@ -617,6 +617,18 @@ run "笔记读盘脏字段（混排时间戳 / 数组 ch / 越界数字不带走
 # 现在 `_clip` 这个字符串字段的唯一入口统一洗掉半个码点（成对 emoji 不动、长度口径不动），
 # 读 / 存 / 导出 / 导图 / 模板四路都过。纯函数 + 临时目录，全离线。
 run "笔记坏字符存盘（半个代理码点不把整份笔记打成「存不下」）" "$PY" tests/check_notes_surrogate.py
+# 上面几条钉的都是「一次写的数据对不对」。这一条钉的是**两个写手同时写**：
+# 后端是 ThreadingHTTPServer，同一本书的 /api/mynotes 保存与 /api/mynotes/export
+# （或两个标签页各存一次）会并着走，而 _write_json / _write_text 原来把临时件写死成
+# `path + ".tmp"`。后来者 open(tmp,"w") 截断前一个人写了半截的临时件，两边按各自偏移
+# 往下写，os.replace 就把两份交织的内容顶成正式账本 —— load_notes 解不动，整份退回空，
+# 用户看到「这本书的划线全没了」；先收尾的那个还会把共用临时件搬走，后一个当场
+# FileNotFoundError（界面「存不下」）。与 anna_state / flomo_notes 同一条坑，收口口径
+# 也一致：临时件名字一次一个（进程号 + 随机串），失败 / Ctrl-C 把临时件收掉；另外
+# 「旧档先挪成 .prev 再顶新的」若顶不上去，把 .prev 搬回来，notes.json 不许被留空。
+# 含对照（共用 .tmp 真会写出解不动的账 / 真会 FileNotFoundError）、两线程各写 50 次的
+# 并写锤、以及两个写口的接线断言。纯逻辑 + 临时书库，全离线。
+run "笔记落盘临时件收口（两个写手同时写不把账写坏 / 失败不留 .tmp）" "$PY" tests/check_notes_atomic.py
 # 划线与想法还会往另一个出口走：导出 Anki 卡包（.apkg）。前面几条钉的是 JSON 账本，
 # 这一条钉的是 genanki 那一步 —— 卡包最终是个真 SQLite，卡面正文 / 背面出处 / 卡组名
 # 只要有一处夹着落单的半个代理码点，`write_to_file()` 当场 UnicodeEncodeError，
