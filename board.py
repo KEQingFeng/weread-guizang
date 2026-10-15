@@ -203,8 +203,13 @@ def _write_json(path, obj):
     留着它既没用，又会让 boards/ 里多一个只有磁盘看得见的垃圾。**只在写这一步失败时
     收** —— 后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，
     删掉才是真的丢东西。
+
+    临时件名带进程号 + 一小串随机：`/api/board` 这条保存路没走 `ui_server._WRITE_LOCK`，
+    后端又是多线程的，两个保存请求打同一块板时，固定名会让先收尾的那个把共用的临时件
+    搬走、后一个 `os.replace` 当场 FileNotFoundError（界面「保存失败」，画的东西没了）。
+    与 `ui_server._write_json` 同一把尺子；`delete_board` 的 purge 也认得这个名字。
     """
-    tmp = path + ".tmp"
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2, allow_nan=False)
@@ -223,8 +228,12 @@ def _write_json(path, obj):
 
 
 def _write_bytes(path, raw):
-    """二进制导出物走同一个原子路子，但不留 .prev：导出物随时能从画布重画，不值得占双倍盘。"""
-    tmp = path + ".tmp"
+    """二进制导出物走同一个原子路子，但不留 .prev：导出物随时能从画布重画，不值得占双倍盘。
+
+    临时件与 `_write_json` 同一条规矩（进程号 + 随机串）：导出与保存可能同时进来，
+    共用固定名一样会有一个的 `os.replace` 扑空。
+    """
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
     try:
         with open(tmp, "wb") as f:
             f.write(raw)
@@ -404,7 +413,9 @@ def delete_board(book_dir, board_id, purge=True) -> dict:
     purge 连 `.json.prev` / `.json.tmp` 这两个「只有磁盘看得见」的副产物一起收：
     `.prev` 是覆盖保存时留的上一版，_board_files() 故意不认它（不然它会占 MAX_BOARDS
     的名额），所以列表里看不见、数不着、界面上永远删不掉 —— 删板时不清就是个吃盘的
-    隐形洞（一块板最多 6 MB）。`.tmp` 是旧版本写崩时可能留下的半截文件，同样收掉。
+    隐形洞（一块板最多 6 MB）。`.tmp` 是写崩 / 被强杀时可能留下的半截文件，同样收掉；
+    现在临时件名带 pid + 随机串（`<id>.json.<pid>.<rand>.tmp`），旧的那个固定名也一并
+    认着 —— 被强杀留下的那一份只有磁盘看得见，不收就永远占盘。
 
     文件本来就不存在不算失败 —— 界面点两次删除、或者板早已被清掉，都不该看到红字。
     """
@@ -412,8 +423,16 @@ def delete_board(book_dir, board_id, purge=True) -> dict:
     folder = dir_of(book_dir)
     names = ["%s%s" % (sid, BOARD_FILE_EXT)]
     if purge:
+        fixed_tmp = "%s%s.tmp" % (sid, BOARD_FILE_EXT)
         names += ["%s%s" % (sid, SVG_EXT), "%s%s" % (sid, PNG_EXT),
-                  "%s%s.prev" % (sid, BOARD_FILE_EXT), "%s%s.tmp" % (sid, BOARD_FILE_EXT)]
+                  "%s%s.prev" % (sid, BOARD_FILE_EXT), fixed_tmp]
+        # 唯一临时名：只删属于这一块板、且以 .tmp 收尾的那些（别的板的临时件不碰）。
+        try:
+            prefix = "%s%s." % (sid, BOARD_FILE_EXT)
+            names += [n for n in os.listdir(folder)
+                      if n != fixed_tmp and n.startswith(prefix) and n.endswith(".tmp")]
+        except OSError:
+            pass
     removed, failed = [], []
     for name in names:
         path = os.path.join(folder, name)

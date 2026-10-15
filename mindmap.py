@@ -391,8 +391,13 @@ def _write_json(path, text):
     写入这一步失败（内容里还有写不进 utf-8 的东西）时把 .tmp 收掉：留着它既没用，
     又会让书目录里多一个只有磁盘看得见的垃圾。**只在写这一步失败时收** ——
     后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，删掉才是真丢东西。
+
+    临时件名带进程号 + 一小串随机：`save_map` 有两个调用侧（界面的 `/api/mindmap`
+    与 AI 画图那条任务线，见 ui_server），同一本书被两处同时存时，固定名会让先收尾
+    的那个把共用的临时件搬走、后一个 `os.replace` 当场 FileNotFoundError。与
+    `ui_server._write_json` / `board._write_json` 同一把尺子。
     """
-    tmp = path + ".tmp"
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)

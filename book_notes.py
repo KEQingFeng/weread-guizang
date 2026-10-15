@@ -115,9 +115,24 @@ def load_notes(book_dir):
 
 
 def _write_json(path, obj):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+    """先写临时件再原子顶替，覆盖前留一份 .prev。
+
+    临时件名带进程号 + 一小串随机：`/api/mynotes` 这条保存路没走 `ui_server._WRITE_LOCK`，
+    后端又是多线程的，固定名会让先收尾的那个把共用的临时件搬走、后一个 `os.replace`
+    当场 FileNotFoundError（界面「保存失败」，可上一次的自动画笔已经写进去了）。与
+    `ui_server._write_json` / `board._write_json` / `mindmap._write_json` 同一把尺子。
+    写入失败时先把临时件收干净再抛，旧档始终完整。
+    """
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     if os.path.exists(path):
         try:
             os.replace(path, path + ".prev")      # 覆盖前留一份上一版
@@ -389,9 +404,17 @@ def export_notes(book_dir, doc, meta=None, titles=None, book_label=""):
 
 
 def _write_text(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
+    """`notes.md` 的原子落盘：临时件一次一个名字，写崩收干净再抛（与 `_write_json` 同口径）。"""
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
 
 
