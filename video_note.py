@@ -1316,8 +1316,13 @@ def _chapter_bodies(transcript, segments, chapters):
     章节标题是 LLM 按内容给的，正文对不齐也不至于错位到看不了。
     """
     text = (transcript or "").strip()
-    if not chapters:
+    # 章行先按「认得出的才留」收一遍：这条函数是两个调用点的公共出口，其中一个
+    # （重建）读的是用户改得动的 summary.json。一行不是对象、或少了标题，都不该让
+    # 整趟重建抛出来 —— 丢一行只是少一节，抛出去是整本书重建不出来。
+    rows = [chapter for chapter in (chapters or []) if isinstance(chapter, dict)]
+    if not rows:
         return [("全文转写", text)]
+    chapters = rows
     segs = [seg for seg in (segments or []) if isinstance(seg, dict)]
     starts = [_sec(chapter.get("start")) for chapter in chapters]
     # 按时间切的唯一前提是章节起点严格递增。LLM 漏给 start 时 _clean_summary 会把每一章
@@ -1334,7 +1339,8 @@ def _chapter_bodies(transcript, segments, chapters):
                 else:
                     break
             pieces[index] += (seg.get("text") or "") + " "
-        return [(chapters[i]["title"], pieces[i].strip()) for i in range(len(chapters))]
+        return [(chapters[i].get("title") or ("第 %d 章" % (i + 1)), pieces[i].strip())
+                for i in range(len(chapters))]
     if segs:
         # 起点不可用：把各段文字接起来当整篇，至少不丢内容、不制造空章
         text = " ".join((seg.get("text") or "").strip() for seg in segs).strip() or text
@@ -1342,7 +1348,7 @@ def _chapter_bodies(transcript, segments, chapters):
     body, step = [], max(1, len(text) // max(len(chapters), 1))
     for i, chapter in enumerate(chapters):
         chunk = text[i * step:(i + 1) * step] if i < len(chapters) - 1 else text[i * step:]
-        body.append((chapter["title"], chunk.strip()))
+        body.append((chapter.get("title") or ("第 %d 章" % (i + 1)), chunk.strip()))
     return body
 
 
@@ -2030,10 +2036,17 @@ def rebuild_book(book_dir):
         raise ValueError("转写是空的，重建出来只会是一本空书")
 
     doc = _read_json(os.path.join(book_dir, SUMMARY_FILE))
-    summary = (doc or {}).get("summary") if isinstance(doc, dict) else None
-    summary = summary if isinstance(summary, dict) else {}
-    chapters = summary.get("chapters") or []
+    raw_summary = (doc or {}).get("summary") if isinstance(doc, dict) else None
     meta = _read_meta(book_dir)
+    # 磁盘上这一份也要过 `_clean_summary` 那把尺子 —— 只洗模型刚给的那一份不够：
+    # summary.json 是用户能直接改的文本，旧版本也可能写下别的形状。`_chapter_bodies`
+    # 拿的是 `chapter.get("start")` 与 `chapters[i]["title"]`，一章被改成字符串、或者
+    # 少了 title，就是 AttributeError / KeyError；重建这条路只接 ValueError，异常穿出
+    # do_POST 后连接被甩（用户看到的是点了没反应）。认不出的章在这里就按「没这一章」
+    # 丢掉，读盘与读模型输出同一个口径。
+    summary = _clean_summary(raw_summary, str(meta.get("page_title")
+                                              or meta.get("title") or "视频笔记"))
+    chapters = summary["chapters"]
     # 没时间戳的老书按字数均分（拿 None 时间戳去切章会让每一段都落进第一章）
     bodies = _chapter_bodies(text, segments if trans["timed"] else None, chapters)
     source = {"title": meta.get("page_title") or meta.get("title") or "视频笔记",
