@@ -493,6 +493,13 @@ run "笔记读盘脏字段（混排时间戳 / 数组 ch / 越界数字不带走
 # 现在 `_clip` 这个字符串字段的唯一入口统一洗掉半个码点（成对 emoji 不动、长度口径不动），
 # 读 / 存 / 导出 / 导图 / 模板四路都过。纯函数 + 临时目录，全离线。
 run "笔记坏字符存盘（半个代理码点不把整份笔记打成「存不下」）" "$PY" tests/check_notes_surrogate.py
+# 划线与想法还会往另一个出口走：导出 Anki 卡包（.apkg）。前面几条钉的是 JSON 账本，
+# 这一条钉的是 genanki 那一步 —— 卡包最终是个真 SQLite，卡面正文 / 背面出处 / 卡组名
+# 只要有一处夹着落单的半个代理码点，`write_to_file()` 当场 UnicodeEncodeError，
+# /api/apkg 兜成 400 + 一句英文报错，一整本书的卡片一张都拿不到。现在书名与每张卡的
+# 两面都过共用那把尺子（book_layout.drop_lone_surrogates）：坏字符摘掉、真 emoji 不动。
+# 把 notes_for_book 换成固定条目，拆开 .apkg 里的 SQLite 直接看卡面。全离线。
+run "卡包坏字符导出（半个代理码点不把整包卡打没）" "$PY" tests/check_apkg_surrogate.py
 # 维护那一套（卸载组件 / 清除数据）最要紧的不是「删得掉」而是「删不掉不该删的」：
 # 书库、别人家的模型、别人家的浏览器、数据目录本身 —— 四条红线各钉一条。
 # 全程在临时沙盒里跑，不碰真实的 cache / 书库 / HF 缓存 / playwright 缓存。
