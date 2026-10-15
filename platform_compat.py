@@ -458,6 +458,14 @@ def backend_identity(port, timeout=1.5):
     让调用方判断成「跟我不一样」，该接管就接管，不会因为对方太老就放过它。
     走无代理的 opener：本机回环不该被 Clash 那类全局代理绕出去（绕出去就连不上，
     然后被误判成「服务没在跑」）。
+
+    `task` 只在该是对象时才读它的 `running`。答话的是端口上**别的程序**，它回的是
+    对象、`task` 里塞什么形状都可能（字符串 / 数组 / 数字 / null）；旧写法
+    `(data.get("task") or {}).get("running")` 只兜住了 null，非空非对象会当场
+    AttributeError。这一句在 take_over_port / port_verdict 的主路上，而
+    `ui_server.py --takeover`（两个启动器与壳都带它）开头就走这条路 —— 一个陌生
+    程序回了半像不像的 JSON，归藏就起不来。JS 那边 `!!(s.task && s.task.running)`
+    本来就不抛，这里对齐成同一把尺子：认不出只当「没在跑」，读口绝不抛。
     """
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
@@ -467,10 +475,11 @@ def backend_identity(port, timeout=1.5):
         return None
     if not isinstance(data, dict):
         return None
+    task = data.get("task")
+    # 旧后端也认 task 这个字段，顺手把它带回来：接管前得知道有没有活儿在跑
     return {"version": str(data.get("version") or ""),
             "code": str(data.get("code") or ""),
-            # 旧后端也认 task 这个字段，顺手把它带回来：接管前得知道有没有活儿在跑
-            "running": bool((data.get("task") or {}).get("running"))}
+            "running": bool(task.get("running")) if isinstance(task, dict) else False}
 
 
 def port_listener_pid(port):
