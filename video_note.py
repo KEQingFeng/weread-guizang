@@ -243,7 +243,7 @@ def _agent_cfg_from_disk():
     """
     path = os.path.join(DATA_DIR, "cache", "config.json")
     try:
-        # 与 ui_server._load_cfg 同一把尺子：config.json 用户会拿记事本直接改，Windows
+        # 与 ui_server.load_cfg（ui_server.py:624）同一把尺子：config.json 用户会拿记事本直接改，Windows
         # 记事本默认存的 UTF-8 带 BOM；裸 utf-8 读到那三字节就当场 JSONDecodeError，被下面
         # 的宽 except 收成「没配」——配置明明填着，视频那一栏却一直说「AI 没配」。
         with open(path, encoding="utf-8-sig") as f:

@@ -326,7 +326,9 @@ def _write_text_atomic(path, text):
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
+        # 兜 BaseException 而不是 Exception：Ctrl-C / 停止键走的是 KeyboardInterrupt /
+        # SystemExit，它们不继承 Exception，只兜 Exception 会在退出路径上把临时件留下。
         try:
             os.remove(tmp)
         except OSError:
