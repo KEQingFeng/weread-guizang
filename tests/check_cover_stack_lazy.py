@@ -24,12 +24,23 @@
 `applyStack()` 自己打上 `saway` / `sgone` 的那几张 —— 判据只留一处，容器查询把 ±3 收窄
 成 ±2 / ±1 时也不会分叉；`shelfStep()` 翻完再点一次，新进扇形的那几张就赶上了。
 
-这一套不依赖浏览器：只读 `ui.html` 源码静态钉住接线（与 `check_cover_lazy.py` 同一路子）。
-请求条数那一半仍然不常驻（要真浏览器 + 60 本带封面的货架），上面的实测数字写在注释里。
+这一套不依赖浏览器，分两半：
+
+  ① 静态段：只读 `ui.html` 源码，钉住接线（与 `check_cover_lazy.py` 同一路子）。
+  ② 真调用段：把 `paintStackCovers` / `coverField` 两段源码抽出来，配一副假 DOM
+     在 node 里真调一遍 —— 60 张假卡（7 张在扇形、53 张 saway / sgone），
+     数它到底点亮了几张、翻页补没补上新进来的那张。假卡故意不实现
+     `getBoundingClientRect`，谁把「按视口判」那套塞回来，调用当场就抛。
+
+真浏览器上那份条数实测（60 → 4）仍写在上面，只作旁证；常驻的是这 19 条。
 """
+import json
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = (ROOT / "ui.html").read_text(encoding="utf-8")
@@ -46,6 +57,12 @@ def fn_body(name):
     """截出 `function <name>(...) { ... }` 的函数体（到行首的右花括号为止）。"""
     m = re.search(r"function\s+%s\s*\([^)]*\)\s*\{(.*?)\n\}" % re.escape(name), SRC, re.S)
     return m.group(1) if m else ""
+
+
+def fn_src(name):
+    """截出整个 `function <name>(...) { ... }`（含签名，到行首的右花括号为止）。"""
+    m = re.search(r"function\s+%s\s*\([^)]*\)\s*\{.*?\n\}" % re.escape(name), SRC, re.S)
+    return m.group(0) if m else ""
 
 
 stack = fn_body("renderShelfStack")
@@ -92,6 +109,99 @@ chk("瀑布那面照旧：renderShelfGrid 仍用 paintCovers(grid) 做视口预�
 ext = fn_body("extCoverImg")
 chk("extCoverImg 仍然只暂存 data-cover，不在游离节点上赋 src",
     "dataset.cover" in ext and not re.search(r"^\s*im\.src\s*=", ext, re.M), ext[:240])
+
+# ── ⑥ 假 DOM 里真调一遍：拿 ui.html 里那两段源码跑 ───────────────────
+def node_checks():
+    """把 `paintStackCovers` / `coverField` 抽出来，配一副假 DOM 在 node 里真调一遍。
+
+    ⑤ 之前那一整段只能钉住「源码长什么样」；这一段钉住「真给它 60 张卡时点亮了几张」——
+    扇形里那几张亮、`saway` / `sgone` 那几张一个请求都不发、翻页只补新进扇形的那一张。
+    假卡**故意不实现 `getBoundingClientRect`**：一旦有人把「按视口判」那套写法塞回这里，
+    调用当场就抛，静态检查看不出来的那种回退也溜不过去。
+    """
+    paint = fn_src("paintStackCovers")
+    field = fn_src("coverField")
+    if not (paint and field):
+        return [("叠卡点亮器抽得出来（跑真调用要用它）", False, (bool(paint), bool(field)))]
+    node = shutil.which("node")
+    if not node:
+        return [("node 在不在（这套要用它跑界面源码）", False, "找不到 node")]
+    harness = r"""
+'use strict';
+const FETCHED = [];
+function mkImg(url){
+  return {
+    dataset: {cover: url},
+    _src: null,
+    getAttribute(n){ return n === 'src' ? (this._src || null) : null; },
+    get src(){ return this._src; },
+    set src(v){ this._src = v; FETCHED.push(v); }
+  };
+}
+function mkCard(id, kind){
+  const cls = new Set(kind ? [kind] : []);
+  const imgs = [];
+  return {
+    id: id,
+    classList: {
+      contains(k){ return cls.has(k); },
+      add(k){ cls.add(k); },
+      remove(k){ cls.delete(k); }
+    },
+    querySelectorAll(sel){
+      if (sel !== 'img[data-cover]') return [];
+      return imgs.filter(im => 'cover' in im.dataset);
+    },
+    addCover(url){ imgs.push(mkImg(url)); }
+  };
+}
+__COVER__
+__PAINT__
+// 60 本一批：光标在最前，前 7 张（s0..s3 / b1..b3）在扇形里，其余被甩出画外
+const cards = [];
+for (let i = 0; i < 60; i++){
+  cards.push(mkCard('b' + i, i < 7 ? '' : (i < 34 ? 'saway' : 'sgone')));
+}
+cards.forEach((c, i) => c.addCover('/cover/' + i + '.jpg'));
+const stage = {children: cards};
+const results = [];
+function step(name, ok, extra){ results.push([name, !!ok, extra == null ? '' : String(extra)]); }
+const want = Array.from({length: 7}, (_, i) => '/cover/' + i + '.jpg').join(',');
+
+const lit = paintStackCovers(stage);
+step('60 张卡里只点亮扇形里那 7 张（不是整批全砸）', lit === 7 && FETCHED.length === 7,
+     'lit=' + lit + ' fetched=' + FETCHED.length);
+step('点亮的正是扇形那 7 张（saway / sgone 一张都没发）',
+     FETCHED.join(',') === want, FETCHED.join(','));
+paintStackCovers(stage);
+step('再调一次不重发（src 已在的跳过）', FETCHED.length === 7, 'fetched=' + FETCHED.length);
+// 翻一下：第 5 张被甩出去，第 8 张翻进扇形
+cards[4].classList.remove('b1'); cards[4].classList.add('sgone');
+cards[7].classList.remove('saway');
+paintStackCovers(stage);
+step('翻页只补新进扇形的那一张', FETCHED.length === 8, 'fetched=' + FETCHED.length);
+step('补的确实是新进来的第 8 张', FETCHED[7] === '/cover/7.jpg', String(FETCHED[7]));
+step('stage 传 null 不抛、回 0', paintStackCovers(null) === 0);
+step('空舞台回 0', paintStackCovers({children: []}) === 0);
+console.log('GZRESULT ' + JSON.stringify(results));
+"""
+    harness = harness.replace("__COVER__", field).replace("__PAINT__", paint)
+    with tempfile.TemporaryDirectory(prefix="guizang-stackcover-") as tmp:
+        js = pathlib.Path(tmp) / "stackcover.js"
+        js.write_text(harness, encoding="utf-8")
+        r = subprocess.run([node, str(js)], capture_output=True, text=True)
+    line = [x for x in r.stdout.splitlines() if x.startswith("GZRESULT ")]
+    if r.returncode or not line:
+        return [("假 DOM 里跑得起来", False,
+                 (r.stderr or r.stdout).strip()[-300:])]
+    out = []
+    for name, ok, extra in json.loads(line[-1][len("GZRESULT "):]):
+        out.append(("真调用：%s" % name, bool(ok), "" if ok else extra))
+    return out
+
+
+for name, ok, extra in node_checks():
+    chk(name, ok, extra)
 
 bad = [c for c in checks if not c[0]]
 print("\n叠卡封面按需加载体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))
