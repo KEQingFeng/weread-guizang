@@ -15889,10 +15889,13 @@ function bzLoad(url, push) {
   const inp = p.querySelector('#bzUrl');
   const load = p.querySelector('#bzLoad');
   if (inp) inp.value = url;
-  if (load) load.classList.remove('off');
-  // 同一地址不重发：/api/state 每 2.6 秒一轮，force 那几趟会走到这里重画这一屏，
+  // 同一地址不重发：/api/state 每 2.6 秒一轮、force 那几趟会走到这里重画这一屏，
   // 不拦就成了「每几秒刷一次页面」。
+  // 遮罩也得跟着这条闸门走：没真的换地址就不会再来一次 load 事件，谁把它揭起来就没人
+  // 合得上 —— 切走再切回内置浏览器（或任何一次 drawState(true) 重画这一屏）之后，
+  // 「正在取回这一页」会一直压在网页中间。揭遮罩只属于「这一趟真发了请求」。
   if (f && f.dataset.src !== url) {
+    if (load) load.classList.remove('off');
     f.dataset.src = url;
     f.src = '/api/browse?url=' + encodeURIComponent(url);
   }
