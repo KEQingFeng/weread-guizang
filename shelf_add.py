@@ -75,6 +75,26 @@ def added_count(succ, total):
     return max(0, min(n, total))
 
 
+def err_code(body):
+    """从回包里认错误码，认不出当 0（不是对象 / 值形状怪都不抛）。
+
+    同一个字段接口用两种拼法（errCode / errcode），值理应是整数。旧读法
+    `body.get("errCode", body.get("errcode", 0)) or 0` 之后直接拿它比大小：
+    写成字符串 `"-2012"` 时 `== -2012` 判不出、`< 0` 当场 TypeError，
+    用户看到的是一句英文类型错误。认不出的当「没错」，由后面的 succ 判定兜底。
+    """
+    v = body.get("errCode", body.get("errcode", 0)) if isinstance(body, dict) else 0
+    if isinstance(v, bool) or v is None:
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    if isinstance(v, str) and re.fullmatch(r"-?[0-9]+", v.strip()):
+        return int(v.strip())
+    return 0
+
+
 def kill_stray_browsers(wait=0.8):
     """profile 被上一轮残留的浏览器锁住时，persistent context 起不来。
 
@@ -110,8 +130,26 @@ async def renew_session(ctx):
         await page.close()
 
 
+def reply_obj(text):
+    """网络那头回的一段文本，收成一个对象；不是 JSON / 不是对象都给 None，绝不抛。
+
+    这一段的形状不由我们定：接口正常时是 `{"succ":…}`，但中间夹一层反向代理、
+    门户认证页、或对面改版时，`json.loads` 能解出一段**合法 JSON 却不是对象**的东西
+    —— 数组 / 字符串 / 数字 / `null`。旧读法 `json.loads(text).get("succ")` 对
+    `[]` 当场 AttributeError，而 `main` 只把「回包看不懂」这一句留给 body=None，
+    于是一个 JSON 数组会翻成 `AttributeError: 'list' object has no attribute 'get'`
+    这种用户看不懂的话（sync.py 的 `_json_obj` 修的是同一类形状）。收口放这一处，
+    调用方按「没拿到回包」说人话。
+    """
+    try:
+        body = json.loads(text)
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
 async def post_add(ctx, ids):
-    """发一次加书架请求，返回 (HTTP 状态, 回包 dict, 原文)。
+    """发一次加书架请求，返回 (HTTP 状态, 回包 dict 或 None, 原文)。
 
     接口只认登录 cookie，不校验页面那套签名头；referer 只是让请求形状和网页端一致。
     """
@@ -122,11 +160,7 @@ async def post_add(ctx, ids):
                  "referer": "https://weread.qq.com/web/shelf"},
         timeout=20000)
     text = await resp.text()
-    try:
-        body = json.loads(text)
-    except Exception:
-        body = None
-    return resp.status, body, text
+    return resp.status, reply_obj(text), text
 
 
 async def main():
@@ -162,14 +196,14 @@ async def main():
             if body is None:
                 fail(f"接口回包看不懂（HTTP {status}）：{text[:160]}")
 
-            err = body.get("errCode", body.get("errcode", 0)) or 0
+            err = err_code(body)
             if err == -2012 or "登录" in str(body.get("errmsg", "")):
                 # skey 半路失效：续一次再发，还是不行才让用户去扫码
                 await renew_session(ctx)
                 status, body, text = await post_add(ctx, ids)
                 if body is None:
                     fail(f"续期后回包看不懂（HTTP {status}）：{text[:160]}")
-                err = body.get("errCode", body.get("errcode", 0)) or 0
+                err = err_code(body)
                 if err < 0:
                     fail("微信读书登录过期了，重新扫一次码就好", 3)
 
