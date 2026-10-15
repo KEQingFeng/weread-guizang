@@ -378,14 +378,35 @@ def cache_path(book_dir, scope, style, chapter=""):
     return os.path.join(cache_dir(book_dir), cache_name(scope, style, chapter))
 
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：模型那一边回来的正文是
+# 外站 JSON，`"\ud800"` 这种转义 `json.loads` 收得下、Python 字符串里也留得住，
+# 可它编不进 utf-8 —— `open(..., "w", encoding="utf-8").write()` 当场
+# UnicodeEncodeError。save_result 一直把异常吞成空串，于是「小结看着出来了、重开
+# 这一页就没了」：屏幕那段还在（响应编码那道口子会顺手摘掉它），落进 _ai/ 的却
+# 一个字都没有。口径与 feed / flomo / writer 那几处同一把尺子：成对的代理码点在
+# `json.loads` 那一步早就合成真字符了，只有落单的才是垃圾。
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def drop_lone_surrogates(text):
+    """摘掉落单的半个代理码点，别的字符一个字不改（纯函数，落盘前统一过这一道）。"""
+    return _SURROGATE.sub("", text if isinstance(text, str) else str(text or ""))
+
+
 def save_result(book_dir, scope, style, chapter, text):
     """把总结存进这本书的 _ai/ 里。写不动也不抛 —— 存盘失败不该让用户白等一场，
-    屏幕上那段话还在。"""
+    屏幕上那段话还在。
+
+    落盘前先摘掉落单的半个代理码点：模型回的是外站 JSON，`"\\ud800"` 这种转义读得
+    进来却写不出去，不清掉就会让整份小结存不下去（见 `_SURROGATE`）。成对代理码点
+    在 `json.loads` 早已合成真字符，真 emoji 因此一个字不动。
+    """
     path = cache_path(book_dir, scope, style, chapter)
+    text = drop_lone_surrogates(text)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            f.write(str(text or ""))
+            f.write(text)
         return path
     except Exception:
         return ""
