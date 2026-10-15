@@ -1412,21 +1412,51 @@ def _transcript_doc(spoken, asr_cfg, plan_info):
             "updated_at": int(time.time())}
 
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：云端 ASR 的 JSON 里直接
+# 带着 `\ud83d` 转义、或编辑器把一段 emoji 拦腰截断后存回来时都会留下它。json.load
+# 收得下这个码点，可 transcript.json 是 ensure_ascii=False 写的，写 utf-8 时当场
+# UnicodeEncodeError —— 用户看到的是「保存转写点了没反应」，书目录里还留一个半截
+# transcript.json.tmp。它是坏输入不是内容，洗掉比让整本转写存不下去强。成对的代理
+# 码点在 json 解码那一步已经合成真字符，这里只会摘到落单的那个。
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _drop_surrogates(v):
+    """把落单的半个代理码点摘掉；结构与别的类型一个字不改。
+
+    字典的**键**也一起洗：编辑器存回来的段落带着自由字段，键同样可能夹着半个码点，
+    而 json.dump 是连键一起编码的 —— 只洗值等于没洗。
+    """
+    if isinstance(v, str):
+        return _SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {_drop_surrogates(k): _drop_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_drop_surrogates(x) for x in v]
+    if isinstance(v, tuple):
+        return tuple(_drop_surrogates(x) for x in v)
+    return v
+
+
 def _write_json(path, obj):
     # 先把它从下面的解析缓存踢掉：文件换了，缓存里那份就是上一版转写，
     # 留着的话「保存完再读还是旧字」会变成一条查不出来的鬼影。
     _JSON_CACHE.pop(path, None)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+        json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
 
 def _read_json(path):
-    """读一份 JSON：缺文件或读坏了都回 None，怎么兜底由调用方决定。"""
+    """读一份 JSON：缺文件或读坏了都回 None，怎么兜底由调用方决定。
+
+    读出来顺手摘掉落单的半个代理码点：这一份可能是旧版本、云同步或用户手改过的
+    文本，脏值从这一道闸进来就会在「再存一次 / 导出 / 重建」时炸在编码上。
+    """
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            return _drop_surrogates(json.load(f))
     except Exception:
         return None
 
@@ -1458,9 +1488,11 @@ def _read_json_cached(path):
 
 
 def _write_text(path, text):
+    # 同一把尺子：transcript.txt / 章节正文也是 utf-8 直写，落单的半个码点照样
+    # 写不进去；它和上面的 json 不管哪一条先抛，用户看到的都是「存不下」。
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
+        f.write(_drop_surrogates(text))
     os.replace(tmp, path)
 
 
@@ -1805,12 +1837,10 @@ def _picked_page(plan_info):
 
 
 def _read_meta(book_dir):
+    # 走 _read_json 同一道收口：meta.json 也是手改 / 云同步落得下的文本，标题里的
+    # 半个码点读出来会一路带到章节名与下载头。
     path = os.path.join(book_dir, "meta.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        return {}
+    meta = _read_json(path)
     return meta if isinstance(meta, dict) else {}
 
 
@@ -1935,6 +1965,9 @@ def save_transcript(book_dir, segments, engine=None, language=None, duration=Non
     if not len(segments):
         raise ValueError("一段都没给，这次不写盘：这份接口是整本覆盖，"
                          "接个空列表就等于把用户的转写清空了")
+    # 内存里先洗一道，让「落盘的 json」「跟着写的 transcript.txt」「这次返回的段数 /
+    # 字数」用的是同一份干净数据，而不是各自在写盘那一刻各洗各的。
+    segments = _drop_surrogates(segments)
     path = os.path.join(book_dir, TRANS_FILE)
     doc = _read_json(path)
     doc = doc if isinstance(doc, dict) else {}
