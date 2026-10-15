@@ -525,6 +525,38 @@ def _write_json(path, obj, mode=None):
             pass
 
 
+def _write_bytes(path, raw):
+    """二进制落盘的唯一出口（封面这一档）：先写临时件再原子顶替。
+
+    与上面 `_write_json` 同一个理由，只是负载是字节不是 JSON：服务是多线程的，
+    **同一张封面会被两处同时写**（一进书架界面就并发取几十张，后台 warm_covers
+    那条线也在补同一批书，详情页大图还会再敲一次 /api/cover）。旧写法两处栽了：
+
+      · `tmp = path + ".tmp"` 是固定临时名 —— 先 os.replace 的那个把临时件搬走，
+        后一个再 replace 直接 FileNotFoundError：下载明明成功了，封面却没落上
+        （失败那一下还会在旁边留一个没人认领的 `.tmp`）。`_write_json` 上面那段
+        注释就是为同一个坑写的；
+      · 直接 `open(path, "wb")` 更糟：中途进程被杀就留半张图，而读口只按
+        `getsize > 800` 认「有封面」，于是一张截断的图会被当成真封面一直用下去，
+        用户看到的是永远打不开的破图，且再也不重取。
+
+    临时名带 pid + 随机串互不打架，写完 os.replace 原子顶替；失败把临时件收干净
+    再抛，旧档始终是完整的那一份。
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "wb") as f:
+            f.write(raw)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _meta_dict(d):
     """读书目录里的 meta.json，只认「对象」这一种形状；读不开 / 不是对象都回空表。
 
@@ -2178,9 +2210,7 @@ def ensure_cover(book_id):
         with urllib.request.urlopen(req, timeout=20) as r:
             raw = r.read()
         if len(raw) > 800:
-            os.makedirs(COVER_DIR, exist_ok=True)
-            with open(p, "wb") as f:
-                f.write(raw)
+            _write_bytes(p, raw)
             return p
     except Exception:
         return None
@@ -3729,11 +3759,7 @@ def cache_cover(book_id, url):
         with urllib.request.urlopen(req, timeout=20) as r:
             raw = r.read(4 * 1024 * 1024)
         if len(raw) > 800:
-            os.makedirs(COVER_DIR, exist_ok=True)
-            tmp = p + ".tmp"
-            with open(tmp, "wb") as f:
-                f.write(raw)
-            os.replace(tmp, p)
+            _write_bytes(p, raw)
             return True
     except Exception:
         pass
@@ -4662,14 +4688,10 @@ def flomo_do(body):
                 p = flomo_att_path(nm)
                 if p:
                     try:
-                        os.makedirs(COVER_DIR, exist_ok=True)
                         with open(p, "rb") as f:
                             raw = f.read(4 * 1024 * 1024)
                         if len(raw) > 800:
-                            tmp = cover_path(info["id"]) + ".tmp"
-                            with open(tmp, "wb") as f:
-                                f.write(raw)
-                            os.replace(tmp, cover_path(info["id"]))
+                            _write_bytes(cover_path(info["id"]), raw)
                         break
                     except OSError:
                         pass
