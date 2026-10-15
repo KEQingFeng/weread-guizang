@@ -549,9 +549,16 @@ def load_books(books_root):
     顺手把已经不在盘上的章剔掉：删稿子走的是原有那条路（`book.delete`），
     它不认识册账，所以账上会留下指向空气的章号。留着它，界面上就有一颗
     点了打不开的「章节」。
+
+    读口用 `utf-8-sig`：这本册账是用户能直接编辑的 JSON，记事本「另存为」、
+    部分云同步客户端回写时会在开头多出三个字节的 BOM；按 utf-8 读会当场
+    JSONDecodeError，被下面那句宽 except 当成「没有账」收成空表 —— 而紧接着任何一次
+    建书 / 改名 / 加章都会把这份空表写回去，用户搭的书目就此静默消失（稿子还在，
+    组没了）。仓库里其余账本（book_layout.read_meta / flomo_notes / ui_server 那几本）
+    早已是这个口径，这里补齐；写盘口径不变，utf-8-sig 不会给文件加 BOM。
     """
     try:
-        with open(books_path(books_root), encoding="utf-8") as f:
+        with open(books_path(books_root), encoding="utf-8-sig") as f:
             data = json.load(f)
     except Exception:
         return []
