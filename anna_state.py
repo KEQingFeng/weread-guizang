@@ -14,6 +14,7 @@
 
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -111,8 +112,58 @@ def _as_int(v):
     return n if n >= 0 else 0
 
 
+# `books` / `pending` 里每条记录的字段表：形状由 `ingest` / `_pending` 定义，这也
+# 就是「读回来该是什么样」的唯一出处。数字字段必须与顶层计数走同一把 `_as_int`。
+_BOOK_NUMS = ("bytes", "chapters", "at")
+_BOOK_TEXTS = ("name", "title", "author", "book")
+_PENDING_NUMS = ("bytes", "at")
+_PENDING_TEXTS = ("name", "reason")
+
+
+def _finite(v):
+    """递归把非有限浮点（`inf` / `-inf` / `nan`）换成 0，别的类型与结构原样。
+
+    为什么非管不可：`json` 认 `Infinity` / `1e400` / `NaN` 这些字面量，读回来就是
+    inf / nan，而 Python 的 `json.dumps` 默认 `allow_nan=True`，照写不误 —— 可它们
+    不是 JSON 规范里的值，浏览器 `JSON.parse` 碰到一个就**整份拒收**。这份账本整份
+    进 `/api/state`（界面每 2.6 秒轮询一次），所以一个坏数字的代价不是「某一格显示
+    不对」，而是「整个界面什么都读不出来」。落在不认识的那个键上（手改 / 旧版本写
+    的新字段）也一样要收，所以这一层是递归的。
+    """
+    if isinstance(v, float) and not math.isfinite(v):
+        return 0
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_finite(x) for x in v]
+    return v
+
+
+def _clean_row(r, nums, texts):
+    """把一条记录里**认得的那几个字段**收回口径；不认识的键原样留着（同便签那条账）。
+
+    数字走 `_as_int`（能认的照认、"42" 也认，越界与形状不对归 0），文本走 `_note`
+    （压空白、摘落单代理码点、夹长度）。最后整条再过一遍 `_finite`，与 `normalize`
+    的契约对齐：洗出来的东西一定写得成严格 JSON。
+    """
+    out = dict(r)
+    for k in nums:
+        if k in out:
+            out[k] = _as_int(out[k])
+    for k in texts:
+        if k in out:
+            out[k] = _note(out[k])
+    return _finite(out)
+
+
 def normalize(raw):
-    """把任意一份读出来的表洗成字段齐全的状态。脏值退回默认，不抛异常。"""
+    """把任意一份读出来的表洗成字段齐全的状态。脏值退回默认，不抛异常。
+
+    `books` / `pending` 里的每条也一起收：原先只认「是对象」就原样收下，行里的
+    `bytes` / `at` / `chapters` 被手改成越界数字（`1e400` → inf）时，`/api/state`
+    的整份回包就是 `"bytes": Infinity` —— 浏览器 `JSON.parse` 整份失败，界面
+    （每 2.6 秒轮询一次）从此什么都读不出来。见 `_clean_row` / `_finite`。
+    """
     st = _blank()
     if not isinstance(raw, dict):
         return st
@@ -126,13 +177,15 @@ def normalize(raw):
     seen = raw.get("seen")
     st["seen"] = [str(x) for x in seen if str(x).strip()][:SEEN_KEEP] \
         if isinstance(seen, list) else []
-    for key, cap in (("books", BOOKS_KEEP), ("pending", PENDING_KEEP)):
+    for key, cap, nums, texts in (
+            ("books", BOOKS_KEEP, _BOOK_NUMS, _BOOK_TEXTS),
+            ("pending", PENDING_KEEP, _PENDING_NUMS, _PENDING_TEXTS)):
         rows = raw.get(key)
         out = []
         if isinstance(rows, list):
             for r in rows[:cap]:
                 if isinstance(r, dict):
-                    out.append(r)
+                    out.append(_clean_row(r, nums, texts))
         st[key] = out
     st["note"] = _note(raw.get("note"))
     st["last_error"] = _note(raw.get("last_error"))
