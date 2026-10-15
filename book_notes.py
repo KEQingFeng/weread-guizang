@@ -102,6 +102,14 @@ def load_notes(book_dir):
     # 直接失败（笔记一屏全空）。越界值一律按认不出处理。
     for k in ("created_at", "updated_at"):
         doc[k] = _stamp(doc.get(k), 0)
+    # 顶层还有两个字符串字段（这本书总的一句话备注、套用的模板 id）漏在收口外面：
+    # 写入口 `_normalize` 那两行早走 `_clip`，读口这里没有 —— 手改 / 云同步把
+    # `"note": 123` 或 `"tpl": {"a":1}` 落回来时，`export_markdown` 的
+    # `(doc.get("note") or "").strip()` 当场 AttributeError（用户看到「导出没做成」），
+    # `tpl` 也一样会带着非字符串往下游走。与 marks / entries 同一条规矩：过 `_clip`
+    # 成字符串、洗掉落单的半个代理码点、裁到写入口径的那个长度。
+    doc["note"] = _clip(doc.get("note"), 2000)
+    doc["tpl"] = _clip(doc.get("tpl"), 60)
     doc["schema"] = SCHEMA
     return doc
 
@@ -294,8 +302,13 @@ def chapter_titles(book_dir):
             titles = json.load(f)
     except Exception:
         return out
+    # 章节标题是 `_catalog.json` 里的（手改 / 旧版本 / 云同步都会落回别的形状），
+    # 导出与思维导图直接把它拼进正文（`### %s`）再落盘：`str(t)[:120]` 只裁长度，
+    # 落单的半个代理码点照原样带进 `f.write(..., encoding="utf-8")`，一句
+    # UnicodeEncodeError 就把整篇 notes.md / 整张导图打回（实测还会留下一个
+    # `notes.md.tmp`）。与划线字段共用 `_clip` 这把尺子：成对的 emoji 一个不动。
     for i, t in enumerate(titles if isinstance(titles, list) else []):
-        out["%04d.md" % i] = str(t)[:120]
+        out["%04d.md" % i] = _clip(t, 120)
     return out
 
 
@@ -430,7 +443,23 @@ def _custom_list(cache_dir):
     except Exception:
         return []
     items = data.get("items") if isinstance(data, dict) else data
-    return [t for t in (items or []) if isinstance(t, dict) and t.get("id")]
+    # 模板文件也是手改得到的长寿账（跨书共用），写入口 `save_template` 走 `_clip`，
+    # 读口这里原样返回：`"body": {"a":1}` 一旦落回盘上，`get_template` 把它交给
+    # `apply_template` 的 `re.sub(..., body)` 就是 TypeError（界面点「套用模板」没反应）。
+    # 形状这条口子收在唯一这个读口上，`templates` / `delete` / `save` 三处调用方
+    # 看到的就都是字符串；`dict(t)` 只覆盖要收的四个字段，created_at / updated_at
+    # 这些没提的键原样留着 —— save 回写（`hit.update`）不能把模板的时间戳弄丢。
+    out = []
+    for t in (items or []):
+        if not isinstance(t, dict) or not t.get("id"):
+            continue
+        t = dict(t)
+        t["id"] = _clip(t.get("id"), 60)
+        t["name"] = _clip(t.get("name"), 60)
+        t["desc"] = _clip(t.get("desc"), 200)
+        t["body"] = _clip(t.get("body"), 20000)
+        out.append(t)
+    return out
 
 
 def save_template(cache_dir, tpl):
