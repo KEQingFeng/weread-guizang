@@ -706,7 +706,16 @@ run "AI 小结 JSON 抠取（花括号开场白不吃掉后面的真导图）" "
 # 这一条把「落盘前先摘掉落单的半个代理码点、真 emoji 与 ZWJ 一个字不动」钉住，并带
 # 一条「不清就写当场 UnicodeEncodeError」的对照。纯函数 + 临时沙盒，归静态段。
 run "AI 小结坏字符（半个代理码点不再让小结悄悄存不下去）" "$PY" tests/check_ai_sum_surrogate.py
-# 上三条管的是小结的「内容」，这一条管小结的「按钮」：模式条 #aiSumStyle 借了阅读设置
+# 上一条管「脏字符写不出去」，这一条管「写到一半被杀」：`_ai/` 里那份是「这本书不必
+# 再问一次模型」的唯一凭据（GET /api/ai_summary 直接 load_result 回界面），而
+# save_result 原来是 `open(path,"w")` 直写 —— `"w"` 一进去就把旧小结截断了，恰好
+# 在写完之前被强杀（关窗口 / 断电 / 换书重开），盘上只剩半截 Markdown，下一次
+# load_result 却认它就是上次那份，用户看到一段断在句中、再也长不回去的小结。这一条
+# 把它换成仓库里那套「先写 .tmp 再 os.replace」并钉住：正常写一个字不改、覆盖不留
+# .tmp、写一半 / KeyboardInterrupt / 改名失败时旧稿完整且 .tmp 收干净，附一条「老写法
+# 确实会把旧稿砸坏」的对照。纯逻辑 + 临时沙盒，归静态段。
+run "AI 小结落盘原子性（写到一半被强杀不毁上次那份）" "$PY" tests/check_ai_sum_atomic.py
+# 上面几条管的是小结的「内容」，这一条管小结的「按钮」：模式条 #aiSumStyle 借了阅读设置
 # 的 .rdseg 外观类，而点击委托原来按这个类名一把抓，点「学习理解」先落进 rdPickCfg
 # ——拿 undefined 当键写进 rdCfg 然后 return，模式换不掉、learn 那份不落盘（真机套件
 # check_ai_summary_ui 里红的那 6 条全是这一条的后果）。这一条钉住「阅读偏好认的是
