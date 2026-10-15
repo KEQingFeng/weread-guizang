@@ -14,23 +14,36 @@
   B transcript.json 被手改 / 云同步落下 / 旧版本写过，值里（或自由字段的**键**里）
     留着它。之后读出来（load_transcript）再存一次、导出或重建，同样炸在编码上。
 
-这一份把两条路连同三条底线钉住：
+  C 整条转笔记落成一本书的 `_save_book`：云转写与 LLM 都是「别人家的 JSON」，
+    分片缓存 `_write_json`、成品正文 `body_md.encode("utf-8")`、`transcript.txt` /
+    `merged.md` 的 `_write_text` 三处撞同一刀。外站元信息（标题 / 上传者）也会脏。
 
-  C 只摘落单的那半个：真 emoji（😀）与 ZWJ 连字（🧑‍💻）一个字不动，洗完是幂等的。
-  D 干净的转写一个字不改：加固不许把好数据洗坏。
-  E 落盘后不留 .tmp，json 与跟着写的 transcript.txt 是同一份干净数据。
+这一份把三条路连同四条底线钉住：
+
+  E1 只摘落单的那半个：真 emoji（😀 / 👍🏽）与 ZWJ 连字（🧑‍💻）一个字不动，洗完是幂等的。
+  E2 干净的转写一个字不改：加固不许把好数据洗坏。
+  E3 落盘后不留 .tmp，json 与跟着写的 transcript.txt 是同一份干净数据。
+  E4 `_save_book` 整条喂脏数据不抛，落出来的每一份文件都不含落单码点。
 
 全程离线、不联网、不开浏览器、不写用户真实书库（全部在系统临时目录里）。
 """
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+
+# 数据目录指进临时沙盒再 import video_note：免得 TMP_ROOT 真去动用户真实缓存。
+SANDBOX = pathlib.Path(tempfile.mkdtemp(prefix="guizang-vidsur-"))
+os.environ["GUIZANG_DATA"] = str(SANDBOX / "cache")
+os.environ["GUIZANG_BOOKS"] = str(SANDBOX / "books")
+os.makedirs(os.environ["GUIZANG_DATA"], exist_ok=True)
+
 import video_note as vn  # noqa: E402
 
 FAILED = []
@@ -39,7 +52,9 @@ HI = "\ud800"                       # 落单的高位代理码点
 LO = "\udfff"                       # 落单的低位代理码点
 HALF = "\ud83d"                     # 一个 emoji 被拦腰截断后剩下的那半个
 EMOJI = "\U0001F600"                # 😀 真字符，必须原样留着
+TONE = "\U0001F44D\U0001F3FD"       # 👍🏽 肤色修饰符，必须原样留着
 ZWJ = "\U0001F9D1\u200D\U0001F4BB"  # 🧑‍💻 ZWJ 连字，必须原样留着
+SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def chk(name, cond, extra=""):
@@ -48,7 +63,7 @@ def chk(name, cond, extra=""):
         PASSED += 1
     else:
         FAILED.append(name)
-    print(("PASS  " if cond else "FAIL  ") + name + ("" if cond else "   " + repr(extra)))
+    print(("PASS  " if cond else "FAIL  ") + name + ("" if cond else "   " + repr(extra)[:220]))
 
 
 def has_surrogate(v):
@@ -69,11 +84,8 @@ def no_raise(fn, *args, **kw):
         return False, "%s: %s" % (type(e).__name__, e)
 
 
-SANDBOX = tempfile.mkdtemp(prefix="guizang-vidsur-")
-
-
 def book(name):
-    d = os.path.join(SANDBOX, name)
+    d = os.path.join(str(SANDBOX), name)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -87,10 +99,18 @@ def read_text(p):
         return f.read()
 
 
+def file_is_clean(path):
+    """盘上这份文件里不该有落单的半个代理码点。"""
+    try:
+        return not SURROGATE.search(read_text(path))
+    except OSError:
+        return False
+
+
 DIRTY_SEGS = [
     {"id": "s1", "start": 0.0, "end": 1.0, "text": "你" + HI + "好",
      "speaker": "说" + HALF, HI + "自由字段": "值" + LO},
-    {"id": "s2", "start": 1.0, "end": 2.0, "text": "真" + EMOJI + ZWJ + "字"},
+    {"id": "s2", "start": 1.0, "end": 2.0, "text": "真" + EMOJI + ZWJ + TONE + "字"},
 ]
 
 try:
@@ -135,10 +155,10 @@ try:
 
     # ── C 只摘坏的那半个：真 emoji / ZWJ 一个字不动，洗是幂等的 ──────────
     chk("C1 emoji 与 ZWJ 连字在 transcript.json 里原样留着",
-        isinstance(doc, dict) and doc["segments"][1]["text"] == "真" + EMOJI + ZWJ + "字",
+        isinstance(doc, dict) and doc["segments"][1]["text"] == "真" + EMOJI + ZWJ + TONE + "字",
         doc["segments"][1] if isinstance(doc, dict) else doc)
     chk("C2 emoji 与 ZWJ 连字在 transcript.txt 里原样留着",
-        EMOJI in txt and ZWJ in txt, txt[:120])
+        EMOJI in txt and ZWJ in txt and TONE in txt, txt[:120])
     clean_tree = {"t": EMOJI + ZWJ, "list": [EMOJI, "顶" + HI + "点"], "n": 7,
                   ZWJ: {"深层": [EMOJI + HALF]}}
     washed = vn._drop_surrogates(clean_tree)
@@ -149,6 +169,8 @@ try:
         ZWJ in washed and washed[ZWJ]["深层"] == [EMOJI], washed)
     chk("C5 _drop_surrogates 幂等：洗过再洗结果不变",
         vn._drop_surrogates(washed) == washed)
+    chk("C6 只基于「落单」下手：正常中文 / 换行 / 制表都留",
+        vn._drop_surrogates("正\n常\t文") == "正\n常\t文")
 
     # ── D 读口：手改 / 旧版本写下的脏 transcript.json 读得开且干净 ────────
     d2 = book("read")
@@ -216,8 +238,64 @@ try:
         not has_surrogate(read_text(j4))
         and not has_surrogate(read_text(os.path.join(d4, "a.txt"))),
         (read_text(j4)[:80], read_text(os.path.join(d4, "a.txt"))))
+
+    # ── G _save_book 整条：脏数据进、干净的书出 ──────────────────────────
+    def fake_probe_meta(url):
+        return {"title": "示例视频", "uploader": "示例UP主", "duration": 48,
+                "thumbnail": "https://example.invalid/c.jpg", "id": "BV1xx411c7mD"}
+
+    vn.probe_meta = fake_probe_meta
+    plan_info = vn.plan("https://www.bilibili.com/video/BV1xx411c7mD")
+    # 外站元信息也会脏：标题 / 上传者里夹一个落单码点。
+    plan_info["title"] = "示例" + HI + "视频"
+    plan_info["uploader"] = "示例" + LO + "UP主"
+
+    BOOKS = str(SANDBOX / "books")
+    os.makedirs(BOOKS, exist_ok=True)
+    spoken = {"text": "第一段转写" + HI + "。第二段带 emoji " + EMOJI + "。",
+              "segments": [{"start": 0.0, "end": 11.0, "text": "第一段" + HI + "转写"},
+                           {"start": 12.0, "end": 29.0, "text": "第二段"}],
+              "engine": "cloud", "language": "zh"}
+    summary = {"title": "示例" + HI + "总结", "overview": "一句话说清" + LO + "这支视频。",
+               "bulletPoints": ["要点" + HI + "一", "要点二"],
+               "chapters": [{"title": "为什么" + LO + "先讲概念", "start": 0,
+                             "summary": "先把概念" + HI + "讲清楚。"},
+                            {"title": "方法怎么落地", "start": 12,
+                             "summary": "给出三步做法。"}]}
+    note_markdown = "# 笔记" + HI + "标题\n\n这是假的笔记正文，夹一个 " + LO + " 坏码。"
+    mindmap = {"version": 1, "title": "导图" + HI + "标题", "root": "root",
+               "nodes": [{"id": "root", "label": "根" + LO + "节点", "type": "root",
+                          "summary": "总览", "children": [], "time_anchor": None}]}
+
+    okg, gbook = no_raise(vn._save_book, BOOKS, plan_info, spoken, summary,
+                          note_markdown, mindmap, {"language": "zh"}, "")
+    chk("G1 _save_book 喂脏数据整条不抛", okg, gbook if not okg else "")
+
+    if okg and isinstance(gbook, dict):
+        bdir = gbook.get("dir") or ""
+        chk("G2 返回的书书名里那个坏码被摘掉", HI not in str(gbook.get("title") or "")
+            and LO not in str(gbook.get("title") or ""), gbook.get("title"))
+
+        want = [vn.TRANS_TXT, vn.TRANS_FILE, vn.SUMMARY_FILE, "merged.md",
+                "meta.json", "notes.md", "notes.json", "mindmap.json"]
+        missing = [n for n in want if not os.path.isfile(os.path.join(bdir, n))]
+        chk("G3 该落的那几份都在", not missing, missing)
+        dirty = [n for n in want
+                 if os.path.isfile(os.path.join(bdir, n)) and not file_is_clean(os.path.join(bdir, n))]
+        chk("G4 落出来的每一份都不含落单的半个代理码点", not dirty, dirty)
+        chk("G5 整本书里没留半截 .tmp",
+            not [p for p in os.listdir(bdir) if p.endswith(".tmp")])
+
+        # 真 emoji 得原样躺在转写里，不能被「洗坏字符」顺手洗掉。
+        gtrans = read_text(os.path.join(bdir, vn.TRANS_TXT))
+        chk("G6 转写里那个真 emoji 一个字没动", EMOJI in gtrans)
+    else:
+        for nm in ("G2 返回的书书名里那个坏码被摘掉", "G3 该落的那几份都在",
+                   "G4 落出来的每一份都不含落单的半个代理码点",
+                   "G5 整本书里没留半截 .tmp", "G6 转写里那个真 emoji 一个字没动"):
+            chk(nm, False, "整条已经抛了")
 finally:
-    shutil.rmtree(SANDBOX, ignore_errors=True)
+    shutil.rmtree(str(SANDBOX), ignore_errors=True)
 
 print()
 print("视频转写落单代理码点：通过 %d 项，失败 %d 项" % (PASSED, len(FAILED)))
@@ -225,4 +303,4 @@ if FAILED:
     for f in FAILED:
         print("  ✗ " + f)
     sys.exit(1)
-print("ok  脏段落 / 脏账本里的半个码点不再把保存与读取打崩，真 emoji 一个字不动")
+print("ok  脏段落 / 脏账本 / 整本书里的半个码点不再把保存与读取打崩，真 emoji 一个字不动")

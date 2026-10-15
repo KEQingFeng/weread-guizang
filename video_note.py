@@ -1738,6 +1738,17 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
     的 _catalog.json 就是那批章节名，阅读器目录一次到位。视频来源那几行放进第一章
     开头 —— 放在第一个标题之前的话，切章时会多出一章「无题」把整本目录顶偏。
     """
+    # 进成品这道口上只洗一次：外站元信息、云转写与 LLM 回的正文都可能夹着落单的半个
+    # 代理码点（JSON 里存得下、utf-8 编不出）。下面 body_md.encode("utf-8") 与
+    # book_import / book_notes 的落盘都不在本文件里，与其指望各自兜底，不如在进
+    # 它们之前先把坏字符摘掉 —— 摘的只是那半个坏码，真 emoji 一个字不动。
+    plan_info = _drop_surrogates(plan_info)
+    spoken = _drop_surrogates(spoken)
+    summary = _drop_surrogates(summary)
+    note_markdown = _drop_surrogates(note_markdown)
+    mindmap = _drop_surrogates(mindmap)
+    ai_error = _drop_surrogates(ai_error)
+
     title = plan_info["title"] or "视频笔记"
     chapters = summary.get("chapters") or []
     bodies = _chapter_bodies(spoken["text"], spoken["segments"], chapters)
