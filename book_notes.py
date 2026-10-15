@@ -114,16 +114,55 @@ def load_notes(book_dir):
     return doc
 
 
+def _tmp_name(path):
+    """同目录临时件，一次一个名字（进程号 + 一小串随机）。
+
+    这一份笔记有两个写手能同时进来：后端是 `ThreadingHTTPServer`，同一本书的
+    `/api/mynotes` 保存与 `/api/mynotes/export`（或两个标签页各存一次）就会并着走。
+    `_write_json` 原先共用 `path + ".tmp"`，后来者 `open(..., "w")` 把前一个人写了
+    一半的临时件截断，两边各自按自己的偏移往下写，最后 `os.replace` 把**两份内容
+    交织在一起**的那一份顶成正式账本 —— `load_notes` 解不动就整份退回空笔记，
+    用户看到的是「这本书的划线全没了」，而那本账是刚刚两个请求各自按规矩写的。
+    先收尾的那一个还会把共用的临时件整个搬走，后一个走到自己那句 `os.replace` 时
+    临时件已经不在，抛 `FileNotFoundError`，界面上就是「存不下」。
+
+    口径与 `anna_state._atomic_write` / `flomo_notes` 一致：临时件名字必须一次一个。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """把写坏的临时件收掉；收不动（已被别人搬走 / 权限）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def _write_json(path, obj):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    if os.path.exists(path):
-        try:
-            os.replace(path, path + ".prev")      # 覆盖前留一份上一版
-        except Exception:
-            pass
-    os.replace(tmp, path)
+    tmp = _tmp_name(path)
+    prev = path + ".prev"
+    backed = False
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        if os.path.exists(path):
+            try:
+                os.replace(path, prev)            # 覆盖前留一份上一版
+                backed = True
+            except Exception:
+                backed = False
+        os.replace(tmp, path)
+    except BaseException:
+        # 走到这一步说明新稿没顶上去：临时件收掉；若旧档已经被挪去 .prev，
+        # 把它搬回来 —— 不能因为一次落盘失败就让 notes.json 整个不见了。
+        _discard(tmp)
+        if backed:
+            try:
+                os.replace(prev, path)
+            except Exception:
+                pass
+        raise
 
 
 def save_notes(book_dir, doc):
@@ -389,10 +428,16 @@ def export_notes(book_dir, doc, meta=None, titles=None, book_label=""):
 
 
 def _write_text(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        # 导出 md / 导图 svg 同走这一个口子：两个请求并着导出时也不能共用一个临时件，
+        # 写崩 / 被 Ctrl-C 时把半截临时件收掉再抛。
+        _discard(tmp)
+        raise
 
 
 # ─────────────────────────── 模板 ───────────────────────────
