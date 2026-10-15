@@ -36,6 +36,18 @@
     而不是再解一次监听地址，是为了不管用户从 127.0.0.1 还是 localhost 打开界面，
     界面自己的请求都算同源 —— 换一种打开方式不该把自己人挡在门外。
 
+还有一条洞，上面那套尺子量不到：**DNS rebinding**
+    上面写着「跨源 GET 的回包页面读不到」，那句对普通跨源是对的 —— 浏览器不发预检、
+    页面也读不到回包。可它假定「攻击者的页面」和「归藏」是两个源。DNS rebinding 把
+    这个前提拆掉：攻击者让 `evil.example` 的 DNS 先指自己、再改指 `127.0.0.1`，浏览器
+    于是认为页面与后端**同源** —— `Sec-Fetch-Site` 会是 `same-origin`、`Origin` 也是
+    `http://evil.example`（等于 Host），`cross_site` 一路放行；跨源读取限制同样不再管用，
+    整份 `/api/state`（书架 / 划线 / 阅读时长）读得到，写操作也做得成。
+
+    堵它靠 `Host` 头：浏览器一定会带上「用户以为自己在访问谁」，rebinding 带的就是那个
+    攻击者域名。所以凡是打上来的请求，Host 必须是回环自己 —— 与 `shell/main.swift` 里
+    `isOutside()` 同一条判断（`127.0.0.1` / `localhost` / `::1`），两边一把尺子。
+
 这一层是纯函数：进出都是字符串与 headers，不碰套接字、不看时钟，所以能脱开服务单测。
 """
 
@@ -107,3 +119,38 @@ def cross_site(method, headers, host):
     if origin is not None and same_origin(origin, host):
         return False
     return True
+
+
+# 本机自己那几个写法，与 shell/main.swift 的 isOutside() 逐字对齐（127.0.0.1 / localhost /
+# ::1）。多认一个都是给 DNS rebinding 留口子，少认一个自家界面就可能打不开。
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def host_allowed(host):
+    """这次请求的 Host 是不是「本机自己」。回 True 就是放行。
+
+    缺头（None / 空串）回 True：浏览器发请求必带 Host，所以 DNS rebinding 一定带着
+    攻击者的域名来；不带 Host 的只有 curl / MCP 适配器 / 门禁脚本这些本机进程，拦它们
+    没有意义（与上面「不认浏览器标签就当不是浏览器」同一条原则）。
+
+    只认字面量：`127.0.0.1.evil.com`、`localhost.evil.com` 都不算 —— Host 是域名后缀
+    匹配就能骗过去的那一层，这里一次也不做后缀匹配。端口写坏（`:oops`）、半个方括号、
+    夹了 userinfo 或 path 的畸形写法一律回 False，宁可拒掉一个能跑通的古怪客户端，
+    也不放过一个认得出「像本机」的域名。
+    """
+    text = str(host or "").strip()
+    if not text:
+        return True
+    # Host 里的 IPv6 本该带方括号（`[::1]:8770`）；裸 `::1` 是 URL 解析后的形状，
+    # 两处（Swift 那边比的是 u.host）都得认，否则从 [::1] 打开界面会自己挡自己。
+    if text.lower() == "::1":
+        return True
+    try:
+        u = urlsplit("//" + text)
+        _port = u.port               # 端口写坏在这一步抛 ValueError（`:oops`）
+    except ValueError:
+        return False
+    if (not u.hostname or u.username is not None or u.password is not None
+            or u.path or u.query or u.fragment):
+        return False
+    return u.hostname.rstrip(".").lower() in LOOPBACK_HOSTS

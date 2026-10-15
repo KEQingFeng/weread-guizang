@@ -640,6 +640,14 @@ run "登录态账本（形状一处真相 / 原子落盘 / 半截档 / 三处读
 # 把浏览器那几种发法各来一遍，专验「跨站回了 403、账本也一个字没动」。不起浏览器，
 # 归静态段，--fast 也得带上。
 run "跨站写操作（判定边界 / 接线 / 真机拦得住且不误伤）" "$PY" tests/check_csrf.py
+# 上一条的前提是「攻击者的页面」和归藏是两个源。DNS rebinding 拆掉这个前提：让外站域名
+# 先指自己、再改指 127.0.0.1，浏览器就认为页面与后端同源（Origin 与 Host 都是那个域名、
+# Sec-Fetch-Site: same-origin），cross_site 一路放行，跨源读取限制也不再管用 —— 账本读得走、
+# 写操作也做得成。堵它只能看 Host 是不是本机那几个写法，与 shell/main.swift 的 isOutside()
+# 同一把尺子。这一条钉 ①纯函数边界表 ②两个入口的接线 ③in-process 真 Handler 上按 rebinding
+# 形状发的 GET / POST（外站 Host 403、账本一个字不动，回环 Host 照常 200）④两把尺子对表。
+# 不起浏览器、不联网，归静态段，--fast 也得带上。
+run "Host 头收口（rebinding 借不到 Host / 像本机的子域名也拒 / 与外壳一把尺子）" "$PY" tests/check_host_guard.py
 # 查询串里的数字被手改坏（?tail=abc / ?n=abc）时，裸 int() 会穿出 do_GET 把连接掐断，
 # 前端只看见 RemoteDisconnected —— 又是「点了没反应」那一种。这一条钉住 _qint 的收口
 # 口径与四个调用点：纯函数 + 只读源码，不依赖浏览器，归静态段。
