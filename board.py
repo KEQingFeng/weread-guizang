@@ -202,7 +202,7 @@ def _tmp_for(path) -> str:
     后一个 replace 当场 FileNotFoundError —— 界面看到「没存进去」，可画其实已经落了一
     半，旁边还留一个没人认领的 `.tmp`。临时名各写各的，两条写就互不打扰。
 
-    与 ui_server._write_text / _write_bytes / _write_json 同一条口径（都是
+    与 `ui_server._write_json` / `_write_bytes`、`flomo_notes.save` 同一条口径（都是
     `path.<pid>.<随机串>.tmp`）。临时件写崩了不会自己消失，delete_board 里按同一
     形状把它们一并收掉。
     """

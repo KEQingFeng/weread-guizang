@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """画板落盘的并发原子性（board.py）：同一块板被两处同时写时，不许有一个写者扑空。
 
-为什么单列一条：`ui_server` 的三条写口（`_write_text` / `_write_bytes` / `_write_json`）
-早就把口径写死 —— 临时名带 pid + 随机串，因为固定的 `xxx.tmp` 在多线程下必有一条
+为什么单列一条：`ui_server` 的两条写口（`_write_bytes` / `_write_json`）早就把口径写死
+—— 临时名带 pid + 随机串，因为固定的 `xxx.tmp` 在多线程下必有一条
 `os.replace` 扑空。画板这一档一直没跟上：`_write_json` / `_write_bytes` 用的是
 `path + ".tmp"`。而画板恰恰是这个后端最重的几次写（画布上限 6 MB，覆盖保存还要先把
-旧档挪成 `.prev`），`save_board` / `save_export` 又直接挂在线程池化的 PUT / POST 上：
+旧档挪成 `.prev`），`save_board` / `save_export` 又直接挂在多线程的 PUT / POST 上：
 同一块板开着两个窗口、或「自动保存」和手点保存撞在一起，两个写者共用一个临时名 ——
 先 replace 的把临时件搬走，后一个当场 FileNotFoundError，界面报「没存进去」，
 可画其实已经落了一半，旁边还留一个没人认领的 `.tmp`。
