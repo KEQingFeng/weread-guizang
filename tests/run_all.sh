@@ -180,6 +180,16 @@ run "订阅条目时间字段脏值（排序 / since / 标已读 / 裁剪不抛�
 # `subs()` / `summary()` 整页打不开。这一条钉住「越界归 0、超大整数照认、坏一条不
 # 带走整页、干净账本一个字不改、落盘后不再有 Infinity」，纯逻辑、离线。
 run "订阅条目时间字段越界数字（Infinity / 1e400 不打抛、不带走整页）" "$PY" tests/check_feed_overflow.py
+# 上面几条管的是「取回来之后的数据」，这一条管「**去哪儿取**」。订阅的地址有三处来源，
+# 却只有用户当场粘进来的那一处核过 scheme：页面里的 `<link rel=alternate href=…>` 与
+# `feed.json` 里存着的那一份都直接喂给了 urlopen，而 urllib 默认认得 `file:` ——
+# 一个博客页写个 `href="file:///Users/…/cache/config.json"`，「发现订阅」这一步就会把
+# 本机文件读回来当订阅解析。这一条把 scheme / 主机名那道闸收到唯一那条取回口（`_http`），
+# 钉住「file: / data: / ftp: / 半截 IPv6 一律拒绝且一次请求都不发」「页面里的坏候选不
+# 进发现结果」「feed.json 里存着 file:// 的源，刷新只让它自己记一句人话错误、不读文件、
+# 不抛穿，同一次里的正常 http 源照刷」「正常 http 订阅一条不误伤」，另附一条
+# 「裸 urlopen 确实读得回本机文件」的对照。全程离线，归 --fast 静态段。
+run "订阅取回地址 scheme 收口（file:// 不替用户读本机文件 / 坏候选不进发现 / 正常源不误伤）" "$PY" tests/check_feed_scheme.py
 # 订阅正文的清洗是外站内容进成品的那道边界。原来那把尺子只量原始字节，浏览器却会
 # 先解一层 HTML 实体、再把 URL 里的 TAB / 换行删掉 —— `&#106;avascript:` 与
 # `java<TAB>script:` 在浏览器手里都是 javascript:；截断的 `<script>` 没有闭合标签，

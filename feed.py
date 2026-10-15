@@ -425,13 +425,35 @@ def clear_snapshots():
 # ── HTTP ────────────────────────────────────────────────────────────
 
 def _check_url(url):
-    u = (url or "").strip()
+    """这个地址准不准替用户去取：只认 http/https，而且必须有个主机名。
+
+    订阅这条线有三处地址，来源各不相同，但都得过同一道闸：
+
+      · 用户粘进来的（`discover` / `add` / 导入 OPML）；
+      · **页面内容里写的**（`<link rel=alternate>` 与 `Link:` 头，见
+        `_link_rel_alternate` / `_link_header`）—— 这是别人写的地址，最不能当自己人；
+      · `feed.json` 里存着的那一份（用户能手改、云同步也可能落半截）。
+
+    旧写法只在第一处核过 scheme，后两处直接喂给 urlopen，而 urllib 默认认得 `file:`：
+    页面上写一条 `href="file:///Users/…/.ssh/id_rsa"`，发现订阅时就会把本机文件读回来
+    当订阅解析（能解析就整篇进书架）。所以这道闸同时收在唯一那条取回口（`_http` 开头
+    再核一次），三处一起盖住，以后再加取回路径也漏不掉。
+
+    解不出来的地址给人话、不抛解释器的英文原文：半截 IPv6 方括号（`http://[::1`）与
+    NFKC 归一化认不出的字符都会让 `urlparse` 自己抛 `Invalid IPv6 URL`，与
+    `_req_target` / `clip_article.split_url` 同一口径。
+    """
+    u = str(url if url is not None else "").strip()
     if not u:
         raise ValueError("链接是空的")
-    p = urllib.parse.urlparse(u)
+    try:
+        p = urllib.parse.urlparse(u)
+        host = (p.hostname or "").strip()
+    except ValueError:
+        raise ValueError("这个链接解不出来，看看是不是写坏了")
     if p.scheme.lower() not in ALLOWED_SCHEMES:
         raise ValueError("只认 http/https 链接（现在这个是 %s）" % (p.scheme or "空"))
-    if not (p.hostname or "").strip():
+    if not host:
         raise ValueError("这个链接没有主机名，打不开")
     return u
 
@@ -446,6 +468,10 @@ def _http(url, headers=None):
     # 谁把我们 302 到内网都不算数。跳转那道闸与剪藏共用一份（延迟 import 避免顶层耦合）。
     import clip_article
     clip_article.ensure_redirect_guard()
+    # 唯一那条取回口再核一次 scheme / 主机名：跳转闸只管 `Location`，管不了「一开始
+    # 喂进来的就是 file://」——`add()` 挑的候选来自页面里的 <link alternate>，`refresh()`
+    # 用的地址来自能手改的 feed.json，两处都不是用户当场敲的，必须在真正发请求之前挡住。
+    url = _check_url(url)
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": ("application/rss+xml,application/atom+xml,application/feed+json,"
@@ -883,8 +909,15 @@ def discover(url):
     result = []
 
     def push(cand):
-        cu = (cand.get("url") or "").strip()
+        cu = str(cand.get("url") or "").strip()
         if not cu or cu in seen:
+            return
+        # 页面里写的地址先过同一道 scheme 闸：一条 file: / data: / 没主机名的
+        # `href` 不算候选，既不摆给界面，也不会被 add() 挑去取（取回口还会再核一次，
+        # 这里挡住是为了让「发现结果」本身就不含取不得的地址）。
+        try:
+            _check_url(cu)
+        except ValueError:
             return
         seen.add(cu)
         result.append({"url": cu, "title": cand.get("title") or "", "type": cand.get("type") or "rss"})
