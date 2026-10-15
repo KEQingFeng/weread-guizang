@@ -25,6 +25,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -65,6 +66,11 @@ BIG = 10 ** 400
 BIG_STR = str(BIG)
 INF = float("inf")
 DAY = "2026-10-15"
+# 上面这些纯函数断言都显式传 today=DAY（固定一个日期才有确定性，也才逐年可复现）；
+# 但第 5 段走的是**真产品路径**（ui_server.activity_summary / activity_brief），
+# 它们自己按本机挂钟取「今天」。夹具当初照 DAY 写，于是写这条门禁的第二天就红 ——
+# 产品没错，错的是夹具把「今天」钉成了某一天。第 5 段改用产品同一口钟取今天。
+TODAY = time.strftime("%Y-%m-%d")
 
 try:
     # ── 0. 前提：这些越界值真的进得来，旧写法真的会抛 ───────────────
@@ -167,7 +173,7 @@ try:
     # ── 5. 真产品路径：两本账的读口都不许被越界数字甩掉 ──────────────
     os.makedirs(os.path.dirname(us.ACTIVITY_PATH), exist_ok=True)
     with open(us.ACTIVITY_PATH, "w", encoding="utf-8") as f:
-        f.write('{"study":{"days":{"' + DAY + '":' + BIG_STR + '},"total":' + BIG_STR + '},'
+        f.write('{"study":{"days":{"' + TODAY + '":' + BIG_STR + '},"total":' + BIG_STR + '},'
                 '"write":{"days":{},"total":0}}')
     summ = val(lambda: us.activity_summary())
     chk("P1 GET /api/activity 的整包（ui_server.activity_summary）不抛",
