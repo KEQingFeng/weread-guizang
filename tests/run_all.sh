@@ -386,6 +386,15 @@ run "导入书 EPUB 配图（同名不串门 / 相对路径 / 缺图兜底）" "
 # 加密条目（RuntimeError）同理。这一条把「压缩包坏法 → 人话 ValueError」钉死，并守住
 # 好包的章节、OPF 元信息与落盘正文一个字不变。纯内存 zip，不联网、不起服务。
 run "导入坏 EPUB（坏包 / 加密包翻成人话，好包零改动）" "$PY" tests/check_import_broken_epub.py
+# 上面三条管的是「包坏、图错、字段坏」；这一条管的是**包里的 XML 想撑爆内存**。
+# OPF 是从外面带进来的，`_parse_xml` 原先的实体闸门只看开头 4096 字节 —— 在 DOCTYPE
+# 前面垫一段超长注释就能把它顶出窗口，而 expat 对内部实体是照展开的：几百字节的
+# 「十亿笑」解出 30 万字符，再深几层就是几个 G，导入那一下直接卡死。改成扫全篇
+# （与 feed.import_opml 同一把尺子）。这条钉住「垫出窗口也拒 / 小写标签也拒 /
+# str 与 memoryview 两条路都拒 / 干净 OPF 不误伤 / 坏 OPF 的 epub 走 read_epub
+# 不抛、不把展开出来的字当书名、章节还能兜底导进来」，另附「实体真的会展开、
+# 旧窗口真的放行」两条对照，免得收口被拿掉还在空转。纯内存 zip，离线。
+run "EPUB 实体闸门（垫出 4KB 窗口也拒 / 好包不改 / 坏 OPF 不撑爆导入）" "$PY" tests/check_import_entity.py
 # 上面两条管的是「文件本身坏」；这一条管的是「文件名 / 标题 / 作者这几个字段坏」。
 # POST 来的 JSON 里 `"\ud800"` 这种转义能被 json.load 读成一个落单的半个代理码点，
 # 旧代码把它写进 ensure_ascii=False 的 meta.json 时抛 UnicodeEncodeError —— 接口回 500
