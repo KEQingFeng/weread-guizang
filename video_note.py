@@ -751,8 +751,8 @@ def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop,
         for seg in (payload.get("segments") or []):
             if not isinstance(seg, dict):
                 continue
-            segments.append({"start": float(seg.get("start") or 0.0) + offset,
-                             "end": float(seg.get("end") or 0.0) + offset,
+            segments.append({"start": _sec(seg.get("start")) + offset,
+                             "end": _sec(seg.get("end")) + offset,
                              "text": str(seg.get("text") or "").strip()})
         offset += _audio_seconds(part)
     _say(progress, "asr", 72, "转写完成")
@@ -1044,9 +1044,12 @@ def _extract_json(text):
 
 
 def _segments_excerpt(segments, limit=120):
+    """段落摘录成提示词里那段 JSON。时间戳同样走 `_sec`：这段字面量是喂给模型的，
+    里面出现 `Infinity` / `NaN` 会让下游的严格 JSON 解析当场拒收整段提示词。"""
     rows = []
     for seg in (segments or [])[:limit]:
-        rows.append({"start": round(float(seg.get("start") or 0.0), 1),
+        seg = seg if isinstance(seg, dict) else {}
+        rows.append({"start": round(_sec(seg.get("start")), 1),
                      "text": _clip(seg.get("text"), 200)})
     return json.dumps(rows, ensure_ascii=False)[:8000]
 

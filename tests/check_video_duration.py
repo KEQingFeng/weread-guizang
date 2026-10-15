@@ -27,14 +27,16 @@
 收口
     · `probe_duration`：`math.isfinite` 是第二条进门条件，非有限一律回 None。
     · `_audio_seconds`：走既有的 `_sec` 那把尺子（有限、正数，否则 0）。
-    · `_pack_result`：start / end 也走 `_sec`，与 `_sec` 的注释里写的三条来源同一口径。
+    · `_transcribe_cloud` 组段那一句 `float(seg.get("start")) + offset` 也换成 `_sec`。
+    · `_pack_result` 与 `_segments_excerpt`（喂模型的提示词那段 JSON）：start / end
+      一并走 `_sec`，与 `_sec` 的注释里写的三条来源同一口径。
 
 这一条钉四层：
     A 探针层：坏 stdout 一律回 None，正常时长一个字不改；
     B 偏移层：`_audio_seconds` 对 inf / NaN / 负数回 0，偏移链不再被污染；
     C 包层：`_pack_result` 收下的每段时间戳都是有限浮点，能被严格 JSON 写出；
     D 端到端：三片音频（一片正常、两片探针回坏值）走一遍 `_transcribe_cloud`，
-      返回的段落与落在盘上的分片缓存都必须是严格 JSON。
+      返回的段落、落在盘上的分片缓存、以及喂给模型的段落摘录都必须是严格 JSON。
 
 全程离线：假 ffprobe 顶掉 subprocess，假 `_post_audio` 顶掉网络，不碰用户真实书库。
 归 --fast 静态段。
@@ -257,6 +259,24 @@ try:
             cache_bad.append("%s: %s" % (os.path.basename(fp), e))
     chk("D6 盘上的分片缓存是严格 JSON（没有 Infinity / NaN）", cache_ok, cache_bad)
 
+    # D7 段落摘录（喂给模型的提示词那段 JSON）同样不许带 Infinity / NaN。
+    excerpt = vn._segments_excerpt([
+        {"start": float("inf"), "text": "越界"},
+        {"start": "1e400", "text": "字符串越界"},
+        {"start": 12.34, "text": "好的一段"},
+        "裸字符串",
+    ])
+    try:
+        rows = strict_json(excerpt)
+        chk("D7 段落摘录是严格 JSON（无 Infinity / NaN）", True)
+    except Exception as e:  # noqa: BLE001
+        rows = None
+        chk("D7 段落摘录是严格 JSON（无 Infinity / NaN）", False, "%s：%r" % (e, excerpt[:160]))
+    chk("D8 摘录里好的一段照认（12.34 → 12.3）、坏条目不带走整段",
+        isinstance(rows, list) and len(rows) == 4
+        and rows[2]["start"] == 12.3 and rows[2]["text"] == "好的一段",
+        rows)
+
     # ── E 源码接线：三处都走同一把尺子 ─────────────────────────────
     SRC_FT = (REPO / "ffmpeg_tool.py").read_text(encoding="utf-8")
     SRC_VN = (REPO / "video_note.py").read_text(encoding="utf-8")
@@ -273,6 +293,12 @@ try:
         and 'float((item or {}).get("end")' not in SRC_VN)
     chk("E5 _pack_result 的 start / end 都过 _sec",
         '_sec(item.get("start"))' in SRC_VN and '_sec(item.get("end"))' in SRC_VN)
+    chk("E6 云转写组段与段落摘录里不再有裸 float(seg.get(\"start\"))",
+        'float(seg.get("start")' not in SRC_VN
+        and 'float(seg.get("end")' not in SRC_VN
+        and '_sec(seg.get("start"))' in SRC_VN)
+    chk("E7 段落摘录的 start 也走 _sec",
+        'round(_sec(seg.get("start")), 1)' in SRC_VN)
 
     # ── F 干净数据回归：既有那套纯函数一个口径不动 ──────────────────
     chk("F1 _sec 仍然是「有限且为正，否则 0」",
