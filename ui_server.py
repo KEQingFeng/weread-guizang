@@ -4773,6 +4773,44 @@ def _body_list(raw):
     return raw if isinstance(raw, list) else []
 
 
+def _body_msgs(body, key):
+    """请求体里那个「本该是消息数组」的字段收成 `[{"role","content"}]`；形状不对丢单条、当空表。
+
+    为什么单开一处：`/api/agent/chat` 的 `history` 是前端捎来的「最近几轮对话」，
+    正常时永远是 `[{"role": "user"|"assistant", "content": "…"}]`。可这份 body 是
+    外来 JSON —— 手改过、旧版本写下、别的 MCP 客户端发来，都可能变成数字 / 对象 /
+    字符串 / 混着非对象的数组。老写法是
+
+        for h in (history or [])[-8:]:
+            r = (h or {}).get("role")
+            c = ((h or {}).get("content") or "").strip()
+
+    —— `history=123` 在 `[-8:]` 当场 `TypeError`，`history={"a": 1}` 是
+    `KeyError: slice(-8, None, None)`，`history=[1]` 在 `.get` 当场 `AttributeError`，
+    `history="ab"` 更会把每个字符当一条消息再 `.get` 抛。`/api/agent/chat` 这条口
+    没有兜底 try/except，异常一路穿出 `do_POST`，`BaseHTTPRequestHandler` 不会替你
+    回 500，它只是把连接关掉 —— 前端 `await fetch` 收到 RemoteDisconnected，屏幕上
+    就是「按下去毫无动静」，与 `_body_str` / `_body_list` 那两条同一个症状。同一口
+    的 `text` / `ctx` 是字符串，复用 `_body_str`，不在这里再收一遍。
+
+    口径同那两条：认不出的形状当没写（回空表），数组里形状不对的单条**丢掉**、
+    不带走整段 —— 少记一轮上下文是小事，整条对话发不出去是大事。顺序与内容一个字
+    不改；只做形状筛选，`[-8:]` 与截断是 `agent_payload` 自己的策略，不在这里定。
+    """
+    raw = (body or {}).get(key)
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for h in raw:
+        if not isinstance(h, dict):
+            continue
+        role = h.get("role")
+        content = h.get("content")
+        if role in ("user", "assistant") and isinstance(content, str):
+            out.append({"role": role, "content": content})
+    return out
+
+
 def _body_str(body, key, default=""):
     """POST body 里**本该是字符串**的字段：只放行真字符串，别的形状一律当没写。
 
@@ -5681,7 +5719,8 @@ class Handler(BaseHTTPRequestHandler):
             url, key, model = agent_cfg()
             if not url or not model:
                 return self._json({"ok": False, "msg": "小 Agent 还没配：去设置 → 小 Agent 里填个地址和模型"})
-            payload = agent_payload(q, (body or {}).get("history"), (body or {}).get("ctx"))
+            payload = agent_payload(q, _body_msgs(body, "history"),
+                                    _body_str(body, "ctx"))
             # 从这一行起就转成流式了，之后没法再改 HTTP 状态码 —— 出错只能当作
             # 流里的一条消息发出去，所以先把「是不是配好了」这类问题在前头挡掉。
             self._sse_start()
@@ -5701,8 +5740,8 @@ class Handler(BaseHTTPRequestHandler):
             mode = _body_str(body, "mode") or "translate"
             if mode not in QUICK_SYS:
                 mode = "translate"
-            ok, out = agent_quick(mode, (body or {}).get("text"),
-                                  (body or {}).get("ctx"))
+            ok, out = agent_quick(mode, _body_str(body, "text"),
+                                  _body_str(body, "ctx"))
             return self._json({"ok": ok, "text": out if ok else "", "msg": "" if ok else out})
 
         if u.path == "/api/ai/summary":
