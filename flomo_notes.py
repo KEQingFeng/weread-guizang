@@ -62,6 +62,30 @@ TAG_RE = re.compile(r"(?<!\S)#([^\s#]+)")
 PUNCT_TAIL = "。，、；：！？）】」』,.;:!?)>\u3000"
 TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})?")
 
+# 落单的半个代理码点（U+D800–U+DFFF，不成对）。`json` 读得下 `"\ud800"` 这种转义，
+# 读回来就是这样一个字符；但它在 utf-8 里编不出来。便签的正文来自 POST 请求体
+# （`fetch` 送来的 JSON 里可以有这种转义），账本又是 `ensure_ascii=False` 落盘的
+# —— 留着它，`json.dump` 当场 UnicodeEncodeError，整条便签写不下去。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def drop_lone_surrogates(v):
+    """把字符串里落单的代理码点摘掉；字典 / 列表逐层走，别的类型原样回。
+
+    和 `book_layout.drop_lone_surrogates` 同一把尺（成对的代理码点在 `json.load`
+    那一步早合成一个真字符了，这里只会摘到落单的那个坏码，emoji 不受影响）。
+    接在四个口子上：`memo_of`（一条出生时算 id 就要编码）、`_clean_memo`（账本读
+    回来的唯一入口）、`save`（唯一的落盘出口）、`build_import_csv`（CSV 导出口）。
+    于是手记、导入、手工编辑过的脏账本、云同步落回来的那份都不会再把便签卡住。
+    """
+    if isinstance(v, str):
+        return SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {k: drop_lone_surrogates(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [drop_lone_surrogates(x) for x in v]
+    return v
+
 
 # ─────────────────────────── 解析 ───────────────────────────
 
@@ -224,12 +248,17 @@ def parse_html(text):
 
 def memo_of(time_str, md, imgs=()):
     """一条笔记的各字段凑齐。单独拎出来是为了让「手工攒一条」和「从 HTML 解一条」
-    共用同一套 id / 标签 / 字数口径（否则重复导入会出现「同一条两个 id」）。"""
-    raw = str(time_str or "").strip()
+    共用同一套 id / 标签 / 字数口径（否则重复导入会出现「同一条两个 id」）。
+
+    文本先过 `drop_lone_surrogates`：手记那条正文直接来自请求体（`fetch` 送来的
+    JSON 里可以有落单的代理转义），而下面算 id 就要 `.encode("utf-8")` —— 留着那
+    半个坏码，手记这一步当场 UnicodeEncodeError，正文根本到不了落盘。
+    """
+    raw = drop_lone_surrogates(str(time_str or "").strip())
     mm = TIME_RE.match(raw)
     date = mm.group(1) if mm else raw[:10]
     clock = (mm.group(2) or "") if mm else ""
-    md = str(md or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    md = drop_lone_surrogates(str(md or "")).replace("\r\n", "\n").replace("\r", "\n").strip()
     tags = extract_tags(md)
     ts = 0
     if date:
@@ -239,7 +268,7 @@ def memo_of(time_str, md, imgs=()):
             ts = int(time.mktime(tuple(parts) + tuple(sec) + (0, 0, -1)))
         except Exception:
             ts = 0
-    imgs = [str(s) for s in (imgs or []) if str(s).strip()]
+    imgs = [drop_lone_surrogates(str(s)) for s in (imgs or []) if str(s).strip()]
     h = hashlib.sha1(("%s|%s" % (raw or date + " " + clock, md)).encode("utf-8"))
     return {"id": "fm_" + h.hexdigest()[:12], "date": date, "clock": clock, "ts": ts,
             "md": md, "tags": tags, "imgs": imgs, "words": words_of(md),
@@ -363,12 +392,15 @@ def build_import_csv(rows):
 
     带 BOM、表头两列，整份文件行尾都是 CRLF（含正文里的换行），与 flomo 网页版
     「导入」页给的样例对齐；正文里的逗号/引号由 csv 模块负责转义。
+
+    正文来自请求体，和便签账本同一类脏：先摘掉落单的半个代理码点再编码 ——
+    否则 `encode("utf-8")` 会抛，导出整份 CSV 全废。
     """
     buf = io.StringIO(newline="")
     w = csv.writer(buf, lineterminator="\r\n")
     w.writerow(CSV_HEADER)
     for text, ts in rows:
-        w.writerow([_crlf(str(text or "")), csv_time(ts)])
+        w.writerow([_crlf(drop_lone_surrogates(str(text or ""))), csv_time(ts)])
     return b"\xef\xbb\xbf" + buf.getvalue().encode("utf-8")
 
 
@@ -412,6 +444,11 @@ def _clean_memo(m):
     ValueError，`"ts": "oops"` 让列表页排序处抛穿请求，`"tags": "读书"` 被逐字拆成
     两个标签、数字全是假的。条目本身一律留下，只把认不出的字段回成安全值。
     字数认不出时按正文重算 —— `words_of` 是唯一那把尺，比硬塞 0 诚实。
+
+    文本字段最后再过一遍 `drop_lone_surrogates`：手改 / 云同步 / 旧版本落下的那份
+    账本里，正文可能夹着半个代理码点（JSON 里那种落单的代理转义，合法 JSON，
+    读回来就是半个坏码），而所有落盘口都是 `ensure_ascii=False` —— 不清掉，打一次
+    标签 / 忘一条 / 收成书都会在 `json.dump` 上抛穿，便签从此只读。
     """
     out = dict(m)
     out["id"] = str(m.get("id") or "")
@@ -423,6 +460,7 @@ def _clean_memo(m):
     out["atts"] = [str(a) for a in _as_list(m.get("atts")) if str(a).strip()]
     out["imgs"] = [str(s) for s in _as_list(m.get("imgs")) if str(s).strip()]
     out["book"] = str(m.get("book") or "")
+    out = drop_lone_surrogates(out)
     words = _as_int(m.get("words"), None)
     out["words"] = words if words is not None else words_of(out["md"])
     return out
@@ -455,10 +493,17 @@ def load(flomo_dir):
 
 
 def save(flomo_dir, data):
+    """整本账落盘（先写 .tmp 再 replace，写一半不毁旧档）。
+
+    落盘前统一走一遍 `drop_lone_surrogates`：这是**唯一**的写出口（手记 / 导入 /
+    打标签 / 忘一条 / 清空 / 路由直接改标签全从这儿过），所以哪怕调用方塞进来的
+    正文里带着半个代理码点，也只丢那一个坏码，不会让 `json.dump(ensure_ascii=False)`
+    抛 UnicodeEncodeError 把整次写入打回。
+    """
     os.makedirs(flomo_dir, exist_ok=True)
     tmp = "%s.%d.tmp" % (path_in(flomo_dir), os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
+        json.dump(drop_lone_surrogates(data), f, ensure_ascii=False, indent=1)
     os.replace(tmp, path_in(flomo_dir))
 
 

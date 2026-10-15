@@ -310,6 +310,13 @@ run "flomo 便签后端（解析 / 去重 / 附件 / 收成书 / 画像）" "$PY
 # 这条把坏形状逐样喂进 load，要求列表 / 标签 / 画像 / 收成书 / 再导入都不抛，且认得出
 # 的数字照认、条目不丢。纯离线，全在临时目录里跑。
 run "flomo 脏账本兜底（脏字段不翻车 / 认得出照认 / 条目不丢）" "$PY" tests/check_flomo_dirty.py
+# 脏的形状之外还有脏的**码点**：便签正文来自 POST 请求体的 JSON（`fetch` 送来的字符串
+# 里可以有落单的代理转义），账本却是 ensure_ascii=False 落盘的 —— 一个落单的代理码点
+# 就能让手记在 memo_of 算 id 的 encode 上抛，还会让盘上已经躺着它的账本从此只读：
+# 打标签 / 忘一条 / 清空全在 json.dump 上抛穿，连 CSV 导出也跟着废。这条拿
+# drop_lone_surrogates 一把尺子钉住出生 / 读回 / 落盘 / CSV 四个口子，并真发一次
+# POST /api/flomo/notes。纯离线，沙盒在系统临时目录。
+run "flomo 便签半个代理码点（手记 / 脏账本 / 清空 / CSV 不整屏卡住）" "$PY" tests/check_flomo_surrogate.py
 # 写作那一格是同一个故事的另一本账：meta.json（rev / words / created / updated / 灵感角度）
 # 与 _books.json（每本书的 created / updated / chapters）同样会被手工编辑、被旧版本写成别的
 # 形状，而读它们的地方原来一律 `int(v or 0)`、`list(v or [])` 直读直用：一个 "很多" 让写作屏
