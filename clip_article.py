@@ -907,6 +907,16 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None
     不传就是默认的通用网页提取。
     """
     art = (extract_fn or extract)(url)
+    # 取回来的标题 / 正文 / 出处都是外站文本，可能夹着落单的半个代理码点：X、知乎、
+    # 小红书那几条路拿回来的是 JSON，`"\ud83d"` 这种转义照样能被 `json.loads` 读成
+    # 一个落单的码点。下面 `body.encode("utf-8")` 碰到它当场抛 UnicodeEncodeError，
+    # 而 clip_many 会把 `str(e)[:160]` 原样递到界面 —— 用户看到的是
+    # 「剪不动：'utf-8' codec can't encode character '\ud83d' …」这句 Python 原文，
+    # 一篇本来剪得下来的文章被一个坏码挡在门外（正文 / 标题里各一处，都实测过）。
+    # 修法不在这一层另写一把尺子：`book_layout.drop_lone_surrogates` 就是「外部文本
+    # 要落进 utf-8」那把共用尺（import_book 与下面那份 meta 落盘都走它），编码与拼
+    # 文件名之前先过一遍，成对的表情一个不动。
+    art = book_layout.drop_lone_surrogates(art)
     body = "# %s\n\n%s\n%s\n" % (art["title"], _front_matter(art), art["markdown"])
     name = re.sub(r'[\\/:*?"<>|]', "", art["title"])[:60] or "clip"
 
