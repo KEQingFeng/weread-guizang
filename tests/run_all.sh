@@ -229,6 +229,12 @@ run "安娜接住下载（同名不覆盖 / 路径护栏）" "$PY" tests/check_a
 run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY" tests/check_anna_name.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
+# 导图的输入是「别人家的 JSON」：节点里本该是数组的 `children` 偶尔写成标量
+# （`"children": 1`）。`_normalize_nodes` / `_flatten_tree` 原来直接迭代它，int 上抛
+# TypeError，穿出 `_normalize_mindmap` 后被 `build_mindmap` 当成「模型两次都不配合」——
+# 一张除了这一个字段全是好的导图被整个丢掉、退成摘要兜底。这条把「坏字段当空、
+# 好树照用、好数据一个字不改」钉住，纯函数 + 假 LLM，不联网、不起服务。
+run "视频导图脏 children（坏字段不带崩整张图）" "$PY" tests/check_video_mindmap_dirty.py
 # 上面那一套走的是正常输入（章节起点递增、每段都带 id）。这一条专门打两种「归属」错：
 # LLM 漏给章节起点（清洗层把每章都填成 0）时正文会全堆进最后一章、前几章只剩空标题；
 # 编辑器新插的段落带着新 id，却按位置认领了旧段落的说话人 / 置信度。两条都在纯函数与
