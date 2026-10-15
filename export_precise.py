@@ -100,11 +100,18 @@ def _dump_json(path, obj, indent=None):
 
     `BaseException`：中止信号走的是 `SystemExit` / `KeyboardInterrupt` 这一类，
     它们不继承 `Exception`，只兜 `Exception` 会在退出路径上留下 .tmp。
+
+    落盘前先过 `book_layout.drop_lone_surrogates`：书名 / 作者 / 章名这些字是从
+    微信读书页面上读回来的，JS 字符串被拦腰截断时会留下半个代理码点（JSON 里
+    形如 U+D83D 的落单代理转义，合法 JSON、`json.load` 照收），而 `ensure_ascii=False`
+    写 utf-8 碰到它就当场 UnicodeEncodeError —— 整趟取书（几十分钟）因为一个
+    坏字符中止在最后一步。它是坏输入不是内容，摘掉那一个码点比让整本书白取强。
     """
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=indent)
+            json.dump(book_layout.drop_lone_surrogates(obj), f,
+                      ensure_ascii=False, indent=indent)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1140,11 +1147,17 @@ def save_chapter(ch_title, blocks, ch_idx, md_dir, raw_dir):
     text_len = sum(len(b["text"]) for b in blocks if b["type"] == "text")
     if text_len == 0 and not img_records:
         return 0, []
+    # 章名与正文都来自页面（canvas 抓回来的一行行字），可能夹着半个代理码点。
+    # 这三份落盘全是 ensure_ascii=False / 显式 utf-8，留一个坏码就是整章写不出去：
+    # `f.write(body)` 抛在半途，盘上还会剩一份被截断的 .md（旧内容已经 truncate）。
+    # 写之前统一摘掉，坏字符只丢它自己，这一章照常落地。
+    body = book_layout.drop_lone_surrogates(body)
     with open(os.path.join(md_dir, f"{ch_idx:04d}.md"), "w", encoding="utf-8") as f:
         f.write(body)
+    raw_rec = book_layout.drop_lone_surrogates(
+        {"title": ch_title, "images": img_records, "text_len": text_len})
     with open(os.path.join(raw_dir, f"{ch_idx:04d}.json"), "w", encoding="utf-8") as f:
-        json.dump({"title": ch_title, "images": img_records, "text_len": text_len},
-                  f, ensure_ascii=False)
+        json.dump(raw_rec, f, ensure_ascii=False)
     return text_len, img_records
 
 
@@ -1157,11 +1170,15 @@ def merge_chapters(md_dir, output_dir, safe_name, title, author):
         最后一秒才看到「导出失败」；能编出来的字也写成另一套字节。
       · 读：这里读的章文件由 save_chapter 按 UTF-8 写，用默认编码读回来就花屏。
     所以合并这一处、以及上游写章那一处，都得钉死 UTF-8。
+
+    书名与作者同样先摘掉落单的半个代理码点：这两样一路从页面 / meta.json 过来，
+    写这行标题时碰上它就整份合并稿写不出来（已经写进 out 的几章一起留成半截）。
     """
     files = sorted(f for f in os.listdir(md_dir) if f.endswith(".md"))
     merged = os.path.join(output_dir, "%s.md" % safe_name)
     with open(merged, "w", encoding="utf-8") as out:
-        out.write("# %s\n\n**%s**\n\n---\n\n" % (title, author))
+        out.write(book_layout.drop_lone_surrogates(
+            "# %s\n\n**%s**\n\n---\n\n" % (title, author)))
         for fn in files:
             with open(os.path.join(md_dir, fn), encoding="utf-8") as fh:
                 out.write(fh.read())
