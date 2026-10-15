@@ -19,6 +19,7 @@
 import json
 import os
 import re
+import uuid
 
 from md_fence import prose_lines
 
@@ -406,10 +407,17 @@ def save_result(book_dir, scope, style, chapter, text):
     一进去就把旧小结截断了 —— 恰好在写完之前被强杀（关窗口 / 断电 / 换书重开），盘上
     只剩半截 Markdown，`load_result` 却认它就是上次那份，用户打开看到一段断在句中、
     再也长不回去的小结。改名是同一文件系统上的原子操作：要么旧稿完整、要么新稿完整。
+
+    临时件名带 pid 与随机串，不用固定的 `path + ".tmp"`：后端是多线程的，`save_result`
+    有两个调用侧（同步那条与任务那条），MCP 适配器还是另一个进程。同一个
+    (书, scope, style, chapter) 被两处同时问出来时，固定临时名会让两边抢同一个件 ——
+    先 `os.replace` 的那个把它搬走，后一个要么改名扑空（保存白做、回空串）、要么把两份
+    内容混写进同一个临时件。临时件各写各的，`os.replace` 的原子性才真的只保证一件事：
+    盘上那份永远是某一个完整的版本。
     """
     path = cache_path(book_dir, scope, style, chapter)
     text = drop_lone_surrogates(text)
-    tmp = path + ".tmp"
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
     done = False
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)

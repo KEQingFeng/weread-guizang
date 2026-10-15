@@ -15,7 +15,10 @@
   · 覆盖：旧稿整份换成新稿；
   · 写一半失败 / KeyboardInterrupt / 改名失败：旧稿必须完整、.tmp 必须收掉；
   · 对照：老写法（open w + 写一半）确实会把旧稿砸坏，证明这道收口不是空转；
-  · 接线：save_result 走的是 .tmp + os.replace，不是直写。
+  · 接线：save_result 走的是 .tmp + os.replace，不是直写；
+  · 同一份小结被两处同时保存：临时件各写各的，两次都成功、盘上是完整的一份，
+    且两次用的临时件不同名；
+  · 对照：固定临时名下后一个改名扑空（那一次保存白做、回空串）。
 
 纯逻辑 + 系统临时目录里的沙盒书库，不起服务、不联网、不碰真实书库，归静态段，
 `--fast` 也要带。
@@ -193,6 +196,90 @@ chk("接线：失败 / 中止路径把 .tmp 收掉", "os.remove(" in src and "fi
 chk("接线：临时件是目标旁边加 .tmp，读口只认目标那份",
     ai_sum.cache_path(BOOK, "whole", "learn", "").endswith("learn-whole.md")
     and bool(p) and p.endswith("learn-whole.md"), p)
+chk('接线：临时件名不是固定的 path + ".tmp"（带 pid 与随机串）',
+    'tmp = path + ".tmp"' not in src and "getpid" in src and "uuid" in src, src)
+
+# ── 五、并发 / 跨进程：同一份小结的临时件不许同名 ──────────────────
+# `save_result` 有两个调用侧（同步那条与任务那条），后端又是多线程的，MCP 适配器
+# 还是另一个进程；同一个 (书, scope, style, chapter) 被两处同时问出来时，固定临时名
+# 让先 replace 的那个把件搬走、后一个改名扑空 —— 保存明明成功却回空串，界面照那句
+# 「没存上」说，用户再点一次又是同一场。这里不靠线程调度碰运气：把那一次交错按顺序
+# 摆出来（外层改名之前，先让「另一处保存」整趟跑完）。
+CONC_A = "A 的那一份：完整。\n- 要点一"
+CONC_B = "B 的那一份：完整。\n- 要点二"
+conc_path = ai_sum.cache_path(BOOK, "conc", "brief", "")
+
+
+class _InterleaveOS:
+    """只截 replace：第一次改名之前先触发一次 hook，别的（path / makedirs / remove）原样透传。"""
+
+    def __init__(self, real):
+        self._real = real
+        self.pending = None
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def replace(self, src, dst, *a, **k):
+        hook = self.pending
+        if hook is not None:
+            self.pending = None          # 只插一次，内层不再触发自己
+            hook()
+        return self._real.replace(src, dst, *a, **k)
+
+
+inter = _InterleaveOS(real_os)
+second = []
+inter.pending = lambda: second.append(ai_sum.save_result(BOOK, "conc", "brief", "", CONC_B))
+outer = None
+try:
+    ai_sum.os = inter
+    outer = ai_sum.save_result(BOOK, "conc", "brief", "", CONC_A)
+finally:
+    ai_sum.os = real_os
+chk("并发：交错的那两处保存都回真路径（不扑空）",
+    bool(outer) and len(second) == 1 and bool(second[0]), (outer, second))
+final = read_path(conc_path)
+chk("并发：盘上是完整的一份，不是两份混写", final in (CONC_A, CONC_B), final)
+_leftover = [n for n in os.listdir(os.path.dirname(conc_path)) if n.endswith(".tmp")]
+chk("并发：不留临时件", _leftover == [], _leftover)
+
+# 两次保存用的临时件必须不同名 —— 这是上面那次交错能各写各的原因。
+seen_tmp = []
+
+
+def _record_open(pth, mode="r", *a, **k):
+    if "w" in str(mode) and str(pth).endswith(".tmp"):
+        seen_tmp.append(str(pth))
+    return real_open(pth, mode, *a, **k)
+
+
+try:
+    ai_sum.open = _record_open
+    ai_sum.save_result(BOOK, "conc", "brief", "", "one")
+    ai_sum.save_result(BOOK, "conc", "brief", "", "two")
+finally:
+    del ai_sum.open
+chk("接线：两次保存的临时件不同名（固定 path+.tmp 会互相截断）",
+    len(seen_tmp) == 2 and seen_tmp[0] != seen_tmp[1], seen_tmp)
+chk("接线：临时件名里带 pid（跨进程也不撞）",
+    all(str(os.getpid()) in s for s in seen_tmp), seen_tmp)
+
+# ── 六、对照：固定临时名下，那个「改名扑空」是真的 ──────────────────
+old_path = str(SANDBOX / "old-concurrent.md")
+old_tmp = old_path + ".tmp"
+with real_open(old_tmp, "w", encoding="utf-8") as f:
+    f.write(CONC_A)                      # A 先写完自己的临时件，还没改名
+with real_open(old_tmp, "w", encoding="utf-8") as f:
+    f.write(CONC_B)                      # B 用同一个名字写完并先改名走了
+real_os.replace(old_tmp, old_path)
+lost = None
+try:
+    real_os.replace(old_tmp, old_path)   # A 这才改名 —— 扑空
+except OSError as e:
+    lost = e
+chk("对照：固定临时名下后一个改名扑空（那次保存白做）", isinstance(lost, FileNotFoundError), lost)
+chk("对照：盘上只剩 B 一份，A 那份没了", read_path(old_path) == CONC_B, read_path(old_path))
 
 shutil.rmtree(SANDBOX, ignore_errors=True)
 
