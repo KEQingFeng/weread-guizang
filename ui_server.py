@@ -14,6 +14,7 @@ import glob
 import hashlib
 import io
 import json
+import math
 import os
 import queue
 import random
@@ -4927,6 +4928,44 @@ def _encode_body(text):
         return book_layout.drop_lone_surrogates(text).encode("utf-8")
 
 
+def _finite(obj):
+    """把非有限数（Infinity / -Infinity / NaN）换成 null 的深拷贝。
+
+    只在 `_json_text` 那条慢路上走一趟。`json` 认 `Infinity` / `NaN`，`json.dumps`
+    也照原样印出来 —— 可那是 Python 的方言，不是 JSON：浏览器 `JSON.parse` 见到
+    当场 SyntaxError，一整条回包作废（用户看到的是整屏打不开，而不是某一个数字
+    显示成空）。账本里这类值住得进来：手改、云同步落盘、旧版本写回，都会把一个
+    inf 写进 `boards/<id>.json` 的 canvas 坐标、`feed.json` 的时间戳这类地方。
+
+    能放心递归，是因为 `obj` 刚被 `json.dumps` 成功印出来过：印得出就必然无环。
+    换掉的只是**回包里的那一份**，调用方手里的对象一个字都不动。
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {_finite(k): _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    return obj
+
+
+def _json_text(obj):
+    """响应 JSON 唯一的那道序列化口：非有限数不许印进回包。
+
+    `json.dumps` 默认允许 `Infinity` / `-Infinity` / `NaN`（`allow_nan=True`），
+    印出来的是 Python 方言而不是 JSON：浏览器 `JSON.parse` 见到就 SyntaxError，
+    整条回包作废。与 `_encode_body` 收半个代理码点同一路子 —— 干净的路照旧只
+    dump 一次，真逮到那三个字面量时才把非有限值换成 null（前端拿到 unknown、
+    界面照常铺开）重印一遍。判据用字面量而不是 `allow_nan=False` 的报错，是因为
+    `json.dumps` 印非有限数的产物只有这三种写法，而报错文案会随版本变。字符串里
+    恰好带「NaN」的正文会多走一趟慢路，结果一字不差。
+    """
+    text = json.dumps(obj, ensure_ascii=False)
+    if "Infinity" not in text and "NaN" not in text:
+        return text
+    return json.dumps(_finite(obj), ensure_ascii=False)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -4951,8 +4990,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, obj, code=200):
-        self._send(code, "application/json; charset=utf-8",
-                   json.dumps(obj, ensure_ascii=False))
+        self._send(code, "application/json; charset=utf-8", _json_text(obj))
 
     # 小 Agent 的回复是一段段吐出来的（上游 SSE），所以这条响应没法先算长度。
     # 走 chunked：每段正文一个 JSON 行，最后来一个收尾块。写完主动断连 ——
