@@ -340,6 +340,15 @@ run "转写时长越界值（inf / NaN 不再变成时间轴里的 Infinity）" 
 # 一起钉住：脏段落存得下、脏账本读得开、两处视图用同一份干净数据、真 emoji 一个字不动、
 # 好数据不改、成功与失败都不留 .tmp。纯逻辑 + 临时目录里的一本假书，归静态段。
 run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 真 emoji 不动）" "$PY" tests/check_video_surrogate.py
+# 上一条管「脏字写不写得下」，这一条管「两个写手会不会抢同一个临时件」。
+# transcript.json / transcript.txt 有两个调用侧够得着同一本书：/api/video 的
+# 「保存转写 / 重建」是服务进程的线程（工作台连点两下、保存与重建撞一起），下载转写
+# 那条任务线是另一个进程（ui_server.start_task 起 video_note.py --task）。旧写法把
+# 临时件写死成 path + ".tmp"，先收尾的 os.replace 把共用临时件搬走，后一个当场
+# FileNotFoundError（界面「保存失败」，前一笔却已经落盘）；写失败时还把 .tmp 留在书目录里。
+# 这条钉住「一次一个名字 + 带进程号、失败收干净、并写不抛、缓存不回旧字」，另留
+# 「固定名确实扑空」的对照防空转。纯函数 + 线程 + 临时沙盒，不联网、不起服务，归静态段。
+run "视频转写落盘（临时件不共用 / 并写不扑空 / 失败不留 .tmp）" "$PY" tests/check_video_atomic.py
 # 视频转笔记最后一步要问外站的 LLM（/chat/completions）。对方回的正文形状没人保证，
 # 而 `_llm_content` 与 SSE 兜底那两段都是裸的 `.get` 链 —— `{"choices": ["oops"]}`、
 # `{"choices": [{"message": "hi"}]}`、SSE 里 `data: []` / `data: 0` 这些「是合法 JSON、
