@@ -147,6 +147,75 @@ else:
             all(v[3] < t.DUP_HINT for v in inter),
             [(v[1], round(v[3], 2)) for v in inter])
 
+# ── E 红线体检：禁改路径 / 改已有测试 / 疑似凭据 / 改动规模 ───────
+# 一条人造 diff 把四类都摆进去，再确认「只加新测试文件」不被冤枉。
+# 假 key 现拼现用：源码里不出现会被隐私扫描器直接命中的字面量。
+FAKE_KEY = "sk-" + "a" * 24
+RED_SAMPLE = """diff --git a/requirements.txt b/requirements.txt
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,0 +4,1 @@
++requests==2.31.0
+diff --git a/tests/check_feed.py b/tests/check_feed.py
+--- a/tests/check_feed.py
++++ b/tests/check_feed.py
+@@ -10 +10 @@
+-chk("旧断言", a == 1)
++chk("新断言", a == 2)
+diff --git a/tests/check_new_gate.py b/tests/check_new_gate.py
+--- a/tests/check_new_gate.py
++++ b/tests/check_new_gate.py
+@@ -0,0 +1,2 @@
++chk("新门禁", True)
++chk("再来一条", True)
+diff --git a/feed.py b/feed.py
+--- a/feed.py
++++ b/feed.py
+@@ -20,0 +21,2 @@
++TOKEN = "%s"
++ok = True
+""" % FAKE_KEY
+rh = t.parse_hunks(RED_SAMPLE)
+red = t.red_lines(rh)
+chk("红线：改了依赖清单要点名", any(r[0] == "禁改路径" and r[1] == "requirements.txt" for r in red), red)
+chk("红线：已有测试出现删除行要点名", any(r[0] == "改了已有测试" and r[1] == "tests/check_feed.py" for r in red), red)
+chk("红线：新增行里的 sk- key 要点名", any(r[0] == "疑似凭据" and r[1] == "feed.py" for r in red), red)
+chk("红线：只加新测试文件不算「改了已有测试」",
+    not any(r[0] == "改了已有测试" and r[1] == "tests/check_new_gate.py" for r in red), red)
+chk("红线：requirements.txt 不被误报成凭据",
+    not any(r[0] == "疑似凭据" and r[1] == "requirements.txt" for r in red), red)
+chk("红线规模：加 6 行删 1 行", t.churn(rh) == (6, 1), t.churn(rh))
+
+# 干净的一条：普通源码改动 + 只加不改的测试，四类都不该报。
+clean = t.parse_hunks("""diff --git a/feed.py b/feed.py
+--- a/feed.py
++++ b/feed.py
+@@ -1,0 +2,1 @@
++x = 1
+diff --git a/tests/check_new_gate.py b/tests/check_new_gate.py
+--- a/tests/check_new_gate.py
++++ b/tests/check_new_gate.py
+@@ -0,0 +1,1 @@
++chk("新门禁", True)
+""")
+chk("红线：干净的改动一个都不报", t.red_lines(clean) == [], t.red_lines(clean))
+
+# 空 diff 是单独一档：没有改动的分支不该被当成待合的 PR。
+chk("红线：空 diff 单独报「空改动」",
+    [r[0] for r in t.red_lines([])] == ["空改动"], t.red_lines([]))
+
+# 改动偏大：>= CHURN_REVIEW 行要提示；占位符 / 假 key 不该被误判成凭据。
+big = [t.Hunk(path="a.py", old_start=1, old_len=0, new_start=1, new_len=1,
+              ctx="", added=["x%d = 1" % i]) for i in range(t.CHURN_REVIEW)]
+chk("红线：达到规模阈值要提示", any(r[0] == "改动偏大" for r in t.red_lines(big)), t.red_lines(big))
+plain = t.parse_hunks("""diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,0 +2,1 @@
++api_key = "YOUR_API_KEY_HERE"
+""")
+chk("红线：占位符不算凭据", t.red_lines(plain) == [], t.red_lines(plain))
+
 # ── 接线：默认分支列表与 merge-tree 探测都不炸 ───────────────────
 chk("--help 能跑通（参数没写坏）",
     subprocess.run([sys.executable, str(REPO / "tools" / "pr_triage.py"), "--help"],
