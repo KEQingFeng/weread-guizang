@@ -300,6 +300,40 @@ def read(books_root, book_id):
     return m
 
 
+def _write_text_atomic(path, text):
+    """文本落盘的唯一出口（正文 / meta / 册账都走这儿）：先写自己那份临时件再原子顶替。
+
+    写作这条路**不止一个写手**：后端是 `ThreadingHTTPServer`，界面的自动存盘、手点
+    「保存」、另一个标签页、MCP 那几个工具可以同时进 `save()`，而这条路上没有任何锁
+    （`ui_server._WRITE_LOCK` 只盖配置 / 书架 / 时长 / 计划那几处）。旧写法把临时件
+    写死成 `path + ".tmp"`，两个写手同时进来时有两种代价，与 `anna_state` / `flomo_notes`
+    当初那一格完全一样：
+
+      · **写坏**：后来者 `open(..., "w")` 把前一个人写了一半的临时件截断，两边各自按
+        自己的文件偏移往下写，`os.replace` 把两份交织在一起的那一份顶成正式稿子 ——
+        用户看到的是「保存成功了、稿子却成了两段话拼在一起」；
+      · **当场抛**：先收尾的那一个 `os.replace` 把共用的临时件整个搬走，后一个写手轮到
+        自己那一句时临时件已经不在，抛 `FileNotFoundError`；这条异常从 `/api/writer/save`
+        直接穿出去，界面拿到 500，而它明明刚提示过「已保存」。
+
+    临时名带 pid + 一小串随机，与 `ui_server._write_bytes`（封面那一格）同一把尺子：
+    同进程两个请求线程、两个进程都不会抢同一个名字。写失败先把临时件收干净再抛，
+    旧档始终是完整的那一份。
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def create(books_root, title="", text=""):
     book_id = new_id()
     d = dir_of(books_root, book_id)
@@ -308,8 +342,7 @@ def create(books_root, title="", text=""):
     os.makedirs(versions_dir(d), exist_ok=True)
     meta = blank_meta(book_id, title or title_from(text))
     body = _drop_surrogates(text) if isinstance(text, str) else ""
-    with open(draft_path(d), "w", encoding="utf-8") as f:
-        f.write(body)
+    _write_text_atomic(draft_path(d), body)
     meta["rev"] = 1
     meta["words"] = words(body)["total"]
     meta = _write_meta(d, meta)
@@ -351,10 +384,7 @@ def save(books_root, book_id, text, title=None, rev=None):
     # 书架卡片、AI 小结、MCP 列书看到的字数才和写作平台里那个「字数」是同一个。
     meta["chars"] = meta["words"]
     meta["updated"] = int(time.time())
-    tmp = draft_path(d) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(body)
-    os.replace(tmp, draft_path(d))
+    _write_text_atomic(draft_path(d), body)
     meta = _write_meta(d, meta)
     return True, meta
 
@@ -366,11 +396,8 @@ def _write_meta(draft_dir, meta):
     只洗要写盘的副本：留在手里那一份带着坏字符，下一步就是发响应时 UnicodeEncodeError。
     """
     meta = _drop_surrogates(dict(meta or {}))
-    tmp = meta_path(draft_dir) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        import json
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, meta_path(draft_dir))
+    _write_text_atomic(meta_path(draft_dir),
+                       json.dumps(meta, ensure_ascii=False, indent=2))
     return meta
 
 
@@ -594,13 +621,11 @@ def load_books(books_root):
 
 def save_books(books_root, books):
     p = books_path(books_root)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        # 册账同样是 ensure_ascii=False 写的：一处落单的半个代理码点就能让整本册账
-        # 写不出去（写作屏的书树跟着一起空），落盘前统一摘干净。
-        json.dump(_drop_surrogates({"v": 1, "books": list(books or [])}),
-                  f, ensure_ascii=False, indent=2)
-    os.replace(tmp, p)
+    # 册账同样是 ensure_ascii=False 写的：一处落单的半个代理码点就能让整本册账
+    # 写不出去（写作屏的书树跟着一起空），落盘前统一摘干净。
+    _write_text_atomic(p, json.dumps(
+        _drop_surrogates({"v": 1, "books": list(books or [])}),
+        ensure_ascii=False, indent=2))
     return True
 
 
