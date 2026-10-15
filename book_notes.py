@@ -38,6 +38,13 @@ TAG_BY_KEY = {t["key"]: t for t in TAGS}
 TAG_BY_NAME = {t["name"]: t for t in TAGS}
 KINDS = ("highlight", "bold", "underline", "strike", "note")   # 划线 / 加粗 / 下划线 / 删除线 / 批注
 
+# 半个代理对（\ud800-\udfff 单独出现）：JS 把一条含 emoji 的字符串拦腰截断（界面按
+# 字数截显示、或用户删到一半）就会剩下它。`json.load` 读得下 `"\ud800"` 这种转义，
+# 于是它一路走到 `_write_json` —— `ensure_ascii=False` 时 `json.dump` 把它原样交给
+# utf-8 编码器，当场 UnicodeEncodeError：用户这一轮改的**整份**笔记没落盘，盘上还留
+# 一个 `notes.json.tmp`。它是坏输入、不是内容，和 board / writer 那边一样洗掉。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
 TPL_FILE = "note_templates.json"
 
 
@@ -194,9 +201,16 @@ def _normalize(doc):
 
 
 def _clip(v, n):
+    """字段级收口：一律成字符串、统一换行、裁长度，顺手洗掉落单的半个代理码点。
+
+    洗在**这里**而不是落盘那一处，是因为 `_clip` 是所有字符串字段（划线正文 / 批注 /
+    条目标题与正文 / 引用 / 模板 / id）唯一的入口：一处洗，读写两侧都干净，也不会有
+    将来新加的字段忘了过关。成对的代理码点（正常 emoji）在这之前已经被 `json` 合成
+    一个真字符了，所以这里删得掉的只有「半个」。
+    """
     s = "" if v is None else str(v)
     s = s.replace("\r\n", "\n").strip()
-    return s[:n]
+    return SURROGATE.sub("", s)[:n]
 
 
 def _seq(v):
