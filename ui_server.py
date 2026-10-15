@@ -3419,6 +3419,13 @@ def drop_stray_md(book_id, title=""):
     没搬动的老书和命令行直接跑出来的还在书库根上。只删书库内的普通文件，
     名字按 `os.path.realpath` 再核一遍归属 —— 书名是用户可控的字符串，
     带 `../` 的那种不能拼成「一路删到书库外面」。
+
+    同一趟还要收 `<书名>.md.tmp`：1.2.1 之后整本合并稿走
+    `export_precise._atomic_write_text`（先把整份拼进内存、写成 `<书名>.md.tmp`，
+    再一次改名过去）。恰好在改名那一步之前被强杀（停止键 / 关窗口 / 断电），
+    盘上就只剩一个 `<书名>.md.tmp` —— 它不以 `.md` 结尾，`RESIDUE_DIRS` /
+    `RESIDUE_FILES` 都不认它，界面上看不见也点不掉，只能跟着这本书一起收走。
+    半个代理码点 / 只读目录这类删不动的情况照旧吞掉：清理失败不该把删书那一步带崩。
     """
     root = os.path.realpath(OUT_DIR)
     places = [os.path.join(root, book_layout.DIR_OF[book_module(book_id)]), root]
@@ -3429,14 +3436,15 @@ def drop_stray_md(book_id, title=""):
             if not nm:
                 continue
             p = os.path.join(place, re.sub(r'[<>:"/\\|?*]', "_", nm) + ".md")
-            real = os.path.realpath(p)
-            if not (real.startswith(root + os.sep) and os.path.isfile(real)):
-                continue
-            try:
-                os.remove(real)
-                gone += 1
-            except OSError:
-                pass
+            for target in (p, p + ".tmp"):
+                real = os.path.realpath(target)
+                if not (real.startswith(root + os.sep) and os.path.isfile(real)):
+                    continue
+                try:
+                    os.remove(real)
+                    gone += 1
+                except OSError:
+                    pass
     return gone
 
 
