@@ -400,16 +400,35 @@ def save_result(book_dir, scope, style, chapter, text):
     落盘前先摘掉落单的半个代理码点：模型回的是外站 JSON，`"\\ud800"` 这种转义读得
     进来却写不出去，不清掉就会让整份小结存不下去（见 `_SURROGATE`）。成对代理码点
     在 `json.loads` 早已合成真字符，真 emoji 因此一个字不动。
+
+    落盘走「先写同目录 .tmp，再 os.replace」这把尺子（与账本 / 画板 / 登录态那几处
+    同一条）：`_ai/` 里那份是「这本书不必再问一次模型」的唯一凭据，而 `open(path,"w")`
+    一进去就把旧小结截断了 —— 恰好在写完之前被强杀（关窗口 / 断电 / 换书重开），盘上
+    只剩半截 Markdown，`load_result` 却认它就是上次那份，用户打开看到一段断在句中、
+    再也长不回去的小结。改名是同一文件系统上的原子操作：要么旧稿完整、要么新稿完整。
     """
     path = cache_path(book_dir, scope, style, chapter)
     text = drop_lone_surrogates(text)
+    tmp = path + ".tmp"
+    done = False
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
+        os.replace(tmp, path)
+        done = True
         return path
     except Exception:
         return ""
+    finally:
+        # 中止信号（KeyboardInterrupt / SystemExit）不继承 Exception，只兜 Exception
+        # 会在退出路径上留下半截 .tmp。没走到改名就把临时件收掉，收不动也不算错 ——
+        # 它不属于任何读口，最多占一份盘。
+        if not done:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def load_result(book_dir, scope, style, chapter=""):
