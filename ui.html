@@ -4731,11 +4731,17 @@ function spineHue(seed) {
 
 /** 远端封面图（微信读书 / QQ 图床那一条 URL）统一从这里造。
  *
- *  两个坑都在这一处收口，别每建一张卡再抄一遍：
+ *  三个坑都在这一处收口，别每建一张卡再抄一遍：
  *  · 图床看 Referer：页面是从 127.0.0.1 打开的外站，微信 / QQ 图床对陌生来路
  *    会直接 403 —— 表现就是「有些书的封面加载不出来」（正文图那条路 rdFixMedia
  *    早就把来路去掉了，封面也该去）；
- *  · 协议相对地址（//cdn…）：浏览器会拿本地服务当参照，结果必然是 404，补成 https。
+ *  · 协议相对地址（//cdn…）：浏览器会拿本地服务当参照，结果必然是 404，补成 https；
+ *  · **不能在这里就赋 src**。这一批卡是在游离容器上建好、最后一次性挂进文档的，
+ *    而浏览器的懒加载判的是「元素在文档里的位置」—— 游离元素没有位置，等于
+ *    「马上就要看」，于是 `loading="lazy"` 形同虚设：进一次书架 60 个封面请求
+ *    同时砸出去，首屏看得见的只有十几张，剩下的全排在前面拖慢一屏封面。
+ *    所以地址先暂存在 `data-cover` 上，等卡片真的挂进文档、再按「滚到眼前」
+ *    由 coverField() / paintCovers() 择时点亮（见下面那一段）。
  */
 function extCoverImg(src) {
   const im = document.createElement('img');
@@ -4743,7 +4749,7 @@ function extCoverImg(src) {
   im.loading = 'lazy';
   im.decoding = 'async';           // 解码放到别的线程，滚动时不被大图卡住主线程
   im.referrerPolicy = 'no-referrer';
-  im.src = coverSrc(src);
+  im.dataset.cover = coverSrc(src);
   return im;
 }
 
@@ -4752,6 +4758,47 @@ function extCoverImg(src) {
 function coverSrc(src) {
   const u = String(src || '').trim();
   return u.startsWith('//') ? 'https:' + u : u;
+}
+
+/* ── 封面：滚到眼前才亮 ───────────────
+   一个书架一批就是 60 本（SHELF_BATCH），而一屏只放得下十几张。封面如果一进书架
+   就全发出去，首屏的十几张要跟看不见的四十几张排同一条队 —— 用户看到的就是
+   「封面半天出不来」，而后端那边是同一秒里几十个 /api/cover 一起去取图。
+
+   extCoverImg() 已把地址暂存在 data-cover 上，这里负责择时点亮：
+   「卡片落在视口上下各一屏之内」才真的赋 src。一屏而不是一个卡片，是因为滚动
+   时下一屏往往是看得见的方向；滚过头一屏才看见的那种，由滚动事件再补。
+   paintCovers 是总开关（任何一次「画面可能变了」都调它），coverField 是给
+   新插进文档的单张卡用的（不需要扫全墙）。
+
+   **藏着的 pane 一律不点亮**：`[hidden]{display:none}` 时所有卡的量出来都是 0×0、
+   落在原点，按「在视口里」判会一口气把一整墙全点亮（等于没做这件事）。判据借用
+   `offsetParent === null`（和 paneVisible 同一把尺子）—— 没布局盒就是没在画面上。 */
+function paintCovers(root, margin) {
+  const box = root || document;
+  if (!box.querySelectorAll) return 0;
+  const h = window.innerHeight || document.documentElement.clientHeight;
+  const m = margin == null ? h : margin;
+  let k = 0;
+  for (const im of box.querySelectorAll('img[data-cover]')) {
+    // 已经亮过的（src 已在）跳过：同一次滚动会反复经过同一批卡
+    if (im.getAttribute('src')) continue;
+    const c = im.closest('.wcard') || im;
+    if (c.offsetParent === null) continue;             // 藏着的 pane：没在画面上，先不点亮
+    const r = c.getBoundingClientRect();
+    if (r.top < h + m && r.bottom > -m) { coverField(im); k++; }
+  }
+  return k;
+}
+
+/** 把一张封面的真地址点亮。**调用前必须先确认卡片已经在文档里** —— 给游离元素
+ *  赋 src，浏览器立刻就发请求，又回到「一次砸出去」那一档。 */
+function coverField(im) {
+  if (!im || im.getAttribute('src')) return;
+  const u = im.dataset.cover;
+  if (!u) return;
+  delete im.dataset.cover;
+  im.src = u;
 }
 
 /** 「最近读过」说成人话，别丢一串日期给用户自己算 */
@@ -10185,7 +10232,9 @@ function paneVisible(name) {
 }
 
 /** 把此刻落在视口里的卡摊开。这是观察器的替补：滚动、改窗口大小、
- *  标签页切回来、切回书架时各兜一遍（观察器在后台标签页里根本不回调）。 */
+ *  标签页切回来、切回书架时各兜一遍（观察器在后台标签页里根本不回调）。
+ *  顺手把该亮的封面点亮 —— 摊开与封面是同一条「滚到眼前」的判据，分开写两次
+ *  迟早有一边漏接（以前就只有摊开，封面每批全砸出去了）。 */
 function revealInView() {
   if (!revealGrid || !revealGrid.isConnected || !paneVisible('shelf')) return 0;
   const h = window.innerHeight || document.documentElement.clientHeight;
@@ -10196,6 +10245,7 @@ function revealInView() {
     if (r.top >= h * .96 || r.bottom <= 0) continue;   // 还没滚到 / 已经滚出上面
     unfurl(c, k++);
   }
+  paintCovers(revealGrid, h);                          // 封面跟着这一批一起亮
   return k;
 }
 
@@ -10240,9 +10290,9 @@ window.addEventListener('scroll', () => {
     revealSettle = 0; revealLast = Date.now(); revealInView();
   }, 150);
 }, {passive: true});
-window.addEventListener('resize', revealInView);
+window.addEventListener('resize', () => { paintCovers(); revealInView(); });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) revealInView();
+  if (!document.hidden) { paintCovers(); revealInView(); }
 });
 
 /* ── 书架显示样式：瀑布 / 叠卡 ─────────────
@@ -10384,6 +10434,9 @@ function renderShelfStack(wrap, shown) {
   }
   fillGrid(box.querySelector('.sstage'), shown);
   applyStack(box.querySelector('.sstage'));
+  // 叠卡一次摊 7 张（正中一张 + 两侧各三张），都在视口里，没有「看不见的那一批」，
+  // 所以这里直接把这一屏的封面都点亮，不走瀑布那套按视口预留。
+  paintCovers(box.querySelector('.sstage'), Infinity);
 }
 
 /** 键控复用：同一本书继续用老节点（封面已解码、摊开动画已放完），
@@ -10459,6 +10512,10 @@ function renderShelfGrid() {
   fillGrid(grid, shown);
   if (isNew) wrap.replaceChildren(grid);
   revealOnScroll(grid);
+  // 封面得等这一屏真挂在文档上之后才点亮 —— extCoverImg 只把地址暂存在
+  // data-cover 上，这会儿才该亮。放在 revealOnScroll 之后：它按卡片落点决定
+  // 「摊开还是先藏着」，同一批卡也正好是同一批要亮的封面。
+  paintCovers(grid);
 
   if (shown.length < all.length) {
     const more = document.createElement('div');
