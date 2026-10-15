@@ -326,6 +326,27 @@ def _find_all(root, name):
     return [e for e in root.iter() if _tag(e) == name]
 
 
+# 实体闸门必须扫**全文**，不能只看开头 4KB：EPUB 是从外面带进来的东西（安娜的档案
+# 领回来的、用户自己找的包），在 OPF 前面垫一段超长注释就能把 DOCTYPE / ENTITY 顶出
+# 窗口，闸门等于不存在。而 expat 对**内部**实体是照展开的：几百字节的「十亿笑」能解出
+# 几十万字符，再深几层就是几个 G（tests/check_import_entity.py 里留了这条对照，免得
+# 收口哪天被拿掉还在空转）。DOCTYPE / ENTITY 是标记而不是内容（正文里的尖括号要写成
+# `&lt;`），正常 OPF 里一个都没有，所以扫全篇不会误伤。与 feed.import_opml 同一把尺子
+# （那边也是全篇扫，见 tests/check_opml_safety.py）。
+_DTD_DECL = re.compile(rb"<!(?:DOCTYPE|ENTITY)", re.I)
+_DTD_DECL_STR = re.compile(r"<!(?:DOCTYPE|ENTITY)", re.I)
+
+
+def _has_dtd_decl(raw):
+    """整份文档里有没有 DTD / 实体声明。bytes 与 str 两条路都不先解码整份再扫。"""
+    if isinstance(raw, str):
+        return bool(_DTD_DECL_STR.search(raw))
+    try:
+        return bool(_DTD_DECL.search(raw))
+    except TypeError:            # memoryview 这类不吃 bytes 正则的
+        return bool(_DTD_DECL.search(bytes(raw)))
+
+
 def _parse_xml(raw):
     """解析不可信的 XML（EPUB 的 OPF）。
 
@@ -333,11 +354,7 @@ def _parse_xml(raw):
     膨胀与外部实体读取），再交给标准解析器。解析失败返回 None，让调用方走兜底
     路径（按 manifest / 自然序排章节），不因为一个坏 OPF 就整本导入失败。
     """
-    if isinstance(raw, str):
-        head = raw[:4096]
-    else:
-        head = raw[:4096].decode("utf-8", "replace")
-    if "<!DOCTYPE" in head or "<!ENTITY" in head:
+    if _has_dtd_decl(raw):
         return None
     try:
         parser = ET.XMLParser()
