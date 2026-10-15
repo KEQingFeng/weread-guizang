@@ -310,6 +310,14 @@ run "导出口径的属性逃逸（围栏语言串不许注出事件属性）" "
 # 不解码就永远「文件不存在」、那张图在 PDF 里静默消失。这里真打一个脏名字的 EPUB
 # 逐份解析、再把 `_abs_images` 的替换结果还原成路径核对。纯离线、不起浏览器。
 run "成品图片文件名（带引号 / & / < 不把 EPUB 打坏、也不从 PDF 里消失）" "$PY" tests/check_export_names.py
+# 上一条管「正文里的地址」和「磁盘上的文件名」，这一条管「书的身份」——书名 / 作者。
+# 它们来自 meta.json（手改 / 云同步 / 导入都写过它），而 json 连 `"\u000c"`（换页符）
+# 这种转义都照收：XML 1.0 里根本没有这个码点，正文那条路早在 md_to_html 入口洗过，
+# 元数据却没有 —— 一个换页符就让 content.opf 与 cover.xhtml「不是合法 XML」，
+# 阅读器把整本书拒收，而导出返回成功、界面说「导出好了」。落单的半个代理码点更早：
+# zipfile.writestr 在 encode 那一步就 UnicodeEncodeError。这里真打一个 EPUB，
+# 用 ElementTree 逐份解析，并留一条「旧写法确实解不动」的对照免得空转。纯离线。
+run "导出元数据 XML 字符（控制符 / 半个代理码点不打坏 EPUB，正常字一个不改）" "$PY" tests/check_export_xml_chars.py
 # 跟上面那条并排：那条管「进成品的内容能不能逃出去」，这条管「成品本身是什么字节」。
 # export_precise 写出去的章节 md / raw json / 合并稿原来不写 encoding，靠系统默认编码 ——
 # macOS 恰好是 UTF-8 所以一直没露馅，Windows 的 GBK 代码页上就变成写 GBK、读 UTF-8，

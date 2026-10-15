@@ -64,6 +64,32 @@ def _rich(text):
     return text
 
 
+# 「XML 1.0 里没有合法写法」的两类字符，收成一把尺子（_xml_clean）：
+#   · C0 控制符（\t \n \r 除外）：XHTML / EPUB 里非法；正文那一路还得靠它躲开
+#     占位记号（\x00N\x00 / \x01N\x01）撞车，理由写在 _stash_line 那段。
+#   · 落单的半个代理码点（U+D800–U+DFFF 不成对）：JSON 的 `"\ud800"` 转义读得回来，
+#     可 utf-8 里编不出来 —— zipfile.writestr 在 encode 那一步就抛。
+# 量哪儿是清楚的一条线：**按整份文本走转义管线的正文不动**（它中间夹着占位记号，
+# 顺手洗掉 C0 反而会把 \\# \\* 这些转义连同记号一起抹掉 —— 实测过，正文里的转义
+# 会当场消失），洗的是**书的身份**：书名 / 作者。它们从手改 / 云同步 / 导入的
+# meta.json 直接过来，而 `book_layout.read_meta` 只摘代理码点、**不摘控制符**。
+# 于是标题里一个换页符（`"\u000c"`，从 PDF 里粘书名就会带进来）就能让 content.opf
+# 与 cover.xhtml「不是合法 XML」，阅读器把整本书拒收 —— 而导出这一步返回成功，
+# 界面上看是「导出好了」，用户点开是报错或空白。收口落在 build_epub / build_pdf
+# 两个入口（元数据进成品之前那一步），_esc / _attrq 一个字不改。
+_SURROGATE = re.compile("[\ud800-\udfff]")
+_CTRL_DROP = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _xml_clean(s):
+    """书的身份（书名 / 作者）落进 XML 之前摘掉 XML / utf-8 都不接受的字符。
+
+    正常文字一个字不改；`\\t \\n \\r` 是合法 XML，留着。
+    """
+    s = _SURROGATE.sub("", str(s if s is not None else ""))
+    return _CTRL_DROP.sub("", s)
+
+
 def _esc(s):
     return html.escape(str(s if s is not None else ""), quote=False)
 
@@ -183,7 +209,7 @@ _STASH_MARK = re.compile(r"\x01(\d+)\x01")
 # IndexError 把整趟导出打抛（界面上「导不出来」），序号落回范围内则更阴 —— 一段
 # 正文被悄悄替换成另一个转义字符。C0 控制符（\t \n \r 除外）本来也不合法于
 # XHTML / EPUB，落进成品还可能被阅读器拒收，所以入口一次洗掉，占位与正文再无交集。
-_CTRL_DROP = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# （那把尺子 `_CTRL_DROP` 现在定义在上面，_xml_clean 与正文共用同一份。）
 
 
 def _stash_line(line, keep):
@@ -443,8 +469,10 @@ def build_epub(book_dir, dest, title="", author="", cover=None):
     chapters = read_chapters(book_dir)
     if not chapters:
         raise ValueError("这本书还没有可导出的章节")
-    title = (title or os.path.basename(book_dir)).strip()
-    author = (author or "").strip()
+    # 书名 / 作者进任何一份 XML 之前先过 _xml_clean：换页符之类的码点 XML 1.0 里
+    # 没有合法写法，拼进 content.opf / cover.xhtml 就会让阅读器把整本书拒收。
+    title = _xml_clean((title or os.path.basename(book_dir)).strip())
+    author = _xml_clean((author or "").strip())
     modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     uid = "urn:uuid:" + str(uuid.uuid4())
 
@@ -616,8 +644,9 @@ def build_pdf(book_dir, dest, title="", author=""):
     chapters = read_chapters(book_dir)
     if not chapters:
         raise ValueError("这本书还没有可导出的章节")
-    title = (title or os.path.basename(book_dir)).strip()
-    author = (author or "").strip()
+    # 同 build_epub：打印页上的书名 / 作者也不许夹 XML 收不下的字符。
+    title = _xml_clean((title or os.path.basename(book_dir)).strip())
+    author = _xml_clean((author or "").strip())
     img_dir = os.path.join(book_dir, "images")
 
     parts = []
