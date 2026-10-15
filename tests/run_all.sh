@@ -197,6 +197,12 @@ run "安娜接住下载（同名不覆盖 / 路径护栏）" "$PY" tests/check_a
 run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY" tests/check_anna_name.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
+# 上面那一套喂的都是干净输入。这一条专打「云转写 / LLM 回的正文里夹着落单的半个代理
+# 码点」：JSON 里存得下、utf-8 编不出，旧读法要一路跑到分片缓存或落成一本书的那一步
+# 才 UnicodeEncodeError，界面只看到「没反应」，盘上还留半截 .tmp。收口放在两个写口
+# （_write_json / _write_text）与 _save_book 进成品那道口，另有「直写确实会抛」的对照。
+# 只 import video_note 的纯函数 + 临时沙盒里落一本假书，不联网、不下模型、不开浏览器。
+run "视频转笔记坏字符（半个代理码点不把整本书打没）" "$PY" tests/check_video_surrogate.py
 # 上面那一套走的是正常输入（章节起点递增、每段都带 id）。这一条专门打两种「归属」错：
 # LLM 漏给章节起点（清洗层把每章都填成 0）时正文会全堆进最后一章、前几章只剩空标题；
 # 编辑器新插的段落带着新 id，却按位置认领了旧段落的说话人 / 置信度。两条都在纯函数与

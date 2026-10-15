@@ -1412,13 +1412,37 @@ def _transcript_doc(spoken, asr_cfg, plan_info):
             "updated_at": int(time.time())}
 
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：JS 字符串被拦腰截断、或
+# 外部接口回的 JSON 里带 `"\ud800"` 这种转义时都会留下它。Python 的 json 收得下、
+# 内存里也放得住，唯独编不进 utf-8 —— 一碰 open(..., "w") 的 json.dump / f.write
+# 就是 UnicodeEncodeError，整趟转写做到「落盘」这一步才炸，界面只看到「没反应」，
+# 盘上还留一个半截 .tmp。它是坏输入不是内容，洗掉比让整本书存不下去强。
+# 成对的代理码点不必管：json 解码时已经合成一个真字符，这里只会摘到落单的那个。
+SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _drop_surrogates(v):
+    """把要落盘的东西里落单的半个代理码点摘干净（dict / list 逐层走）。
+
+    与 writer / mindmap / board / anna_state 的存盘收尾同一个口径：只动字符串，
+    形状与别的类型一个字不改；真 emoji（含 ZWJ 连字）一个字节都不碰。
+    """
+    if isinstance(v, str):
+        return SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {k: _drop_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_drop_surrogates(x) for x in v]
+    return v
+
+
 def _write_json(path, obj):
     # 先把它从下面的解析缓存踢掉：文件换了，缓存里那份就是上一版转写，
     # 留着的话「保存完再读还是旧字」会变成一条查不出来的鬼影。
     _JSON_CACHE.pop(path, None)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+        json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
 
@@ -1460,7 +1484,7 @@ def _read_json_cached(path):
 def _write_text(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
+        f.write(_drop_surrogates(text))
     os.replace(tmp, path)
 
 
@@ -1706,6 +1730,17 @@ def _save_book(out_dir, plan_info, spoken, summary, note_markdown, mindmap, asr_
     的 _catalog.json 就是那批章节名，阅读器目录一次到位。视频来源那几行放进第一章
     开头 —— 放在第一个标题之前的话，切章时会多出一章「无题」把整本目录顶偏。
     """
+    # 进成品这道口上只洗一次：外站元信息、云转写与 LLM 回的正文都可能夹着落单的半个
+    # 代理码点（JSON 里存得下、utf-8 编不出）。下面 body_md.encode("utf-8") 与
+    # book_import / book_notes 的落盘都不在本文件里，与其指望各自兜底，不如在进
+    # 它们之前先把坏字符摘掉 —— 摘的只是那半个坏码，真 emoji 一个字不动。
+    plan_info = _drop_surrogates(plan_info)
+    spoken = _drop_surrogates(spoken)
+    summary = _drop_surrogates(summary)
+    note_markdown = _drop_surrogates(note_markdown)
+    mindmap = _drop_surrogates(mindmap)
+    ai_error = _drop_surrogates(ai_error)
+
     title = plan_info["title"] or "视频笔记"
     chapters = summary.get("chapters") or []
     bodies = _chapter_bodies(spoken["text"], spoken["segments"], chapters)
