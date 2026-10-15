@@ -34,6 +34,7 @@ import json
 import os
 import re
 import time
+import uuid
 import zipfile
 from html.parser import HTMLParser
 
@@ -513,12 +514,35 @@ def save(flomo_dir, data):
     打标签 / 忘一条 / 清空 / 路由直接改标签全从这儿过），所以哪怕调用方塞进来的
     正文里带着半个代理码点，也只丢那一个坏码，不会让 `json.dump(ensure_ascii=False)`
     抛 UnicodeEncodeError 把整次写入打回。
+
+    临时件必须**一次一个名字**（进程号 + 一小串随机），不能只带进程号：手记 / 打标签 /
+    忘一条 / 清空 / 导入全都从这儿过，而后端是 `ThreadingHTTPServer` —— 同一进程里
+    两个请求线程会同时进来，只带进程号时它们落到**同一个临时件**上：
+
+      · 后来者 `open(..., "w")` 把前一个人写了一半的临时件截断，两边各自按自己的偏移
+        往下写，`os.replace` 顶成正式账本的是**两份内容交织**的那一份，`load` 解不动
+        就整份退回空账，界面上是「便签全没了」；
+      · 先收尾的那一个 `os.replace` 会把共用的临时件整个搬走，后一个写手轮到自己那一句
+        时临时件已经不在，抛 `FileNotFoundError` —— 请求带着异常出去，用户看到的是
+        「点了没反应」。
+
+    口径与 `anna_state._atomic_write` / `ui_server._write_json` 一致（更严那一档）。
+    写失败时先把临时件收干净再抛，旧档在整个过程里始终完整。
     """
     os.makedirs(flomo_dir, exist_ok=True)
-    tmp = "%s.%d.tmp" % (path_in(flomo_dir), os.getpid())
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(drop_lone_surrogates(data), f, ensure_ascii=False, indent=1)
-    os.replace(tmp, path_in(flomo_dir))
+    dest = path_in(flomo_dir)
+    tmp = "%s.%d.%s.tmp" % (dest, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(drop_lone_surrogates(data), f, ensure_ascii=False, indent=1)
+        os.replace(tmp, dest)
+    except BaseException:
+        # 与 board / mindmap / login / sync / anna_state 那几个写口同一档：收走残件再抛。
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def att_dir(flomo_dir):
