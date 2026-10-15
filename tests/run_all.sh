@@ -227,6 +227,16 @@ run "安娜接住下载（同名不覆盖 / 路径护栏）" "$PY" tests/check_a
 # ENAMETOOLONG（用户看到的是「这份没接住」）。这一条把两条上限、真建一次文件、
 # 不切半个字、幂等、追加时间戳后仍在 255 内，全部离线钉住。
 run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY" tests/check_anna_name.py
+# 上面那条管「文件名怎么落」，这一条管「账本里的每一条怎么读回来」。normalize 立下的
+# 契约是「脏值退回默认、不抛」，可 books / pending 里的每条原先只认「是对象」就原样
+# 收下：行里的 bytes / at / chapters 被手改成越界数字（1e400 → inf）时，json.dumps
+# 默认 allow_nan=True 照写出 `Infinity`，而这不是 JSON 规范里的值 —— 浏览器
+# JSON.parse 整份拒收。这份状态整份进每 2.6 秒轮询一次的 /api/state，所以代价不是
+# 「安娜那一栏显示不对」，而是「整个界面什么都读不出来」。这一条钉住行里认得的那几个
+# 字段与顶层计数走同一把 _as_int、整条再过一遍 _finite（不认识键上的坏数字也收，
+# 不认识的键本身照留），外加真机 /api/state 必须是严格 JSON 与一条「旧写法确实写出
+# Infinity」的对照。纯函数 + 源码走查 + 进程内真 Handler，不联网、不开浏览器，归静态段。
+run "安娜账本行脏数字（越界值不打废 /api/state，不认识的键照留）" "$PY" tests/check_anna_rows.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 # 上面那一套走的是正常输入（章节起点递增、每段都带 id）。这一条专门打两种「归属」错：
