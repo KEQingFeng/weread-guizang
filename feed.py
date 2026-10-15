@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 
 import platform_compat
@@ -245,16 +246,50 @@ def _load():
     return _normalize(data)
 
 
+def _tmp_name(path):
+    """写盘临时件名：进程号 + 一小串随机，两次写不撞同一个名字。
+
+    全项目同一把尺子（封面 `ui_server._write_bytes`、便签账、AI 小结、画板、笔记、
+    视频转写、导图、写作；样板见 `book_notes._tmp_name`）。为什么不写死
+    `path + ".tmp"`：
+
+      · 服务是 `ThreadingHTTPServer`，同一份目标被两只手同时写时，先收尾的那个
+        `os.replace` 把两人共用的临时件整个搬走，后一个轮到自己那句就 FileNotFoundError
+        —— 保存其实成了，回给界面的却是「没存上」；反过来后开的那个一进去就把前一个人
+        写了一半的件截断，顶成正式文件的是两份内容交织的那一份。订阅这条线上真够得着
+        的是 `write_opml`（导出 OPML 就是一个普通请求，两次导出落在同一个路径上）。
+      · `_save` 进程内有 `_LOCK` 串着，够不着并发；`to_shelf` 每收一次都开一本新目录
+        （book id 带随机 hex），同一个路径也撞不上。这两处跟着随机化，是为了这一族
+        不该有人还留着固定名，也让强杀留下的那半截件长得有形状（清残稿按
+        `名字.数字.随机串.tmp` 认）。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """把没走到 `os.replace` 的临时件收干净；收不掉也不让原始异常被盖住。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def _save(data):
     # 最后一道闸：调用方给什么进来都保证 json.dump 不会因为落单的半个代理码点抛。
     # _load 已经洗过一遍，但「抓完外站直接并进内存再落盘」那一趟的数据没经过 _load，
     # 这里兜住，别让一次坏输入把整份账本挡在盘外（并留下半截 .tmp）。
     data = _drop_surrogates(data)
     os.makedirs(os.path.dirname(STORE) or ".", exist_ok=True)
-    tmp = STORE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, STORE)             # 原子替换：中途崩了也不会留下半截文件
+    tmp = _tmp_name(STORE)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, STORE)         # 原子替换：中途崩了也不会留下半截文件
+    except BaseException:
+        # 中止信号（KeyboardInterrupt / SystemExit）不继承 Exception，只兜 Exception
+        # 会在半路漏下一件；`_discard` 收不掉也不盖住原始异常。
+        _discard(tmp)
+        raise
 
 
 # 整份读 → 改内存 → 整份写，这条链不是原子的。后台刷新抓一轮要几十秒，这期间
@@ -2166,13 +2201,22 @@ def _outline_feed(row, indent, group):
 
 
 def write_opml(path=None, title="归藏订阅"):
-    """把 OPML 落到一个文件（默认 <数据目录>/订阅.opml），返回路径。"""
+    """把 OPML 落到一个文件（默认 <数据目录>/订阅.opml），返回路径。
+
+    临时件走 `_tmp_name`：导出 OPML 就是界面上的一个普通请求（`act=opml_write`），
+    同一个路径上两次导出落在同一个固定临时名时，先收尾的 `os.replace` 把件搬走、
+    后一个当场 FileNotFoundError —— 界面说「OPML 没写出去」，可前一份已经写出去了。
+    """
     p = os.path.expanduser(path or os.path.join(DATA_DIR, "订阅.opml"))
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(export_opml(title=title))
-    os.replace(tmp, p)
+    tmp = _tmp_name(p)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(export_opml(title=title))
+        os.replace(tmp, p)
+    except BaseException:
+        _discard(tmp)
+        raise
     return p
 
 
@@ -2331,10 +2375,17 @@ def to_shelf(entry_id, out_dir):
                  "date": e.get("published", ""), "words": words, "chars": words,
                  "feed_id": fid, "feed_title": feed.get("title", ""),
                  "clipped_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    tmp = mp + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, mp)
+    tmp = _tmp_name(mp)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, mp)
+    except BaseException:
+        # 这一处每收一次都开一本新目录，同一个路径撞不上；跟着这一族的尺子走，是为了
+        # 强杀留下的那半截件也有形状（清残稿按 `名字.数字.随机串.tmp` 认），
+        # 且失败时不留残件。
+        _discard(tmp)
+        raise
 
     bid = info.get("id", "")
 
