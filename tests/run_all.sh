@@ -208,6 +208,16 @@ run "视频转笔记归属（章节起点不可用 / 新段不继承旧段字段
 # 这条把读盘归一化与纯函数的容错都钉住：坏账本不抛、转写一个字不少、好账一模不改。
 # 纯逻辑加临时目录里的一本假书，不起服务、不联网、不开浏览器，故归静态段。
 run "视频书重建脏账本（手改 summary 不甩连接 / 正文不丢 / 好账不改）" "$PY" tests/check_video_rebuild.py
+# 同一栏里 `duration` / `words` / `chapters` / `page` / `pages` 早都过了 `_vnum`
+# 那把尺子（越界归 0），唯独排序用的 `updated_at` 还是裸 `float(...)` + 只兜异常：
+# `float("1e400")` 回的是 inf 而不是抛、`float("nan")` 回 nan 也不抛，两个都从 try
+# 底下漏了过去。一本 meta 里带个越界时间，`GET /api/video?mode=books` 的回包正文里
+# 就是 `"updated_at": Infinity` —— Python 的 json 默认照写，浏览器 `JSON.parse`
+# 整份拒收，用户看到的是视频工作台那一屏整个空白，而不是某本书排序差一点。这条把
+# 纯函数出的值、真机回包的严格 JSON（parse_constant 一见到 Infinity / NaN 就判失败）、
+# 以及源码接线三面一起钉住，另留一面「旧写法确实写出 Infinity」的对照防门禁空转。
+# 纯逻辑 + 进程内真 Handler，不联网、不开浏览器，归静态段，--fast 也得带上。
+run "视频书越界时间（1e400 / NaN 不再把工作台甩成 Infinity）" "$PY" tests/check_video_time.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
