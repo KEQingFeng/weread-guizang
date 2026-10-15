@@ -26,7 +26,7 @@
     带 pid + 一小串随机，与 `ui_server._write_bytes`（封面那一格）同一把尺子；写失败先把
     临时件收干净再抛，旧档始终完整。
 
-钉五面
+钉七面
   A. 正常写：正文与 meta 各一次替换、源不是正式文件、两次写的临时件名不一样且带进程号；
   B. 对照：共用固定 `.tmp` 时写出的是什么（顶上去的不是任何一份完整正文）＋ 后一个写手
      的 replace 当场 FileNotFoundError —— 这道闸不是空转；
@@ -34,16 +34,23 @@
   D. 崩过之后同一个口子还能用；册账（`save_books`）走的是同一把尺子；
   E. 两个真进程同时写同一篇稿：最后落地的正文一定是**某一份完整的稿**、meta 仍是一份
      解得动的完整账、不留 `.tmp`（A3 / C2 是回归探测器；这一节是实机旁证）。
+  F. 另两只手：meta（`remember_sparks`）与册账（`create_book`）各四个真线程同时进来 ——
+     这一节钉的是**不写坏、不漏件、不抛**，不是「四次更新都在」：读-改-写没有锁，最后
+     落地谁那一版本来就由调度决定，所以断言只看「解得动、是这本书的账、不留 `.tmp`」。
+  G. 接线：`writer.py` 里再没有 `tmp = … + ".tmp"` 那种固定名赋值、`_write_text_atomic`
+     兜的是 BaseException；meta 与册账在界面上确实有好几个请求入口（并发不是假想）。
 
 跑法：纯函数 + 系统临时目录沙盒书库，不联网、不开浏览器、不起服务，归 --fast 静态段。
 """
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -68,6 +75,11 @@ def esc(s):
     """extra 里可能带着落单的半个代理码点：直接 print 会自己抛，把一条断言失败
     伪装成整个套件崩。转义成 \\ud800 再打。"""
     return str(s).encode("unicode_escape").decode("ascii")
+
+
+def read_repo(fname):
+    with open(os.path.join(ROOT, fname), encoding="utf-8") as f:
+        return f.read()
 
 
 TMP = tempfile.mkdtemp(prefix="guizang-writer-atomic-")
@@ -229,6 +241,100 @@ try:
 except Exception as e:                          # noqa: BLE001
     meta_ok, meta_err = False, "%s: %s" % (type(e).__name__, e)
 chk("E4 并写之后 meta.json 仍是一份解得动的完整账", meta_ok, meta_err)
+
+print("── F. 另两只手：meta 与册账各四个线程同时进来 ──────────")
+# E 节是「两个真进程写同一篇正文」，这一节补的是另外两只手：AI 灵感回包走
+# `remember_sparks`（写 meta）、界面上建书改名删书归章排序都写 `books.json`。
+# 说清楚这一节钉的是什么：读-改-写没有锁，四次更新最后落地谁那一版由调度决定，
+# 所以这里**不**断言「四本都在」，只断言「不写坏、不漏件、没有人把异常咽下去」。
+N = 4
+merrs = []
+bar_m = threading.Barrier(N)
+
+
+def meta_worker(i):
+    try:
+        bar_m.wait(timeout=10)
+        for k in range(3):
+            writer.remember_sparks(LIB, bid, ["角度%d-%d" % (i, k)])
+    except Exception as e:                    # noqa: BLE001
+        merrs.append("%s: %s" % (type(e).__name__, e))
+
+
+mts = [threading.Thread(target=meta_worker, args=(i,)) for i in range(N)]
+for t in mts:
+    t.start()
+for t in mts:
+    t.join(timeout=30)
+chk("F1 meta：四个线程并发写同一份 meta.json，没有一个写手抛异常", merrs == [], merrs[:3])
+meta_shape, mwhy = True, ""
+try:
+    mdoc = json.load(open(writer.meta_path(d), encoding="utf-8"))
+    meta_shape = isinstance(mdoc, dict) and mdoc.get("id") == bid
+except Exception as e:                        # noqa: BLE001
+    meta_shape, mwhy = False, "%s: %s" % (type(e).__name__, e)
+chk("F2 meta：最后落地的那一份解得动、还是这本书的那份账", meta_shape is True, mwhy)
+chk("F3 meta：并发之后沙盒里不留 .tmp 残件", tmps(LIB) == [], tmps(LIB))
+
+berrs = []
+bar_b = threading.Barrier(N)
+
+
+def book_worker(i):
+    try:
+        bar_b.wait(timeout=10)
+        writer.create_book(LIB, "并发的一本书%d" % i)
+    except Exception as e:                    # noqa: BLE001
+        berrs.append("%s: %s" % (type(e).__name__, e))
+
+
+bts = [threading.Thread(target=book_worker, args=(i,)) for i in range(N)]
+for t in bts:
+    t.start()
+for t in bts:
+    t.join(timeout=30)
+chk("F4 册账：四个线程并发建书（都写 books.json），没有一个写手抛异常", berrs == [], berrs[:3])
+books_shape, bwhy = True, ""
+try:
+    books = writer.load_books(LIB)
+    books_shape = isinstance(books, list) and all(b.get("id") for b in books)
+except Exception as e:                        # noqa: BLE001
+    books_shape, bwhy = False, "%s: %s" % (type(e).__name__, e)
+chk("F5 册账：最后落地的那一份解得动、每本都有号", books_shape is True, bwhy)
+chk("F6 册账：并发之后不留 .tmp 残件", tmps(LIB) == [], tmps(LIB))
+
+print("── G. 接线：固定名真没了，写口真有好几个 ────────────────")
+WSRC = read_repo("writer.py")
+u_src = read_repo("ui_server.py")
+
+
+def body_of(func):
+    """截出一个模块级函数的函数体（到下一个顶层 `def` 或文件末为止）。"""
+    m = re.search(r"(?m)^def %s\(" % re.escape(func), WSRC)
+    if not m:
+        return ""
+    n = re.search(r"(?m)^def ", WSRC[m.end():])
+    return WSRC[m.end():m.end() + n.start()] if n else WSRC[m.end():]
+
+
+chk("G1 接线：writer.py 源码里再没有 `tmp = … + \".tmp\"` 这种固定临时名赋值",
+    not re.search(r'tmp\s*=\s*[^\n]*\+\s*"\.tmp"', WSRC),
+    re.findall(r'(?m)^.*tmp\s*=.*\.tmp.*$', WSRC)[:4])
+wta_body = body_of("_write_text_atomic")
+chk("G2 接线：三个写口都从 `_write_text_atomic` 出去，名字格式只有这一处（带 pid + 随机串）",
+    "os.getpid()" in wta_body and "uuid.uuid4().hex" in wta_body
+    and '"%s.%d.%s.tmp"' in wta_body
+    and all('_write_text_atomic(' in body_of(f) for f in ("save", "_write_meta", "save_books")),
+    wta_body[-200:])
+chk("G3 接线：失败那条路兜的是 BaseException（中止信号也不漏件）",
+    "except BaseException" in wta_body, wta_body[-160:])
+chk("G4 接线：meta 确实有两个写口（界面存盘那次与 AI 灵感回包那次），并发不是假想",
+    "writer_mod.save(" in u_src and "writer_mod.remember_sparks(" in u_src,
+    (u_src.count("writer_mod.save("), u_src.count("writer_mod.remember_sparks(")))
+acts = sum(u_src.count("writer_mod.%s(" % n)
+           for n in ("create_book", "rename_book", "delete_book",
+                     "add_chapter", "remove_chapter", "order_chapter"))
+chk("G5 接线：册账动作真的有好几个请求入口（建 / 改名 / 删 / 归章 / 排序）", acts >= 4, acts)
 
 print("\n写作落盘原子体检：%d 项通过，失败 %d 项" % (PASSED[0], len(FAIL)))
 for f in FAIL:

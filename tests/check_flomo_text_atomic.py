@@ -21,15 +21,20 @@
     `json.dump` 往临时件里流式写（`check_flomo_atomic.py` 拿 `json.dump` 当探针），只把
     命名交给 `_tmp_for`，不重复第二份名字格式。
 
-钉五面：
+钉六面：
   A. `_write_text_atomic` 本身：写得下、读得回、不留 `.tmp`；两次写的临时名不一样且带
      pid；替换发生之前目标文件一直是完整的那一份；写崩收干净、旧档不动。
   B. `to_shelf` 接线：走 `_write_text_atomic`，源码里不再有 `mp + ".tmp"`；两次收书给
-     出的临时名不同（拿旧固定名跑这一条必红）。
+     出的临时名不同（拿旧固定名跑这一条必红）。`_tmp_for` 是这一族唯一的名字来源：带
+     pid + 随机串，`save()` 也用它 —— 落在 B3/B4/B5。
   C. `to_shelf` 并写：两个真线程把两条笔记收进同一个书目录，meta.json 一定解得动、不留
      `.tmp`、都不抛。
   D. `write_portrait` 接线与并写：两个真线程各写几十趟，画像两份都解得动、不留 `.tmp`。
-  E. `_tmp_for` 是这一族的名字来源：带 pid + 随机串，`save()` 也改用它。
+  E. 画像写到一半被中止信号打断：JSON 已经顶替、Markdown 还没顶替时照旧抛，半截临时件
+     收干净，旧的那份画像解得动 —— `_write_text_atomic` 兜的是 BaseException，只兜
+     Exception 会在 Ctrl-C / 「停止」那条退出路径上漏件。
+  F. 接线：界面点「生成画像」真的走 `write_portrait`，`read_portrait` 在文件缺失时现算
+     并落盘 —— D 节那两只同时进来的手不是假想出来的。
 
 跑法：纯函数 + 系统临时目录沙盒，不联网、不开浏览器、不起服务，归 --fast 静态段。
 """
@@ -288,6 +293,75 @@ for name in (flomo.PORTABLE_JSON, flomo.PORTABLE_MD):
 chk("D1 两个线程各写 40 趟，画像两份都解得动", parsed, pwhy)
 chk("D2 并写之后画像目录里不留 .tmp 残件", tmps_in(pdir) == [], tmps_in(pdir))
 chk("D3 两个线程都正常收工", perr == [], perr[:2])
+
+print("── E. 画像写到一半被打断：中止信号也不漏件 ──────────────")
+# 画像一次写两份文件（JSON 给机器、Markdown 给人和 Agent），所以它是这一族里唯一
+# 能造出「前一份已经顶替、后一份改名失败」那种半路的格子。`_write_text_atomic` 兜的是
+# `except BaseException`：Ctrl-C 与界面上的「停止」走的是 KeyboardInterrupt / SystemExit，
+# 它们不继承 Exception，只兜 Exception 会在退出路径上把半截临时件留在盘上。
+FD4 = str(SB / "flomo4")
+flomo.save(FD4, {"memos": [memo("q1"), memo("q2")]})
+pdir4 = flomo.portrait_dir(FD4)
+flomo.write_portrait(FD4)
+JP4 = os.path.join(pdir4, flomo.PORTABLE_JSON)
+MP4 = os.path.join(pdir4, flomo.PORTABLE_MD)
+with open(JP4, "rb") as f:
+    before_j = f.read()
+
+real_replace = os.replace
+boom = {"n": 0}
+
+
+def replace_that_stops(src, dst, *a, **kw):
+    boom["n"] += 1
+    if boom["n"] == 2:                       # 第一份（JSON）照常顶替，第二份（MD）改名时被打断
+        raise KeyboardInterrupt()
+    return real_replace(src, dst, *a, **kw)
+
+
+os.replace = replace_that_stops
+raised = None
+try:
+    flomo.write_portrait(FD4)
+except KeyboardInterrupt:
+    raised = "KeyboardInterrupt"
+except BaseException as e:                   # noqa: BLE001 —— 别的异常也算没按原样抛出去
+    raised = type(e).__name__
+finally:
+    os.replace = real_replace
+chk("E1 第二份改名时收到中止信号（KeyboardInterrupt），照旧抛不吞",
+    raised == "KeyboardInterrupt", raised)
+chk("E2 JSON 已顶替、Markdown 没顶替时，半截 .tmp 也收干净了",
+    tmps_in(pdir4) == [], tmps_in(pdir4))
+e3, e3why = True, ""
+try:
+    with open(JP4, encoding="utf-8") as f:
+        e3 = isinstance(json.load(f), dict)
+except Exception as e:                       # noqa: BLE001
+    e3, e3why = False, "%s: %s" % (type(e).__name__, e)
+chk("E3 打断之后落地的画像 JSON 逐字节没动、仍是解得动的一份",
+    e3 is True and open(JP4, "rb").read() == before_j, e3why)
+
+print("── F. 接线：同时写画像的两只手都真的在 ──────────────────")
+u_src = read_repo("ui_server.py")
+chk("F1 接线：界面那次「生成画像」（mode=portrait）真的调 write_portrait 落盘",
+    'mode == "portrait"' in u_src and "flomo_notes.write_portrait(" in u_src,
+    (u_src.count('mode == "portrait"'), u_src.count("flomo_notes.write_portrait(")))
+chk("F2 接线：画像的两份都在同一个循环里，改名出口只有 `_write_text_atomic` 这一处",
+    wp_body.count("_write_text_atomic(") == 1
+    and "for name, text in" in wp_body
+    and "PORTABLE_JSON" in wp_body.split("for name, text in", 1)[-1]
+    and "PORTABLE_MD" in wp_body.split("for name, text in", 1)[-1],
+    wp_body.split("for name, text in", 1)[-1][:200])
+chk("F3 接线：`_write_text_atomic` 失败路径兜的是 BaseException（中止信号也要收残件）",
+    "except BaseException" in body_of(SRC, "_write_text_atomic"),
+    body_of(SRC, "_write_text_atomic")[-160:])
+for name in (flomo.PORTABLE_JSON, flomo.PORTABLE_MD):
+    os.remove(os.path.join(pdir4, name))
+got = flomo.read_portrait(FD4)
+chk("F4 接线：read_portrait 在画像缺失时现算并落盘（删掉两份再读，两份都回来了）",
+    isinstance(got, dict) and os.path.isfile(JP4) and os.path.isfile(MP4)
+    and tmps_in(pdir4) == [], (type(got).__name__, tmps_in(pdir4)))
 
 print("\nflomo 收书 meta / 画像落盘体检：%d 项通过，失败 %d 项" % (PASSED[0], len(FAIL)))
 for f in FAIL:
