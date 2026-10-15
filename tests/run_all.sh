@@ -118,6 +118,16 @@ run "取书目录账本脏形状（脏形状当没目录 / 好数据不改 / 对
 # 这一条把三个读口各钉一圈（脏形状不抛 / 好数据不改 / 旧读法确实会抛的对照 / 接线走
 # book_layout.read_meta 同一把尺子）。纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
 run "取书引擎脏读口（进度 / meta / raw 页记录不带走整趟取书）" "$PY" tests/check_export_dirty_read.py
+# 上面那三个读口是引擎的「账本」；这一条收的是引擎的「章节」。chapters/ 是用户能
+# 直接编辑的目录，两处脏输入各能把整趟取书带走：随手放的 notes.md / 手工改名的
+# 第3章.md 排在数字章后面，get_last_chapter_title 的 `int(...)` 抛 ValueError ——
+# 这一句在每轮会话开头跑，于是还没打开浏览器就带着英文报错结束；一章被另存成 GBK
+# 或写到一半断电，裸 open 的 UnicodeDecodeError 在 load_used_titles（每轮切章前）
+# 与 merge_chapters（全书取完的最后一秒）各炸一次，书明明取完了、合并稿却没出来。
+# 界面取正文 / EPUB / PDF 那几条路早就换成了 book_export.read_chapter_file 这把
+# 尺子，引擎自己这三处补齐。这一条钉「野文件名不再抛 / 坏字节只换替代符 / 正常书
+# 一字不改 / 三处接线同一把尺子」。纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
+run "取书引擎读章口（野文件名 / 坏字节不带走整趟取书）" "$PY" tests/check_engine_chapter_read.py
 # 上一对管的是「脏账本读得开」，这一条管的是「账本压根别写脏」。引擎里三份账本
 # （_catalog.json / _stuck.json / meta.json）原先都是 open(path, "w") 直写，而 "w"
 # 一进去就把旧内容截断 —— 取书又是会被界面停止键强杀的长任务，恰好在写完前被杀就
