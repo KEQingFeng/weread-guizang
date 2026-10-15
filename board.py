@@ -193,6 +193,22 @@ def normalize_env(doc) -> dict:
 
 # ─────────────────────────── 读写 ───────────────────────────
 
+def _tmp_for(path) -> str:
+    """这条写口自己的临时名：pid + 随机串，不再用固定的 `xxx.tmp`。
+
+    画板落盘是整个后端最重的几次写（画布上限 6 MB，还要先把旧档挪成 .prev 再顶替），
+    而 save_board / save_export 直接挂在线程池化的 PUT / POST 上，同一块板被两处同时
+    写完全够得着：两个写者共用同一个 `xxx.tmp` 时，先 os.replace 的把临时件搬走，
+    后一个 replace 当场 FileNotFoundError —— 界面看到「没存进去」，可画其实已经落了一
+    半，旁边还留一个没人认领的 `.tmp`。临时名各写各的，两条写就互不打扰。
+
+    与 ui_server._write_text / _write_bytes / _write_json 同一条口径（都是
+    `path.<pid>.<随机串>.tmp`）。临时件写崩了不会自己消失，delete_board 里按同一
+    形状把它们一并收掉。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
 def _write_json(path, obj):
     """原子写 JSON：先写临时名再 os.replace，中途崩了也不会留下半截文件。
 
@@ -204,7 +220,7 @@ def _write_json(path, obj):
     收** —— 后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，
     删掉才是真的丢东西。
     """
-    tmp = path + ".tmp"
+    tmp = _tmp_for(path)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2, allow_nan=False)
@@ -224,7 +240,7 @@ def _write_json(path, obj):
 
 def _write_bytes(path, raw):
     """二进制导出物走同一个原子路子，但不留 .prev：导出物随时能从画布重画，不值得占双倍盘。"""
-    tmp = path + ".tmp"
+    tmp = _tmp_for(path)
     try:
         with open(tmp, "wb") as f:
             f.write(raw)
@@ -398,13 +414,35 @@ def save_board(book_dir, doc) -> dict:
             "msg": "画板已存好（%s）" % _human_size(size)}
 
 
+def _stray_tmps(folder, sid) -> list:
+    """这块板在 boards/ 里可能留下的临时件名（写崩才会剩下，正常路径收得干净）。
+
+    临时名现在带 pid + 随机串（见 _tmp_for），所以不再是一个固定名字能点得到的：
+    按「<id>.<官方扩展名>.<随便什么>.tmp」这个形状扫一遍，把这一块板的都收走 ——
+    只认这个前缀，别的板的临时件、别人的文件名都不会被扫中。目录读不出来（书被删了、
+    权限没了）当没有残件，删板本身照样往下走。
+    """
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return []
+    out = []
+    for base in ("%s%s" % (sid, BOARD_FILE_EXT), "%s%s" % (sid, SVG_EXT),
+                 "%s%s" % (sid, PNG_EXT)):
+        for name in entries:
+            if name.startswith(base + ".") and name.endswith(".tmp") and name not in out:
+                out.append(name)
+    return out
+
+
 def delete_board(book_dir, board_id, purge=True) -> dict:
     """删一块板：purge=True 连它的 SVG / PNG 导出物一起清；False 只收画板、留图。
 
-    purge 连 `.json.prev` / `.json.tmp` 这两个「只有磁盘看得见」的副产物一起收：
+    purge 连 `.json.prev` 与 `.tmp` 这些「只有磁盘看得见」的副产物一起收：
     `.prev` 是覆盖保存时留的上一版，_board_files() 故意不认它（不然它会占 MAX_BOARDS
     的名额），所以列表里看不见、数不着、界面上永远删不掉 —— 删板时不清就是个吃盘的
-    隐形洞（一块板最多 6 MB）。`.tmp` 是旧版本写崩时可能留下的半截文件，同样收掉。
+    隐形洞（一块板最多 6 MB）。`.tmp`（含旧版本留下的固定名与现在带 pid + 随机串的
+    临时名）是写到一半崩掉时可能留下的半截文件，同样收掉。
 
     文件本来就不存在不算失败 —— 界面点两次删除、或者板早已被清掉，都不该看到红字。
     """
@@ -414,6 +452,7 @@ def delete_board(book_dir, board_id, purge=True) -> dict:
     if purge:
         names += ["%s%s" % (sid, SVG_EXT), "%s%s" % (sid, PNG_EXT),
                   "%s%s.prev" % (sid, BOARD_FILE_EXT), "%s%s.tmp" % (sid, BOARD_FILE_EXT)]
+        names += _stray_tmps(folder, sid)
     removed, failed = [], []
     for name in names:
         path = os.path.join(folder, name)
