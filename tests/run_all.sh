@@ -331,6 +331,13 @@ run "导入坏 EPUB（坏包 / 加密包翻成人话，好包零改动）" "$PY"
 # 加一句 codec 原文，而书目录已经建出来了，书架上留一本只有半截章节、没有 meta 的幽灵书。
 # 剪藏那条路（封面 og:image 地址）同理。收口复用 book_layout 那把共用清洗尺，离线钉住。
 run "导入 / 剪藏坏字符（半个代理码点不许打成失败、不留半截目录）" "$PY" tests/check_import_surrogate.py
+# 上面那条守着两个落盘口（import_book 的 title / author / 章节，与 save_clip 那份 meta）。
+# 剪藏还有一处它没走到：`body.encode("utf-8")` 把标题 / 正文 / 出处拼成的 Markdown 编成
+# 字节，而 X / 知乎 / 小红书的提取路是 JSON——`"\ud83d"` 转义读成一个落单的半个代理码点，
+# 混进 title 或 markdown，这一句 encode 当场抛 UnicodeEncodeError，界面收到的是
+# 「剪不动：'utf-8' codec can't encode character …」这句 Python 原文。收口复用同一把共用
+# 清洗尺（book_layout.drop_lone_surrogates），在这道编码与拼文件名之前过一遍。
+run "剪藏正文坏字符（半个代理码点不许把一篇能剪的文章挡在门外）" "$PY" tests/check_clip_surrogate.py
 # 写作那一格从「一叠散稿」升级成「书 → 第一章 / 第二章 …」之后，多出的一份风险在账本上：
 # `_books.json` 记的是「哪几章、按什么顺序、属于哪本书」，章本身还是原来那篇稿子
 # （目录 / rev / 快照 / MCP 一字未改）。账本一坏，界面上就是「我的章不见了」这种最要命的
