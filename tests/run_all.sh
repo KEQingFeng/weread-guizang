@@ -590,6 +590,15 @@ run "小 Agent（地址补全 / 流式形状 / 非流式抠字 / 配置 / 接线
 # 报一个巨大间隔，不夹就是一根通天柱）、单日封顶 12 小时、缺的日子补 0 而不是跳过（跳一格
 # 整张图就错位）、连续天数对「今天还没开始」宽容。纯函数不算盘不碰 HTTP，所以归静态段。
 run "时长账（夹 / 封顶 / 补零 / 连续 / 色阶 / 归档）" "$PY" tests/check_activity.py
+# 上一条管的是「数算得对不对」，这一条管的是「账里有个越界数字会不会把整屏弄没」：
+# `1e400` 与一长串数字都是**合法 JSON**，会原样落进 activity.json（手改 / 同步落半截 /
+# 旧版本写坏）。`load` 里 `int(sec)` 只兜 `except Exception`，`10**400` 这种大整数收得下，
+# 一路活到 `levels()` 的 `int(hi * 0.25)`、`summary()` 的 `int(week / 7)` —— 两个都当场抛
+# `OverflowError`。`ui_server.activity_summary()` 正是这两句的调用方，`GET /api/activity`
+# 于是一甩，个人主界面上两张热力图整块出不来。这一条钉住「大整数照认（不改口径）＋
+# 每条读路径都不抛 ＋ 正常尺度与老写法逐值同值 ＋ 兜底回包仍是严格合法 JSON」，
+# 外加「旧浮点写法确实会抛」的对照。纯函数 + 临时沙盒，归静态段。
+run "时长账越界数字（大整数不再让 /api/activity 甩连接）" "$PY" tests/check_activity_overflow.py
 # 本机阅读时长这本老账原先直读直用：days 里一个 "abc"、books 里一个字符串 seconds，
 # 就能让 /api/readstat 与阅读时每十几秒一次的 /api/readstat/tick 抛异常（同步会把远端
 # 那份原样落盘，用户也可能手工编辑）。activity 早就按「认不出的当空账」洗过，这一条把

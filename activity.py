@@ -196,7 +196,12 @@ def levels(d, kind, today=None):
     hi = peak(d, kind, today=today)
     if hi < 900:
         return [900, 1800, 3600]
-    return [max(1, int(hi * 0.25)), int(hi * 0.5), int(hi * 0.75)]
+    # 用整数折算，不走 `int(hi * 0.25)`：hi 是从账本里读回来的，而 `1e400` / 一长串
+    # 数字都是**合法 JSON**，会原样落进 activity.json、再被 int() 收成一个大整数
+    # （越界正是这么来的）；`大整数 * 0.25` 会当场抛 OverflowError（int too large to
+    # convert to float），两张热力图那一屏整页打不开。四分之一 / 一半 / 四分之三这套
+    # 档位对整数取整与浮点写法同值，正常尺度的账一个字不改。
+    return [max(1, hi // 4), hi // 2, max(1, hi * 3 // 4)]
 
 
 def level_of(sec, cuts):
@@ -224,7 +229,9 @@ def summary(d, today=None):
             "total": int(book.get("total", 0)),
             "week": week,
             "year": year,
-            "avg_day": int(week / 7) if week else 0,
+            # 整数除法：week 是账本里的秒数之和，同样可能是个大整数，`week / 7` 先转
+            # float 就抛 OverflowError —— 与色阶那处同一个坑，读数一字不差。
+            "avg_day": week // 7 if week else 0,
             "streak": streak(d, kind, today=today),
             "busy_days": busy,
             "max": max([v for _k, v in calendar(d, kind, YEAR_WEEKS, today=today)] or [0]),
