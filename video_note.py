@@ -1511,9 +1511,25 @@ def _write_json(path, obj):
     # 先把它从下面的解析缓存踢掉：文件换了，缓存里那份就是上一版转写，
     # 留着的话「保存完再读还是旧字」会变成一条查不出来的鬼影。
     _JSON_CACHE.pop(path, None)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
+    # 临时件名带进程号 + 一小串随机：这条写口有两个调用侧够得着同一本书 ——
+    # `/api/video` 的「保存转写 / 重建」跑在服务进程的线程里（工作台连点两下、
+    # 保存与重建撞在一起），而下载转写那条任务线是**另一个进程**
+    # （`ui_server.start_task` 起 `video_note.py --task`）。两边都写同一份
+    # transcript.json / meta.json，固定名会让先收尾的那个把共用的临时件搬走，
+    # 后一个 `os.replace` 当场 FileNotFoundError（界面「保存失败」，前一笔却已经落盘）。
+    # 与 `ui_server._write_json` / `board._write_json` 同一把尺子。
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
+    except Exception:
+        # 写这一步失败时把临时件收干净再抛（内容里还有落单码点这类），
+        # 别在书目录里留一个只有磁盘看得见的垃圾。
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
 
 
@@ -1559,9 +1575,18 @@ def _read_json_cached(path):
 def _write_text(path, text):
     # 同一把尺子：transcript.txt / 章节正文也是 utf-8 直写，落单的半个码点照样
     # 写不进去；它和上面的 json 不管哪一条先抛，用户看到的都是「存不下」。
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(_drop_surrogates(text))
+    # 临时件名同样带进程号 + 随机串：`/api/video` 的保存与重建会同时写
+    # transcript.txt / merged.md，固定名一样会让后一个 `os.replace` 扑空。
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(_drop_surrogates(text))
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
 
 
