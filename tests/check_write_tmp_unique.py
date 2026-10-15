@@ -16,8 +16,9 @@
     没人钉，所以留在这里。
 
 为什么要钉这一档
-    `save_map` 有两个调用侧：界面的 `/api/mindmap`（`ui_server.py` 里 `save_map` 的
-    同步那条）与 AI 画图那条任务线（同一个文件里另一处）。后端是 `ThreadingHTTPServer`，
+    `save_map` 有两只手：界面存盘那次（`/api/mindmap` 的 `save`，`ui_server.py:6374`）与
+    「让 AI 画一张」那次（`/api/ai/mindmap` → `ai_mindmap`，`ui_server.py:3002`，它在请求
+    线程里等模型最长 180 秒、回来直接落盘覆盖）。后端是 `ThreadingHTTPServer`，
     同一本书被两处同时存时，旧写法把临时件写死成 `path + ".tmp"`，先收尾的那个
     `os.replace` 把共用的临时件整个搬走，后一个轮到自己那一句时件已经不在 ——
     抛 `FileNotFoundError`，界面「保存失败」，可前一笔明明落盘了；反过来后开的那个
@@ -225,7 +226,7 @@ chk("E2 接线：临时名走进程号 + uuid（与 board / ui_server 同一把�
     "os.getpid()" in body and "uuid" in body, body[:200])
 u_src = (REPO / "ui_server.py").read_text(encoding="utf-8")
 callers = len(re.findall(r"mindmap\.save_map\(", u_src))
-chk("E3 接线：save_map 确实有两个调用侧（界面那条与 AI 画图任务线），并发不是假想",
+chk("E3 接线：save_map 确实有两只手（界面存盘那条与「让 AI 画一张」那条），并发不是假想",
     callers >= 2, callers)
 
 print()

@@ -392,9 +392,11 @@ def _write_json(path, text):
     又会让书目录里多一个只有磁盘看得见的垃圾。**只在写这一步失败时收** ——
     后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，删掉才是真丢东西。
 
-    临时件名带进程号 + 一小串随机：`save_map` 有两个调用侧（界面的 `/api/mindmap`
-    与 AI 画图那条任务线，见 ui_server），同一本书被两处同时存时，固定名会让先收尾
-    的那个把共用的临时件搬走、后一个 `os.replace` 当场 FileNotFoundError。与
+    临时件名带进程号 + 一小串随机：`save_map` 有两只手（界面存盘那次
+    `ui_server.py:6374`，与「让 AI 画一张」那次 `ui_server.py:3002` —— 后者在请求线程里
+    等模型最长 180 秒，等的这段时间里前者完全可能把同一份图存下去），同一本书被两处
+    同时存时，固定名会让先收尾的那个把共用的临时件搬走、后一个 `os.replace` 当场
+    FileNotFoundError。与
     `ui_server._write_json` / `board._write_json` 同一把尺子。
     """
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
