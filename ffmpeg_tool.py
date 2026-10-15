@@ -22,6 +22,7 @@ bootstrap.py 那套思路：下载的东西全落在应用自己的数据目录�
 提示页、错架构的包，都能骗过前者，而用户看到的会是「装成功之后又说找不到」。
 """
 import json
+import math
 import os
 import re
 import shutil
@@ -179,6 +180,11 @@ def probe_duration(path):
 
     ffprobe 只管把时长念出来，任何一步不对劲（没装、文件是坏的、读超时）都
     当作「不知道」，让上层自己决定要不要继续，而不是把异常甩上去。
+
+    认不出的值里有一类特别危险：`float()` 对 `inf` / `nan` / `1e400` / 一长串
+    数字**不抛异常**，回的是非有限值。它们一旦当成秒数传下去，往后每一段的时间
+    偏移都成了 inf，最终写进 transcript 的 JSON 就是 `Infinity` —— Python 照写，
+    浏览器 `JSON.parse` 整份拒收。所以「有限」是这里的第二条进门条件。
     """
     try:
         exe = ffprobe_path()
@@ -192,9 +198,10 @@ def probe_duration(path):
     except Exception:
         return None
     try:
-        return float((out.stdout or "").strip())
-    except ValueError:
+        seconds = float((out.stdout or "").strip())
+    except (TypeError, ValueError, OverflowError):
         return None
+    return seconds if math.isfinite(seconds) else None
 
 
 # 常见容器对应的音频编码器。ffmpeg 自己也会按扩展名猜，但显式点出来更稳。

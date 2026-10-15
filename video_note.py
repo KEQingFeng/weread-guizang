@@ -566,12 +566,20 @@ def pick_engine(want, asr_cfg):
 
 
 def _pack_result(result):
-    """把云转写回的 JSON 收敛成 {"text", "segments":[{start,end,text}]}。"""
+    """把云转写回的 JSON 收敛成 {"text", "segments":[{start,end,text}]}。
+
+    时间戳走 `_sec` 这把尺子，不裸 `float(...)`：云那一头是外站 JSON，
+    `Infinity` / `NaN` / `1e400` / 负值都是 `float()` 收得下、却不该出现在时间轴上
+    的值。这一段的结果还要落进分片缓存（`_write_json`，`ensure_ascii=False`），
+    一旦混进非有限值，`json.dump` 照写 `Infinity` —— 那份档就不再是严格 JSON，
+    越界那一段也把整条时间轴带偏。
+    """
     segments = []
     for item in (result or {}).get("segments") or []:
-        text = str((item or {}).get("text") or "").strip()
-        segments.append({"start": float((item or {}).get("start") or 0.0),
-                         "end": float((item or {}).get("end") or 0.0),
+        item = item if isinstance(item, dict) else {}
+        text = str(item.get("text") or "").strip()
+        segments.append({"start": _sec(item.get("start")),
+                         "end": _sec(item.get("end")),
                          "text": text})
     text = str((result or {}).get("text") or "").strip()
     if not text:
@@ -743,8 +751,8 @@ def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop,
         for seg in (payload.get("segments") or []):
             if not isinstance(seg, dict):
                 continue
-            segments.append({"start": float(seg.get("start") or 0.0) + offset,
-                             "end": float(seg.get("end") or 0.0) + offset,
+            segments.append({"start": _sec(seg.get("start")) + offset,
+                             "end": _sec(seg.get("end")) + offset,
                              "text": str(seg.get("text") or "").strip()})
         offset += _audio_seconds(part)
     _say(progress, "asr", 72, "转写完成")
@@ -752,8 +760,13 @@ def _transcribe_cloud(audio_path, cloud, model, lang, progress, should_stop,
 
 
 def _audio_seconds(path):
-    seconds = ffmpeg_tool.probe_duration(path)
-    return float(seconds) if seconds else 0.0
+    """一段音频的秒数。量不出、不是有限值、不是正数，都当 0。
+
+    这里的结果是拼时间轴的偏移量（`offset += _audio_seconds(part)`）：一旦回 inf，
+    后面每一段的 start / end 都成了 inf，落到盘上就是 `Infinity`。`_sec` 那把尺子
+    本来就是为这一刻备的 —— probe_duration 那边另有同一道闸，两层都留着。
+    """
+    return _sec(ffmpeg_tool.probe_duration(path))
 
 
 # ─────────────────────────── LLM ───────────────────────────
@@ -1031,9 +1044,12 @@ def _extract_json(text):
 
 
 def _segments_excerpt(segments, limit=120):
+    """段落摘录成提示词里那段 JSON。时间戳同样走 `_sec`：这段字面量是喂给模型的，
+    里面出现 `Infinity` / `NaN` 会让下游的严格 JSON 解析当场拒收整段提示词。"""
     rows = []
     for seg in (segments or [])[:limit]:
-        rows.append({"start": round(float(seg.get("start") or 0.0), 1),
+        seg = seg if isinstance(seg, dict) else {}
+        rows.append({"start": round(_sec(seg.get("start")), 1),
                      "text": _clip(seg.get("text"), 200)})
     return json.dumps(rows, ensure_ascii=False)[:8000]
 

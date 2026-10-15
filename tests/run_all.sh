@@ -256,6 +256,19 @@ run "视频书重建脏账本（手改 summary 不甩连接 / 正文不丢 / 好
 # 以及源码接线三面一起钉住，另留一面「旧写法确实写出 Infinity」的对照防门禁空转。
 # 纯逻辑 + 进程内真 Handler，不联网、不开浏览器，归静态段，--fast 也得带上。
 run "视频书越界时间（1e400 / NaN 不再把工作台甩成 Infinity）" "$PY" tests/check_video_time.py
+# 上一条收的是 meta.json 里那个排序用的 `updated_at`；这一条收的是同一本书的**时间轴
+# 本身**。`float()` 对 `"inf"` / `"nan"` / `"1e400"` / 一长串数字都不抛异常，回的是非
+# 有限值，而时长那条路上有两处裸 `float(...)`：`ffmpeg_tool.probe_duration()` 念的是
+# ffprobe 的 stdout（坏片源 / 认不出的容器就可能回这些），`video_note._pack_result()`
+# 收的是云 ASR 这个外站给的 JSON。更坏的是 `_audio_seconds()` 的结果是拼时间轴的偏移量
+# —— 一片回 inf，`offset += inf` 之后**后面每一段**的 start / end 都成了 inf。这些值写进
+# transcript.json 与分片缓存就是 `"start": Infinity`，浏览器 `JSON.parse` 整份拒收，
+# 用户看到的是工作台那一屏整个空白。收口是 `math.isfinite` 的第二道闸 + 既有的 `_sec`
+# 尺子。这条钉四层：探针边界表、偏移链、`_pack_result` 的每段时间戳、以及三片音频
+# （一片正常两片探针回坏值）走一遍 `_transcribe_cloud` 后返回与落盘都必须是严格 JSON，
+# 另留一面「旧写法确实写出 Infinity」的对照。假 ffprobe + 假 _post_audio，不联网、
+# 不开浏览器，归静态段，--fast 也得带上。
+run "转写时长越界值（inf / NaN 不再变成时间轴里的 Infinity）" "$PY" tests/check_video_duration.py
 # 同一本书的另一份账：transcript.json 是 ensure_ascii=False 直写的，而云端 ASR 的回包 /
 # 编辑器存回来的段落里可能带着落单的半个代理码点（`\ud83d`）。旧写法在 json.dump 那一步
 # 抛 UnicodeEncodeError：界面「点了保存没反应」，书目录里还留一个半截 transcript.json.tmp；
