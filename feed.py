@@ -69,6 +69,35 @@ FEED_TYPES = {
 # 只允许这两种 scheme 发出去；file:// data: gopher:// 之类一律拒绝
 ALLOWED_SCHEMES = ("http", "https")
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：JSON 里写 `"\ud800"` 能被
+# json.loads 收成这个码点，可 utf-8 编不出来。订阅这一格有两条路会撞上它：
+#   · 外站的 JSON Feed 在 title / id 里带这种转义 —— 解析时不抛，等到算去重键
+#     `_entry_key`（退回 sha1(link+title) 那一步 .encode("utf-8")）或入库算
+#     content_hash 时才 UnicodeEncodeError，整趟刷新带着这个源垮掉；
+#   · feed.json 被手改 / 云同步落盘 / 旧版本写过，值里留着它 —— 之后任何一次写盘
+#     （标已读 / 打标签 / 删除 / 加源）都在 ensure_ascii=False 的 json.dump 上抛，
+#     界面看到「点了没反应」，cache 里还留一个半截 feed.json.tmp。
+# 它是坏输入不是内容，洗掉比让一整份账本写不出去强。成对的代理码点不必管：json
+# 解码时已经合成一个真字符，这里只会摘到落单的那半个，真 emoji / ZWJ 连字一个字不动。
+# 与 book_layout / writer / mindmap / board / person / anna_state 同一口径。
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _drop_surrogates(v):
+    """把落单的半个代理码点摘干净（dict 的键与值、list、str 逐层走）。
+
+    要连字典键一起洗：`seen` 表的键就是外部 guid，`entries` 的键是源 id，键里留着
+    半个码点照样会让 json.dump 当场抛 —— 只洗值等于没洗。键被洗后若与另一个键撞名，
+    后写的覆盖前者：本来就已经是认不出的坏输入，重合了也不算丢真数据。
+    """
+    if isinstance(v, str):
+        return _SURROGATE.sub("", v)
+    if isinstance(v, dict):
+        return {_drop_surrogates(k): _drop_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_drop_surrogates(x) for x in v]
+    return v
+
 
 # ── 存取 ────────────────────────────────────────────────────────────
 
@@ -195,7 +224,11 @@ def _normalize(data):
     for lst in data["entries"].values():
         for e in lst:
             _norm_entry(e)
-    return data
+    # 落单的半个代理码点在 JSON 里存得下、utf-8 里编不出：手改 / 云同步 / 旧版本落下的
+    # feed.json 里只要有一个，之后任何一次写盘都会在 json.dump 上抛（见 _SURROGATE）。
+    # 读口把它洗掉，界面拿到的、写回去的就都是干净的；条目 id 与 seen 键用同一把尺子，
+    # 两边的对应关系不会被洗歪。
+    return _drop_surrogates(data)
 
 
 def _load():
@@ -209,6 +242,10 @@ def _load():
 
 
 def _save(data):
+    # 最后一道闸：调用方给什么进来都保证 json.dump 不会因为落单的半个代理码点抛。
+    # _load 已经洗过一遍，但「抓完外站直接并进内存再落盘」那一趟的数据没经过 _load，
+    # 这里兜住，别让一次坏输入把整份账本挡在盘外（并留下半截 .tmp）。
+    data = _drop_surrogates(data)
     os.makedirs(os.path.dirname(STORE) or ".", exist_ok=True)
     tmp = STORE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -660,7 +697,11 @@ def parse_feed(blob, base=""):
         }
         item["has_content"] = len(_TAG.sub("", item["content_html"]).strip()) > len(item["summary"]) + 40
         entries.append(item)
-    return {"title": title, "site": link, "kind": kind, "link": link, "entries": entries}
+    # 外站文本进内存前先摘掉落单的半个代理码点：id / title / link 里带着它，后面的
+    # _entry_key（sha1(link+title).encode("utf-8")）与入库时的 content_hash 都会抛
+    # UnicodeEncodeError，整趟刷新带着这个源一起垮。在这里洗一次，下游不必各自防。
+    return _drop_surrogates({"title": title, "site": link, "kind": kind, "link": link,
+                             "entries": entries})
 
 
 def _author_name(e):
@@ -715,7 +756,10 @@ def _parse_jsonfeed(text, base=""):
             "summary_html": sanitize_html(summary or body, link_e or home or base),
             "has_content": bool(it.get("content_html") or it.get("content_text")),
         })
-    return {"title": title, "site": home, "kind": "json", "link": link, "entries": entries}
+    # 同 RSS/Atom 那一路：JSON Feed 里的 `"\ud800"` 转义 json.loads 收得下、utf-8 编不出，
+    # 出这扇门之前洗掉，算去重键与写盘才不会再撞上 UnicodeEncodeError。
+    return _drop_surrogates({"title": title, "site": home, "kind": "json", "link": link,
+                             "entries": entries})
 
 
 def _decode(blob):
