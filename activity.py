@@ -196,7 +196,12 @@ def levels(d, kind, today=None):
     hi = peak(d, kind, today=today)
     if hi < 900:
         return [900, 1800, 3600]
-    return [max(1, int(hi * 0.25)), int(hi * 0.5), int(hi * 0.75)]
+    # 整数除法，不写 `int(hi * 0.25)`：hi 是从账本里读回来的大整数，乘一个浮点
+    # 会先把它转成 float —— 手改 / 云同步落回来的那一长串数字（`10**400` 这种
+    # 合法 JSON 整数）转 float 当场 OverflowError，/api/activity 整条不回包。
+    # 整除对正常值一字不差（正数的四分之一 / 一半 / 四分之三，向下取整），
+    # 大数也照算不误。
+    return [max(1, hi // 4), hi // 2, (3 * hi) // 4]
 
 
 def level_of(sec, cuts):
@@ -224,7 +229,8 @@ def summary(d, today=None):
             "total": int(book.get("total", 0)),
             "week": week,
             "year": year,
-            "avg_day": int(week / 7) if week else 0,
+            # 同一把尺子：`week / 7` 是 int/float，week 越界时同样抛 OverflowError。
+            "avg_day": week // 7 if week else 0,
             "streak": streak(d, kind, today=today),
             "busy_days": busy,
             "max": max([v for _k, v in calendar(d, kind, YEAR_WEEKS, today=today)] or [0]),

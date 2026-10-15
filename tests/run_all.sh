@@ -576,6 +576,11 @@ run "小 Agent（地址补全 / 流式形状 / 非流式抠字 / 配置 / 接线
 # 报一个巨大间隔，不夹就是一根通天柱）、单日封顶 12 小时、缺的日子补 0 而不是跳过（跳一格
 # 整张图就错位）、连续天数对「今天还没开始」宽容。纯函数不算盘不碰 HTTP，所以归静态段。
 run "时长账（夹 / 封顶 / 补零 / 连续 / 色阶 / 归档）" "$PY" tests/check_activity.py
+# 上面那条守的是规矩，这一条守的是规矩的量级边界：手改 / 云同步把账本里那一格写成一长串
+# 数字（`10**400` 这种合法 JSON 整数），旧算式 `int(hi * 0.25)` 与 `week / 7` 转 float
+# 当场 OverflowError，/api/activity 整条不回包。同一种病在 web_parse 的推文编号上犯过一次，
+# 见 check_web_parse_bigid.py。纯函数、不起服务，归静态段。
+run "时长账越界整数（一长串数字不许让整屏白掉）" "$PY" tests/check_activity_bigint.py
 # 本机阅读时长这本老账原先直读直用：days 里一个 "abc"、books 里一个字符串 seconds，
 # 就能让 /api/readstat 与阅读时每十几秒一次的 /api/readstat/tick 抛异常（同步会把远端
 # 那份原样落盘，用户也可能手工编辑）。activity 早就按「认不出的当空账」洗过，这一条把
