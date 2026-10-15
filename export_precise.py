@@ -19,6 +19,7 @@ from collections import deque
 
 from playwright.async_api import async_playwright
 
+import book_export
 import book_layout
 import download_images
 import platform_compat as pc
@@ -485,15 +486,47 @@ async def wait_stable(page, prev_count, timeout=8):
     return last
 
 
+_CHAPTER_FILE_RE = re.compile(r"([0-9]+)\.md\Z")
+
+
 def get_last_chapter_title(md_dir):
-    if not os.path.exists(md_dir):
+    """已落盘的最后一章：回 (标题, 章号)；没有就回 (None, 0)。
+
+    为什么不能照旧 `int(sorted(files)[-1].replace(".md",""))`：chapters/ 是用户能
+    直接编辑的目录（手改、另存、别的工具写回都会落进来），两处脏输入各是一种坏法：
+
+      · **野文件名**：随手放的 `notes.md`、旧版本备份改名成的 `第3章.md` 排在数字章
+        后面（`z` 比数字大），`int("notes")` 当场抛 ValueError。这一句在**每一轮
+        会话开头**都会问一次（main → get_last_chapter_title），于是整趟取书在还没
+        打开浏览器时就被一句英文报错带走。
+      · **坏字节**：一章被另存成 GBK、或写到一半断电，裸 `open(encoding="utf-8")`
+        抛 UnicodeDecodeError —— 与界面 / 打包那条「这一章打不开」是同一个病根，
+        那边早就换成了 `book_export.read_chapter_file` 那把尺子（坏字节换成替代符、
+        读不到才回 None），引擎自己这两处却漏了。
+
+    现在只认引擎自己写出去的 `<十进制数字>.md`，取编号最大的一份（不是字典序最大：
+    `999.md` 与 `1000.md` 并存时字典序会把 1000 判成更早的一章）。读不动时标题回
+    空串、编号照回 —— 会话要从它之后接着读，不能把这一章再取一遍。
+    """
+    if not os.path.isdir(md_dir):
         return None, 0
-    files = sorted(f for f in os.listdir(md_dir) if f.endswith(".md"))
-    if not files:
+    try:
+        names = os.listdir(md_dir)
+    except OSError:
         return None, 0
-    idx = int(files[-1].replace(".md", ""))
-    with open(os.path.join(md_dir, files[-1]), encoding="utf-8") as f:
-        title = f.readline().strip().replace("# ", "")
+    best = None                      # (章号, 文件名)
+    for fn in names:
+        m = _CHAPTER_FILE_RE.match(fn)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        if best is None or idx > best[0]:
+            best = (idx, fn)
+    if best is None:
+        return None, 0
+    idx, fn = best
+    text = book_export.read_chapter_file(os.path.join(md_dir, fn))
+    title = (text or "").split("\n", 1)[0].strip().replace("# ", "")
     return title, idx
 
 
@@ -547,18 +580,26 @@ def load_catalog_titles(catalog_path):
 
 
 def load_used_titles(md_dir):
-    """已落盘章节的标题（供续传时去重，避免重复切出同一章）。"""
+    """已落盘章节的标题（供续传时去重，避免重复切出同一章）。
+
+    读法与 get_last_chapter_title / merge_chapters 同一把尺子（book_export.
+    read_chapter_file）：一章的坏字节只换成替代符，不许在这里抛 UnicodeDecodeError。
+    这一句在每一轮会话开头与收尾的目录核对里都要跑，抛一次就是「整本书取不动」。
+    """
     used = set()
     if not os.path.isdir(md_dir):
         return used
-    for fn in sorted(os.listdir(md_dir)):
+    try:
+        names = sorted(os.listdir(md_dir))
+    except OSError:
+        return used
+    for fn in names:
         if not fn.endswith(".md"):
             continue
-        try:
-            with open(os.path.join(md_dir, fn), encoding="utf-8") as f:
-                first = f.readline().strip()
-        except OSError:
+        text = book_export.read_chapter_file(os.path.join(md_dir, fn))
+        if text is None:
             continue
+        first = text.split("\n", 1)[0].strip()
         if first.startswith("# "):
             used.add(norm_title(first[2:]))
     return used
@@ -1173,6 +1214,12 @@ def merge_chapters(md_dir, output_dir, safe_name, title, author):
 
     书名与作者同样先摘掉落单的半个代理码点：这两样一路从页面 / meta.json 过来，
     写这行标题时碰上它就整份合并稿写不出来（已经写进 out 的几章一起留成半截）。
+
+    读章这一侧与 read_chapters / 界面取正文走同一把尺子（book_export.read_chapter_file）：
+    一章被另存成 GBK、或写到一半断电留下坏字节时，裸 `open(encoding="utf-8")` 抛的
+    UnicodeDecodeError 会把**整本书的合并稿**打回 —— 书其实已经取完了，只在最后一秒
+    失败。坏字节只换成替代符、正文其余部分照旧；真读不到（权限 / 同名目录）的那一份
+    跳过，不带崩其余章节（口径与 book_export.read_chapters 一致）。
     """
     files = sorted(f for f in os.listdir(md_dir) if f.endswith(".md"))
     merged = os.path.join(output_dir, "%s.md" % safe_name)
@@ -1180,8 +1227,10 @@ def merge_chapters(md_dir, output_dir, safe_name, title, author):
         out.write(book_layout.drop_lone_surrogates(
             "# %s\n\n**%s**\n\n---\n\n" % (title, author)))
         for fn in files:
-            with open(os.path.join(md_dir, fn), encoding="utf-8") as fh:
-                out.write(fh.read())
+            text = book_export.read_chapter_file(os.path.join(md_dir, fn))
+            if text is None:
+                continue
+            out.write(text)
             out.write("\n\n---\n\n")
     return merged
 
