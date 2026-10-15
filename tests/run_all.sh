@@ -59,6 +59,15 @@ run "MCP 标准输入脏行（坏行不许带走适配器）" "$PY" tests/check_
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
+# 认指纹的读口也得防「对方回的 JSON 形状不对」。backend_identity() 读 /api/state 的
+# version / code / task，前两个是标量、怎么脏都能 str()，task 却要往下 .get("running")：
+# 非空非对象（字符串 / 数组 / 数字）时旧写法 `(task or {}).get(...)` 当场 AttributeError。
+# 这一句在 take_over_port / port_verdict 的主路上，而两个启动脚本、mac 壳、MCP 适配器
+# 全都带 --takeover —— 8770 上坐着别的本地服务、又回了个半像不像的 JSON，归藏这次启动
+# 就带着英文报错退出。Node 侧的同一把尺子本来就不抛，这一条把 Python 对齐并钉住：
+# 脏 task 当「没在跑」、接管链三个读口都不抛、且仍不碰陌生程序。只碰回环上自己起的
+# 临时服务，不联网、不开浏览器，归静态段。
+run "认指纹读口形状（task 写成字符串 / 数组 / 数字不再让接管链抛）" "$PY" tests/check_backend_identity_shape.py
 # 首次运行那一步（bootstrap.py）自己判断「Chromium 装没装」，答错一次就是重下 368MB。
 # 它原先自己抄了一份平台目录表，抄丢了官方环境变量的 `~` 写法（glob 不认 `~`，于是永远
 # 报没装）。这一条钉住「目录只有一处真相」（platform_compat）＋「~ 也认」＋「只认
