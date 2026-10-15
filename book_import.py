@@ -33,6 +33,7 @@ import uuid
 import zipfile
 from xml.etree import ElementTree as ET
 
+import book_layout
 import md_fence
 
 # 单份导入的上限。base64 会胖三分之一，前端也按这个数先拦一道。
@@ -715,6 +716,15 @@ def _rewrite_imgs(md, namemap=None, doc_dir=""):
     return _IMG_REF.sub(rep, md or "")
 
 
+# 落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）：浏览器的 JS 字符串被拦腰截断时
+# 会留下它，而 POST 来的 JSON 里 `"\ud800"` 这种转义照样能被 json.load 读成这个码点 ——
+# 于是它混进标题 / 作者 / 正文，写 utf-8 那一下抛 UnicodeEncodeError：/api/import 回 500 加
+# 一句 codec 原文，/api/clip 回「剪不动：'utf-8' codec …」，而且书目录这时候已经建出来了，
+# 书架上留一本只有半截章节的幽灵书。收口不在这里另写一把尺子：book_layout 那份
+# drop_lone_surrogates 就是「外部文本要落进 utf-8」的共用尺（读 meta 也走它），直接复用。
+_clean = book_layout.drop_lone_surrogates
+
+
 def _write_json(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -772,12 +782,22 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
 
     # 标题/作者：调用方给了就用调用方的，没给就先认 EPUB 里的 dc:title / dc:creator，
     # 最后才退回文件名。导入时前端不传这两个字段，所以 OPF 元信息才是主要来源。
-    title = ((title or "").strip() or opf_meta.get("title")
-             or os.path.splitext(name)[0].strip() or "未命名")
-    author = (author or "").strip() or opf_meta.get("creator") or ""
+    # 拼出来之后立刻过共用的清洗尺：这几项都是要落进 meta.json（ensure_ascii=False）的。
+    title = _clean((title or "").strip() or opf_meta.get("title")
+                   or os.path.splitext(name)[0].strip() or "未命名")
+    author = _clean((author or "").strip() or opf_meta.get("creator") or "")
 
-    chapters = [(t or "第 %d 章" % (i + 1), _rewrite_imgs(b).strip())
-                for i, (t, b) in enumerate(chapters) if b and b.strip()]
+    # 正文与章标题同理：先摘掉落单的半个代理码点再落盘（`f.write` 抛的是同一个错）。
+    # 顺序与旧写法一致 —— 空正文照旧丢，章序号照旧按原始下标算，正常文本一个字不动。
+    clean_chapters = []
+    for i, (t, b) in enumerate(chapters):
+        if not b or not b.strip():
+            continue
+        body = _clean(_rewrite_imgs(b)).strip()
+        if not body:
+            continue
+        clean_chapters.append((_clean(t or "") or "第 %d 章" % (i + 1), body))
+    chapters = clean_chapters
     if not chapters:
         raise ValueError("这份文件里没读出正文，换一份再试")
 

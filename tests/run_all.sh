@@ -275,6 +275,12 @@ run "导入书 EPUB 配图（同名不串门 / 相对路径 / 缺图兜底）" "
 # 加密条目（RuntimeError）同理。这一条把「压缩包坏法 → 人话 ValueError」钉死，并守住
 # 好包的章节、OPF 元信息与落盘正文一个字不变。纯内存 zip，不联网、不起服务。
 run "导入坏 EPUB（坏包 / 加密包翻成人话，好包零改动）" "$PY" tests/check_import_broken_epub.py
+# 上面两条管的是「文件本身坏」；这一条管的是「文件名 / 标题 / 作者这几个字段坏」。
+# POST 来的 JSON 里 `"\ud800"` 这种转义能被 json.load 读成一个落单的半个代理码点，
+# 旧代码把它写进 ensure_ascii=False 的 meta.json 时抛 UnicodeEncodeError —— 接口回 500
+# 加一句 codec 原文，而书目录已经建出来了，书架上留一本只有半截章节、没有 meta 的幽灵书。
+# 剪藏那条路（封面 og:image 地址）同理。收口复用 book_layout 那把共用清洗尺，离线钉住。
+run "导入 / 剪藏坏字符（半个代理码点不许打成失败、不留半截目录）" "$PY" tests/check_import_surrogate.py
 # 写作那一格从「一叠散稿」升级成「书 → 第一章 / 第二章 …」之后，多出的一份风险在账本上：
 # `_books.json` 记的是「哪几章、按什么顺序、属于哪本书」，章本身还是原来那篇稿子
 # （目录 / rev / 快照 / MCP 一字未改）。账本一坏，界面上就是「我的章不见了」这种最要命的

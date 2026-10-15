@@ -25,6 +25,7 @@ import urllib.parse
 import urllib.request
 
 import book_import
+import book_layout
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
@@ -932,8 +933,11 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None
                  "chars": art["words"],
                  "clipped_at": time.strftime("%Y-%m-%d %H:%M:%S")})
     tmp = mp + ".tmp"
+    # 这一份 meta 是「页面提取结果 + 剪藏专属字段」，落盘也是 ensure_ascii=False：
+    # 地址 / 站名 / 标题里落单的半个代理码点照样写不进去。正文那一半已经在
+    # import_book 里过过刀了，这里补上同一把尺，免得两个落盘口各防一半。
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        json.dump(book_layout.drop_lone_surrogates(meta), f, ensure_ascii=False, indent=2)
     os.replace(tmp, mp)
     info.update({"url": art["url"], "site": art["site"], "date": art["date"],
                  "words": art["words"], "chars": art["words"],
