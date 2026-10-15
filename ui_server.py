@@ -481,11 +481,42 @@ _WRITE_LOCK = threading.RLock()
 
 
 def _write_json(path, obj, mode=None):
+    """全后端小账本唯一的落盘出口：先写临时件再原子顶替，坏字符不许把这一趟带走。
+
+    落单的半个代理码点（U+D800–U+DFFF 单独出现、不成对）是账本里唯一一类「能读进来、
+    却写不出去」的值：`json.load` 读得下 `"\\ud800"` 这种转义，`json.dumps(...,
+    ensure_ascii=False)` 也原样留着它，可 utf-8 这一关当场 UnicodeEncodeError。而这些
+    账本不只本进程在写 —— 手改、云同步落盘、旧版本写回都可能让一个坏码点住进
+    config.json / 书架账 / 阅读时长 / 计划 / 划线索引里。旧写法在 `json.dump` 上直接抛
+    穿调用方（`save_cfg` 那条路尤其重：`/api/config` 连回包都发不出去），还在账本旁边
+    留一个没人认领的 `.tmp`。
+
+    收口与响应那一侧的 `_encode_body` 同一把尺子：干净的路照旧 dump 一次；真编不动
+    时才按书库那把 `book_layout.drop_lone_surrogates` 摘掉落单的坏码点重编（成对的
+    代理码点在 `json.load` 那一步已合成真字符，只有落单的才是垃圾）。任何写失败都把
+    `.tmp` 收干净再抛，旧档始终是完整的 —— 与 mindmap / board 那两个写口的规矩一致。
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+
+    def _dump(payload):
+        # 唯一的 json.dump 调用点：干净与「洗过一遍」两份负载都从这儿出去，
+        # 免得在回退里再抄一份「open + dump」把老格式写出两种样子。
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    try:
+        try:
+            _dump(obj)
+        except UnicodeEncodeError:
+            _dump(book_layout.drop_lone_surrogates(obj))
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     if mode is not None:
         try:
             os.chmod(path, mode)

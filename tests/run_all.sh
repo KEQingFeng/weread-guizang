@@ -732,6 +732,15 @@ run "小 Agent 请求体字段脏形状（history / text / ctx 写脏不再断�
 # 编不动时才按书库那把尺子摘掉落单代理码点，`_send` / `_chunk`（SSE）两个出口都走它。
 # 纯函数 + 源码接线 + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据。
 run "响应正文坏字符（半个代理码点不再把整屏甩成空响应）" "$PY" tests/check_response_utf8.py
+# 上一条钉的是响应那一侧的编码口；这一条钉同一类坏字符落盘的这一侧。`_write_json`
+# 是书架账 / config.json / 阅读时长 / 阅读计划 / 划线索引这些小账本**唯一**的写出口，
+# 而账本不只本进程在写（手改 / 云同步落盘 / 旧版本写回）：config.json 的 `export_dir`
+# 里一个落单的半个代理码点，旧写法在 `json.dump(ensure_ascii=False)` 当场 UnicodeEncodeError
+# —— `/api/config` 点保存等不到回包（异常穿出 do_POST，连接被关），账本旁边还留一个
+# 没人认领的 `.tmp`。收口与 `_encode_body` 同一把尺子：干净的路照旧 dump，编不动时才按
+# book_layout.drop_lone_surrogates 摘掉落单坏码点重编；任何写失败先收 .tmp 再抛，旧档不动。
+# 纯函数 + save_cfg 全链 + 源码接线，全在临时沙盒，不联网、不起服务，归静态段。
+run "账本落盘坏字符（半个代理码点不再让保存等不到回包 / 不留 .tmp）" "$PY" tests/check_ledger_write.py
 # 字段级脏形状还剩最后一档：数字。`_body_str` / `_body_list` 之外的订阅整理参数一直是
 # 裸的 `int(body["index"])`。它们有 `feed_do` 的兜底 catch 接着，所以不是断连，而是
 # `str(e)` 把 `invalid literal for int() with base 10: 'abc'` 原样弹给用户 ——
