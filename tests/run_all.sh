@@ -832,6 +832,16 @@ run "插图并发下载（坏清单 / 防穿越 / 原子落盘 / 判重口径 / 
 # 「只跳一条」和 download_one 的「坏路径只回 fail」一起钉住，含「这些名字确实过不了
 # 文件系统」的对照，防护栏空转。全离线，假 urlopen 顶掉网络。
 run "插图文件名脏值（NUL / 控制符 / 半个代理码点只跳一条，不带走整批）" "$PY" tests/check_download_dirty.py
+# 文件名 / 落盘都收完了，地址本身还没人看：图片地址来自 raw/*.json（从网页扒下来、用户
+# 还能手工编辑的外部数据），而默认 opener 是认得 `file:` 的 ——
+# `urllib.request.urlopen("file:///Users/…/.ssh/id_rsa")` 会把本机文件原样读回来。跳转那道
+# 闸只管 `Location`，管不了「一开始喂进来的就是 file://」；剪藏 / 平台解析 / 内置浏览器 /
+# 订阅四条取页路都显式核过 scheme，只有插图下载漏了。这一条钉住 fetchable_url 只放行
+# http/https（大小写、空白归一，半截 IPv6 也算不合法）、download_one 一个请求都不发就回
+# fail:blocked-url、collect_tasks 只当坏记录跳过；含「默认 opener 确实读得回本机文件」的
+# 对照防空转。网络层用假 urlopen 顶掉，端到端那条打本机临时端口 + file:// 指向临时目录里
+# 的假密钥文件，不联网、不碰真实书库。
+run "插图地址 scheme（file:// / data: 不许替用户取回本机文件）" "$PY" tests/check_download_scheme.py
 # 加书架（shelf_add.py）是少数几个真去改微信那边状态的动作，此前也没有测试。这一条
 # 不联网、不开浏览器，钉的是两件离线也验得实的事：书号尺子四个入口必须是同一把
 # （界面 / 本地服务 / MCP 都写 5–20 位，shelf_add.py 原来写 5–12，且 Python 的 \d 连
