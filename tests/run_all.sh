@@ -186,6 +186,16 @@ run "导入书切章（围栏代码块里的 # 不算章节）" "$PY" tests/chec
 # 账本（cache/anna.json）只存名字与数字、下载夹的路径拼法不许被人用 ../ 穿出沙盒、
 # 同一份文件按字节摘要不重复入库、认不出的格式留着原文件并写清原因。全离线。
 run "安娜的档案（账本 / 防穿越 / 去重 / 入库 / 域名）" "$PY" tests/check_anna.py
+# 上面那一条管的是账本「写了什么」，这一条管的是账本「怎么写下去」。cache/anna.json
+# 不是一个人在用：后端 /api/anna 的 search / domain / 清账会写（后端是 ThreadingHTTPServer，
+# 这一路没走 _WRITE_LOCK），窗口那一趟 anna_browser 子进程也在写。旧写法的临时件是死
+# 名字 `path + ".tmp"`，两个写手同时进来就有两种代价 —— 一个把另一个写了一半的临时件
+# 截断、最后顶上去的账两份内容交织（read_state 解不动就整份退回空账）；或者先收尾那个
+# replace 把共用的临时件搬走，后一个 replace 当场 FileNotFoundError —— 而
+# anna_browser.handle_download 是在 counted() 之后才 queue.append 的，异常一抛文件接住了
+# 却永远排不进队列。收口与 ui_server._write_json 同一把尺子（进程号 + 随机串），写失败
+# 先把临时件收干净再抛。纯函数 + 系统临时目录 + 两条真进程并写，不联网、不开浏览器。
+run "安娜账本落盘（两个写手不共用临时件 / 写失败不留 .tmp）" "$PY" tests/check_anna_atomic.py
 # 接住下载这一步只做「原样落盘 + 排队」，但最容易出的事故是同一秒里连下几份同名
 # 文件互相覆盖（用户下了四本、目录里只剩两本，队列里四条还指向同一个路径）。它不该
 # 靠真开一个窗口来验：假 download 对象 + 钉死在同一秒，离线把「谁也没被谁盖掉」钉住。

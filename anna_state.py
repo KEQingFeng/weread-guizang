@@ -17,6 +17,7 @@ import json
 import os
 import re
 import time
+import uuid
 
 try:
     import platform_compat as pc
@@ -169,16 +170,48 @@ def _drop_surrogates(v):
     return v
 
 
+# 这一个落盘口临时件的名字为什么必须**一次一个**（进程号 + 一小串随机），不能写死成
+# `path + ".tmp"`：
+#
+#   · 这一份账本有两个**进程**在写 —— 后端请求线程（`/api/anna` 的 search / domain /
+#     清账）与窗口那一趟子进程（`anna_browser.py` 领关键词、接住下载、收尾报数）。
+#     后端又是 `ThreadingHTTPServer`，同一进程里两个请求也能同时进来
+#     （`write_state` 这一路没走 `_WRITE_LOCK`）。
+#   · 临时件同名时，后来者 `open(..., "w")` 会把前一个人已经写了一半的临时件截断，
+#     两边各自按自己的偏移往下写，最后 `os.replace` 把**两份内容交织在一起**的那一份
+#     顶成正式账本。`read_state` 解不动就整份退回空账，界面上看到的是「入库记录全没了」
+#     —— 而账本是刚刚两个进程各自按规矩写的。
+#   · 还有当场抛异常的那一种：先收尾的那一个 `os.replace` 会把共用的临时件整个搬走，
+#     后一个写手轮到自己那一句时临时件已经不在，抛 `FileNotFoundError`。这条异常从
+#     `counted()` / `write_state()` 直接穿出去，而 `anna_browser.handle_download` 是在
+#     `counted()` **之后**才 `queue.append(...)` 的 —— 文件接住了却永远排不进队列
+#     （书架上就是没有这本，得等下一次「补收」）。
+#   · 口径与 `flomo_notes`（带进程号）和 `ui_server._write_json`（进程号 + 随机串）
+#     一致；这里取两者里更严的那一档，因为这条路上真的有两个进程。
 def _atomic_write(path, payload):
-    """原子落盘，并把摘过坏字符的那份回给调用方（界面回话要用它，不能各说各的）。"""
+    """原子落盘，并把摘过坏字符的那份回给调用方（界面回话要用它，不能各说各的）。
+
+    临时件一次一个名字、写失败先收干净再抛：理由在函数上面那段注释里。
+    这只解决「账本被写坏」，不解决「读—改—写互相覆盖」——两个写手先后落盘时后一个
+    仍可能基于旧读数，所以计数仍以最后一次为准。
+    """
     payload = _drop_surrogates(payload)
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except BaseException:
+        # 与 export_precise._write_json / sync._write_atomic 同一档：窗口那一趟是会被
+        # 停止键收走的子进程，KeyboardInterrupt 这类不继承 Exception，也要收干净。
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return payload
 
 
