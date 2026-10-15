@@ -16591,7 +16591,13 @@ function readerSkeleton() {
 function wireReader(p) {
   p.addEventListener('click', e => {
     // 设置面板里的分段按钮先认（它们在 #rdPop 里，不是普通工具钮）。
-    const seg = e.target.closest && e.target.closest('.rdseg button');
+    //
+    // 这里认的是 `[data-rd]`（阅读偏好那一行自己的记号），**不是** `.rdseg` 这个类名。
+    // `.rdseg` 只是「分段控件长什么样」的外观类，小结的模式条 #aiSumStyle 也借了它。
+    // 按类名一把抓时，点「学习理解」会先落进这里：rdPickCfg 从 #aiSumStyle 上取不到
+    // data-rd，拿着 undefined 当键往 rdCfg 里塞一个 'undefined' 键，然后 return ——
+    // 小结那一侧再也收不到这一下（真机套件 check_ai_summary_ui 里红的就是这条）。
+    const seg = e.target.closest && e.target.closest('.rdseg[data-rd] button');
     if (seg && p.contains(seg)) { rdPickCfg(seg); return; }
     // 笔记栏：一行就是一句划线，点整行跳回正文；行上那几颗小钮另有分工。
     const ntrow = e.target.closest && e.target.closest('.ntrow');
@@ -17063,6 +17069,10 @@ function rdPopToggle(on) {
 function rdPickCfg(seg) {
   const segs = seg.closest('.rdseg'); if (!segs) return;
   const key = segs.dataset.rd;
+  // 没有 data-rd 的分段不是阅读偏好（#aiSumStyle 这种借样子的）。这里自己也要挡住：
+  // 少了这道，任何一个漏带记号的分段都会在 rdCfg 上留下一个 'undefined' 键
+  // （值若不是 undefined，那一份脏账还会跟着写进 localStorage）。
+  if (!key) return;
   let v = seg.dataset.v;
   if (key === 'size' || key === 'w' || key === 'lh') v = +v;
   rdCfg[key] = v;
@@ -17080,7 +17090,10 @@ function rdApplyCfg() {
   wrap.style.setProperty('--rd-font', rdCfg.font === 'serif' ? RD_SERIF : RD_SANS);
   if (rdCfg.theme === 'auto') wrap.removeAttribute('data-rdtheme');
   else wrap.setAttribute('data-rdtheme', rdCfg.theme);
-  wrap.querySelectorAll('.rdseg').forEach(seg => {
+  // 只同步真正是阅读偏好那几行（[data-rd]）。不带记号的 .rdseg 是别人借样子用的：
+  // 小结模式条 #aiSumStyle 的选中态由 sumChips 自己管，这里一并去 toggle 会把
+  // 「学习理解 / 归纳」身上那颗 .on 抹掉 —— 用户改个字号，模式高亮就没了。
+  wrap.querySelectorAll('.rdseg[data-rd]').forEach(seg => {
     const key = seg.dataset.rd;
     seg.querySelectorAll('button').forEach(b => {
       b.classList.toggle('on', String(rdCfg[key]) === b.dataset.v);
