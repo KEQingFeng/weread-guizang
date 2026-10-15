@@ -13,7 +13,12 @@
     `titles.get(list)` 都抛 unhashable，导出与导图一起坏；
   · 顶层 `created_at: 1e400` 是合法 JSON（解析成 inf）→ `json.dumps` 原样印成
     `Infinity`，那不是合法 JSON，界面 `JSON.parse` 整份 /api/mynotes 直接失败；
-  · `color` 给数字 → 写盘那条 `_hex` 的 `(v or "").strip()` 抛 AttributeError。
+  · `color` 给数字 → 写盘那条 `_hex` 的 `(v or "").strip()` 抛 AttributeError；
+  · 顶层 `note` 给数字 / `tpl` 给对象 → `export_markdown` 的 `(doc.get("note") or
+    "").strip()` 抛 AttributeError（同一个「读口没收、下游才炸」）。
+
+同一把尺子还管着 `note_templates.json`：`get_template` / `apply_template` 拿到的
+`body` 给成对象时，`re.sub(..., body)` 抛 TypeError（界面点「套用模板」没反应）。
 
 这一条把这几样一起喂进 `load_notes`，要求：读得开、条目一条不少、认得出的字段照认，
 然后 `export_markdown` / `export_notes` / `note_tree` / `mindmap` 四条下游都不抛，
@@ -24,6 +29,8 @@
 import json
 import os
 import pathlib
+import re
+import shutil
 import sys
 import tempfile
 
@@ -61,6 +68,11 @@ def try_call(fn):
 
 DIRTY = {
     "created_at": 1e400,                             # 合法 JSON，解析成 inf
+    # 顶层这两个字符串字段（这本书总的一句话备注、套用的模板 id）也会被手改 / 云同步
+    # 落回别的形状：修前 load_notes 不收它们，export_markdown 的
+    # `(doc.get("note") or "").strip()` 在 int / 对象上当场 AttributeError。
+    "note": 123,
+    "tpl": {"a": 1},
     "marks": [
         {"id": "m1", "text": "第一句", "ch": ["0001.md"],
          "created_at": "昨天", "tag": "point", "color": 5},
@@ -108,6 +120,9 @@ with tempfile.TemporaryDirectory(prefix="gz-notes-dirty-") as td:
         (doc.get("created_at"), doc.get("updated_at")))
     chk("R9 坏 refs（字符串 / 对象）当空表，条目本身照留",
         doc["entries"][0]["refs"] == [] and len(doc["entries"]) == 2, doc["entries"])
+    chk("R10 顶层 note / tpl 也收成字符串（不再是 int / 对象，下游 .strip() 才不抛）",
+        isinstance(doc.get("note"), str) and isinstance(doc.get("tpl"), str),
+        (type(doc.get("note")).__name__, type(doc.get("tpl")).__name__))
 
 # ── 2. 下游四条路都不抛（修前 export_markdown 在排序上抛） ────────
 with tempfile.TemporaryDirectory(prefix="gz-notes-down-") as td:
@@ -172,6 +187,37 @@ with tempfile.TemporaryDirectory(prefix="gz-notes-loop-") as td:
             and all(isinstance(m["created_at"], int) for m in back["marks"]), back["marks"])
     else:
         chk("L1 脏档过一遍存读回环：条目数不缩水、时间戳是整数", False, err)
+
+# ── 6. 自定义模板文件的形状：body 给成对象，套用不该抛 ──────────────
+# note_templates.json 跨书共用、手改得动。写入口 save_template 走 _clip，读口
+# _custom_list 原来原样返回：`"body": {"a":1}` 一旦落回盘上，`get_template` 把它交给
+# `apply_template` 的 `re.sub(..., body)` 就是 TypeError（界面点「套用模板」没反应）。
+print("\n── 6. 自定义模板 body 形状 ──")
+cache = tempfile.mkdtemp(prefix="gz-notes-tpl-")
+try:
+    with open(os.path.join(cache, bn.TPL_FILE), "w", encoding="utf-8") as f:
+        json.dump({"items": [
+            {"id": "user_x", "name": {"n": 1}, "desc": [1], "body": {"a": 1},
+             "created_at": 111, "updated_at": 222}]}, f)
+    ok_ctl, err_ctl = try_call(lambda: re.sub(r"\{text\}", lambda m: "", {"a": 1}))
+    chk("T0 对照：body 给 dict 时 re.sub 确实 TypeError（证明这不是空想）",
+        not ok_ctl and "TypeError" in err_ctl, err_ctl)
+    tpl = bn.get_template(cache, "user_x")
+    chk("T1 get_template 拿到的 body / name / desc 都是字符串",
+        bool(tpl) and all(isinstance(tpl.get(k), str) for k in ("body", "name", "desc")),
+        tpl)
+    ok, err = try_call(lambda: bn.apply_template(tpl, {}))
+    chk("T2 apply_template 不抛（body 已收成字符串）", ok, err)
+    listed = [t for t in bn.templates(cache) if not t.get("official")]
+    chk("T3 templates 列表里的自定义模板字段也都是字符串",
+        bool(listed) and all(isinstance(t.get(k), str)
+                             for t in listed for k in ("body", "name", "desc")), listed)
+    kept = bn._custom_list(cache)[0]
+    chk("T4 收口不弄丢模板的其它键（created_at / updated_at 原样留着）",
+        kept.get("id") == "user_x" and kept.get("created_at") == 111
+        and kept.get("updated_at") == 222, kept)
+finally:
+    shutil.rmtree(cache, ignore_errors=True)
 
 print()
 print("笔记读盘脏字段收口：通过 %d 项，失败 %d 项" % (PASSED, len(FAIL)))
