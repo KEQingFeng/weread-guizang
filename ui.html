@@ -9600,6 +9600,9 @@ function paneEl(name) {
     rdTimeStop();          // 离开阅读器就停表
     rdLayersTuck();        // 顺手把这一本书的浮层收掉（见下面那段注释）
   }
+  if (changed && shownPane === 'browse' && name !== 'browse') {
+    bzBusy(false);         // 离开内置浏览器：那行「正在取回这一页」要收掉，别带到别页
+  }
   for (const k in PANES) PANES[k].hidden = (k !== name);
   // 阅读器要「一屏刚好」：正文自己在栏内滚，整页不许跟着滚。切到阅读器时
   // 把 main 底部那段呼吸留白收窄（配合 .rdwrap 的定高），离开时再还回去。
@@ -15880,6 +15883,14 @@ function bzBar() {
   if (fwd) fwd.disabled = BZ.at >= BZ.hist.length - 1;
 }
 
+/** 那一行「正在取回这一页」的唯一开关：只在真去取一页时亮、取回来 / 离开这一屏就收。
+ *  单独开一个口是为了「收尾只有一处」—— 上一版在 bzLoad 里无条件掀开，见那段注释。 */
+function bzBusy(on) {
+  const p = PANES.browse;
+  const l = p && p.querySelector('#bzLoad');
+  if (l) l.classList.toggle('off', !on);
+}
+
 function bzLoad(url, push) {
   if (!url) return;
   if (push !== false) bzPush(url);
@@ -15887,12 +15898,14 @@ function bzLoad(url, push) {
   if (!p) return;
   const f = p.querySelector('#bzFrame');
   const inp = p.querySelector('#bzUrl');
-  const load = p.querySelector('#bzLoad');
   if (inp) inp.value = url;
-  if (load) load.classList.remove('off');
   // 同一地址不重发：/api/state 每 2.6 秒一轮，force 那几趟会走到这里重画这一屏，
   // 不拦就成了「每几秒刷一次页面」。
   if (f && f.dataset.src !== url) {
+    // 只有真去取这一页时才亮那一行。这里原来是无条件 remove('off') 的，而同一地址又被
+    // 上面那句拦住不重发 —— 没有 iframe 的 load 事件来收，提示就永久压在页面上
+    // （issue #131：打开过一次内置浏览器后，后面的页面中间一直留着这行小字）。
+    bzBusy(true);
     f.dataset.src = url;
     f.src = '/api/browse?url=' + encodeURIComponent(url);
   }
@@ -15943,7 +15956,7 @@ function wireBrowse(p) {
   q('#bzReload').onclick = () => {
     const f = q('#bzFrame');
     if (f && f.dataset.src) {
-      q('#bzLoad').classList.remove('off');
+      bzBusy(true);
       f.src = '/api/browse?url=' + encodeURIComponent(f.dataset.src);
     }
   };
@@ -15953,10 +15966,7 @@ function wireBrowse(p) {
     if (u) bzLoad(u, true);
   };
   q('#bzUrl').addEventListener('keydown', e => { if (e.key === 'Enter') q('#bzGo').click(); });
-  q('#bzFrame').addEventListener('load', () => {
-    const l = q('#bzLoad');
-    if (l) l.classList.add('off');
-  });
+  q('#bzFrame').addEventListener('load', () => bzBusy(false));
 }
 
 // 网页里点链接 → 那一段补的脚本 postMessage 回来 → 这里接着取下一页。
