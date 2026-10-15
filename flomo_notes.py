@@ -43,6 +43,15 @@ VERSION = 1
 # 这个闸只挡「导出的 HTML 坏掉导致把整页当一条」这种事故。
 MAX_MD = 20000
 
+# 单条笔记「字数」这一格能信到多大。导入那条正文本来就夹在 MAX_MD（两万）里，
+# 手写的也是人在敲；超过一千万只可能是越界脏值 —— 手改 / 云同步 / 旧版本能把
+# `10**400` 这种合法 JSON 大整数落进 words，`_as_int` 认得出它、原样收下，
+# 于是记忆画像那句 `round(总字数 / 条数, 1)` 先做一次大整数转 float，当场
+# OverflowError，画像那一页（JSON 与 Markdown 两条路）整页打不开。
+# 这个数只是「明显不可能是真的」的分界，不是内容上限：越界值一律按正文重算，
+# 而 `words_of` 是唯一那把尺 —— 一条正文真有这么长时重算出来的就是它本身。
+MAX_WORDS = 10 ** 7
+
 # 单个附件落盘的上限：导出包里的图通常是手机拍的 1~3 MB，超过 12 MB 的多半是
 # 原图或视频抽帧，收进来只会让本地目录虚胖，不如跳过并出声。
 MAX_ATT_BYTES = 12 * 1024 * 1024
@@ -443,7 +452,8 @@ def _clean_memo(m):
     直接 `int()` / `for` 遍历：`"words": "abc"` 让 /api/flomo/stats 与记忆画像抛
     ValueError，`"ts": "oops"` 让列表页排序处抛穿请求，`"tags": "读书"` 被逐字拆成
     两个标签、数字全是假的。条目本身一律留下，只把认不出的字段回成安全值。
-    字数认不出时按正文重算 —— `words_of` 是唯一那把尺，比硬塞 0 诚实。
+    字数认不出（`"abc"`）或认得出但越界（负数 / 大得明显不是这条正文的，如
+    `10**400`）都按正文重算 —— `words_of` 是唯一那把尺，比硬塞 0 诚实。
 
     文本字段最后再过一遍 `drop_lone_surrogates`：手改 / 云同步 / 旧版本落下的那份
     账本里，正文可能夹着半个代理码点（JSON 里那种落单的代理转义，合法 JSON，
@@ -462,7 +472,11 @@ def _clean_memo(m):
     out["book"] = str(m.get("book") or "")
     out = drop_lone_surrogates(out)
     words = _as_int(m.get("words"), None)
-    out["words"] = words if words is not None else words_of(out["md"])
+    # 认不出（None）与认得出但越界（负数 / 大得不可能）走同一条退路：按正文重算。
+    # 只把「明显不是这条正文的字数」换掉，正常值一个字不动（"42" 仍是 42）。
+    if words is None or words < 0 or words > MAX_WORDS:
+        words = words_of(out["md"])
+    out["words"] = words
     return out
 
 
