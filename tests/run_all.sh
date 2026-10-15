@@ -234,6 +234,10 @@ run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_v
 # 编辑器新插的段落带着新 id，却按位置认领了旧段落的说话人 / 置信度。两条都在纯函数与
 # 临时沙盒里当场钉住，不联网、不起浏览器。
 run "视频转笔记归属（章节起点不可用 / 新段不继承旧段字段）" "$PY" tests/check_video_chapters.py
+# 「视频转笔记」顶部那两扇门（哔哩哔哩 / YouTube）开在内置浏览器这一层，不另开弹窗、也不
+# 跳系统浏览器 —— 那正是需求想避免的。名册只有 VT_PORTALS 一处，按钮与接线都照它来；这条
+# 静态钉住名册、顶部渲染、接线与「复用同一条 /api/browse」四件事，纯文件走查 + 离线纯函数。
+run "视频转笔记顶部入口（哔哩哔哩 / YouTube 走内置浏览器）" "$PY" tests/check_video_portal.py
 # 「重建」读的是磁盘上那份 summary.json（用户改得动），不是模型刚给的那一份：一章被
 # 改成字符串、或少了 title，`_chapter_bodies` 原先就 AttributeError / KeyError，而
 # /api/video 只接 ValueError —— 异常穿出去就是连接被甩（界面上是「点了没反应」）。
