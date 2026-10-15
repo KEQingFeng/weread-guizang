@@ -1998,6 +1998,14 @@ def build_apkg(book_id, title):
     if not items:
         raise RuntimeError("这本没有划线或想法（确定书里有笔记？或接口 Key 未填）")
     book_id = resolved or book_id
+    # 卡包最终要落成一个真 SQLite（genanki 写盘），而划线正文来自账本 / 官方网关：
+    # 里面夹一个落单的半个代理码点（JSON 存得下、utf-8 编不出）就会让整包建不出来，
+    # 用户点「导出卡包」只看到一句 Python 报错。书名与每张卡的两面都过一遍共用那把
+    # 尺子（book_layout.drop_lone_surrogates，与 meta / 下载头同一个口径）：坏字符
+    # 摘掉、好字一个不改。book_id 也可能不是字符串，一并收成能进 sha1 的文本。
+    clean = book_layout.drop_lone_surrogates
+    title = clean(title) if isinstance(title, str) else ""
+    book_id = clean(book_id) if isinstance(book_id, str) else str(book_id)
     safe = re.sub(r"[^\w\u4e00-\u9fff-]", "_", (title or book_id))[:40] or book_id
     model = genanki.Model(
         int(hashlib.sha1(("gz" + book_id).encode()).hexdigest()[:8], 16),
@@ -2012,10 +2020,10 @@ def build_apkg(book_id, title):
              "line-height:1.75;color:#1a1e26;background:#fff;text-align:left;padding:18px}"
              ".q{font-weight:600}.a{color:#3a4150}.src{color:#8b93a3;font-size:13px;margin-top:10px}"))
     deck_id = int(hashlib.sha1(("gzd" + book_id).encode()).hexdigest()[:8], 16)
-    deck = genanki.Deck(deck_id, f"归藏·{title or book_id}")
+    deck = genanki.Deck(deck_id, clean(f"归藏·{title or book_id}"))
     seen = set()
     for x in items:
-        t = x["text"].strip()
+        t = clean(str(x.get("text") or "")).strip()
         if not t or t in seen:
             continue
         seen.add(t)
@@ -2025,8 +2033,8 @@ def build_apkg(book_id, title):
                 when = time.strftime("%Y-%m-%d", time.localtime(x["at"]))
             except Exception:
                 when = ""
-        back = (f'<div class="src">{x.get("kind","")} · 《{title or book_id}》'
-                + (f' · {when}' if when else '') + '</div>')
+        back = clean(f'<div class="src">{x.get("kind","")} · 《{title or book_id}》'
+                     + (f' · {when}' if when else '') + '</div>')
         deck.add_note(genanki.Note(model=model, fields=[t, back]))
     os.makedirs(APKG_DIR, exist_ok=True)
     dest = os.path.join(APKG_DIR, safe + ".apkg")
