@@ -4833,6 +4833,27 @@ function coverField(im) {
   im.src = u;
 }
 
+/** 叠卡那一面：只点亮扇形里看得见的那几张（正中 + 左右各三），不是整批。
+ *
+ *  fillGrid() 一次把**整批**都塞进舞台（SHELF_BATCH = 60 本），applyStack() 只把
+ *  离得远的那几本用 `opacity:0` 的 `saway` / `sgone` 甩到画外 —— 它们仍留在文档里、
+ *  仍有布局盒，`.sstage>.wcard` 又是 `position:absolute`，于是 offsetParent 不为 null。
+ *  原先这里是把整个舞台交给 paintCovers、margin 传无穷大，以为「叠卡一次只摊 7 张」，实测进一次
+ *  叠卡书架 60 个 `/api/cover` 一次性全发出去（与瀑布那一版修的是同一个病，只是漏了这一面）。
+ *
+ *  在不在扇形里按 applyStack() 自己打的那两个类判断，不在这儿另算一遍距离：判据只留一处，
+ *  容器查询把 ±3 收窄成 ±2 / ±1 时也不会分叉。翻页时 applyStack() 刚重打完类，调用方紧跟
+ *  着再点一次这里，新进扇形的那几张就赶上了。 */
+function paintStackCovers(stage) {
+  if (!stage) return 0;
+  let k = 0;
+  for (const c of stage.children) {
+    if (c.classList.contains('saway') || c.classList.contains('sgone')) continue;
+    for (const im of c.querySelectorAll('img[data-cover]')) { coverField(im); k++; }
+  }
+  return k;
+}
+
 /** 「最近读过」说成人话，别丢一串日期给用户自己算 */
 function daysAgo(ts) {
   if (!ts) return '';
@@ -10405,6 +10426,9 @@ function shelfStep(dir) {
   if (document.querySelector('.wcard.open')) closeAllCards();
   shelfCursor = want;
   applyStack(stage);
+  // 翻进来的那几张刚进扇形，封面得跟着点亮（applyStack 只挪位置，不碰 img）——
+  // 不补这一下，翻过去看见的就是一张没封面的空卡，要等下一次重画才亮。
+  paintStackCovers(stage);
   // 快翻到已经进来的那批末尾了，把后面的补进来（叠卡不摆「加载更多」那颗钮）。
   // 补一批是 O(已铺数量) 的活，连翻时不能每一下都同步干 —— 攒到这一串翻完再补，
   // 否则「翻到批尾」那几下会卡。翻页本身已经先走完，观感不受影响。
@@ -10465,9 +10489,9 @@ function renderShelfStack(wrap, shown) {
   }
   fillGrid(box.querySelector('.sstage'), shown);
   applyStack(box.querySelector('.sstage'));
-  // 叠卡一次摊 7 张（正中一张 + 两侧各三张），都在视口里，没有「看不见的那一批」，
-  // 所以这里直接把这一屏的封面都点亮，不走瀑布那套按视口预留。
-  paintCovers(box.querySelector('.sstage'), Infinity);
+  // 叠卡只点亮扇形里看得见的那 7 张：fillGrid 把整批都塞进舞台，剩下的用 opacity:0
+  // 甩在画外、仍在文档里，按「在视口里」判会把一整批的封面全砸出去（见 paintStackCovers）。
+  paintStackCovers(box.querySelector('.sstage'));
 }
 
 /** 键控复用：同一本书继续用老节点（封面已解码、摊开动画已放完），
@@ -11120,14 +11144,13 @@ function localCard(b, back) {
     return d;
   };
   if (b.cover) {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.src = '/api/cover?book=' + encodeURIComponent(id);
+    // 和书架那一面同一条规矩：地址先暂存在 data-cover 上，等网格挂进文档、由
+    // 调用方 paintCovers(grid) 按「滚到眼前」点亮。这一格同样是一屏整批铺开
+    // （renderLocalGrid 一次把本地书全塞进 .sgrid），在游离节点上赋 src 等于
+    // 进一次本地书架就把这一批封面全砸出去。
+    const img = extCoverImg('/api/cover?book=' + encodeURIComponent(id));
     img.onerror = () => img.replaceWith(ph());
     img.onload = () => img.classList.add('in');
-    if (img.complete && img.naturalWidth) img.classList.add('in');
     cv.append(img);
   } else {
     cv.append(ph());
@@ -11331,6 +11354,9 @@ function renderLocalGrid(body) {
   const cur = [...grid.children];
   if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
   if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+  // 封面等这一屏真挂上文档之后才点亮（localCard 只把地址暂存在 data-cover 上）。
+  // paneEl 在 viewPane 里已经把这一格显出来，所以这时候量得到布局盒。
+  paintCovers(grid);
 }
 
 /* ── 导入自己的书 ─────────────────────────
@@ -11778,6 +11804,8 @@ function renderClipShelf() {
   const cur = [...grid.children];
   if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
   if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+  // 与本地书架同一处：卡片铺进文档之后再按「滚到眼前」点亮封面
+  paintCovers(grid);
 }
 
 function wireClip(p) {
