@@ -122,6 +122,36 @@ def _dump_json(path, obj, indent=None):
         raise
 
 
+def _atomic_write_text(path, text):
+    """正文类落盘的原子写口：先写同目录 .tmp，写完再一次性改名。
+
+    与 `_dump_json` 同一条规矩，只是写的是纯文本 —— 章节 `.md` 与整本合并稿。
+    取书是会被界面停止键强杀的长任务，而 `open(path, "w")` 一进去就把旧内容截断：
+
+      · 章节 `.md`：恰好在写完前被杀，盘上剩半截正文。它的第一行 `# 章名` 却
+        完好无损，续传时 `load_used_titles` 照样把这一章算成「已写出来」，
+        正文缺的那半截再也没人补 —— 不报错、不丢文件，只是少了一半内容。
+      · 整本合并稿：用户等完整场取书，最后一步被杀，`<书名>.md` 是个半本。
+
+    「旧档全程完整、新档要么完整要么不出现」之后，被杀的章节文件压根不出现
+    （`.tmp` 不以 `.md` 结尾，`load_used_titles` 不认它），重跑自然会补这一章。
+
+    `BaseException`：中止信号走的是 `SystemExit` / `KeyboardInterrupt` 这一类，
+    它们不继承 `Exception`，只兜 `Exception` 会在退出路径上留下 .tmp。
+    """
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_progress(book_dir, **fields):
     """把「现在翻到第几页、写了多少章多少字」落盘，供界面画进度条。
 
@@ -1189,16 +1219,16 @@ def save_chapter(ch_title, blocks, ch_idx, md_dir, raw_dir):
     if text_len == 0 and not img_records:
         return 0, []
     # 章名与正文都来自页面（canvas 抓回来的一行行字），可能夹着半个代理码点。
-    # 这三份落盘全是 ensure_ascii=False / 显式 utf-8，留一个坏码就是整章写不出去：
-    # `f.write(body)` 抛在半途，盘上还会剩一份被截断的 .md（旧内容已经 truncate）。
-    # 写之前统一摘掉，坏字符只丢它自己，这一章照常落地。
+    # 两份落盘全是 ensure_ascii=False / 显式 utf-8，留一个坏码就是整章写不出去：
+    # `f.write(body)` 抛在半途，旧内容已经 truncate。写之前统一摘掉，坏字符只丢它
+    # 自己，这一章照常落地。两份都走原子写口（_atomic_write_text / _dump_json）：
+    # 写到一半被杀时盘上不会留下一个「第一行章名完好、后半截正文没了」的 .md ——
+    # 那种半截章会被续传的 load_used_titles 当成已写出来，缺的正文再没人补。
     body = book_layout.drop_lone_surrogates(body)
-    with open(os.path.join(md_dir, f"{ch_idx:04d}.md"), "w", encoding="utf-8") as f:
-        f.write(body)
+    _atomic_write_text(os.path.join(md_dir, f"{ch_idx:04d}.md"), body)
     raw_rec = book_layout.drop_lone_surrogates(
         {"title": ch_title, "images": img_records, "text_len": text_len})
-    with open(os.path.join(raw_dir, f"{ch_idx:04d}.json"), "w", encoding="utf-8") as f:
-        json.dump(raw_rec, f, ensure_ascii=False)
+    _dump_json(os.path.join(raw_dir, f"{ch_idx:04d}.json"), raw_rec)
     return text_len, img_records
 
 
@@ -1215,6 +1245,11 @@ def merge_chapters(md_dir, output_dir, safe_name, title, author):
     书名与作者同样先摘掉落单的半个代理码点：这两样一路从页面 / meta.json 过来，
     写这行标题时碰上它就整份合并稿写不出来（已经写进 out 的几章一起留成半截）。
 
+    落盘走 `_atomic_write_text`：先把整份拼进内存、再一次改名过去。合并稿是在一趟
+    取书的最后一秒才写的，老写法 `open(merged, "w")` 一进去就把上一版截断 —— 用户
+    等了整场，最后一步被杀，`<书名>.md` 是个半本，下一次导出前它一直躺在那里像个
+    成品。拼好再改名之后，被杀的整本要么还是上一版、要么是完整的新版，不会半本。
+
     读章这一侧与 read_chapters / 界面取正文走同一把尺子（book_export.read_chapter_file）：
     一章被另存成 GBK、或写到一半断电留下坏字节时，裸 `open(encoding="utf-8")` 抛的
     UnicodeDecodeError 会把**整本书的合并稿**打回 —— 书其实已经取完了，只在最后一秒
@@ -1223,15 +1258,15 @@ def merge_chapters(md_dir, output_dir, safe_name, title, author):
     """
     files = sorted(f for f in os.listdir(md_dir) if f.endswith(".md"))
     merged = os.path.join(output_dir, "%s.md" % safe_name)
-    with open(merged, "w", encoding="utf-8") as out:
-        out.write(book_layout.drop_lone_surrogates(
-            "# %s\n\n**%s**\n\n---\n\n" % (title, author)))
-        for fn in files:
-            text = book_export.read_chapter_file(os.path.join(md_dir, fn))
-            if text is None:
-                continue
-            out.write(text)
-            out.write("\n\n---\n\n")
+    parts = [book_layout.drop_lone_surrogates(
+        "# %s\n\n**%s**\n\n---\n\n" % (title, author))]
+    for fn in files:
+        text = book_export.read_chapter_file(os.path.join(md_dir, fn))
+        if text is None:
+            continue
+        parts.append(text)
+        parts.append("\n\n---\n\n")
+    _atomic_write_text(merged, "".join(parts))
     return merged
 
 
