@@ -227,6 +227,15 @@ run "安娜接住下载（同名不覆盖 / 路径护栏）" "$PY" tests/check_a
 # ENAMETOOLONG（用户看到的是「这份没接住」）。这一条把两条上限、真建一次文件、
 # 不切半个字、幂等、追加时间戳后仍在 255 内，全部离线钉住。
 run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY" tests/check_anna_name.py
+# 上面三条管的是账本与文件名「写出去」那一侧，这一条管口令条「读回来」那一侧。
+# cache/anna_cmd.json 是界面递给窗口的「该搜这个词」牌子，会被手改、云同步落回、或
+# 留着旧版本写下的脏值。`term` 要拿去做三件事：拼搜索地址（quote 把关键词编成 utf-8，
+# 落单的半个代理码点在那一步抛 UnicodeEncodeError，而这一句在 check_cmd 的 try 之外，
+# 异常直接穿出去把整扇窗口带成「这一趟没走通」）、打进日志（stdout 抛同一个错，会被
+# catch 成一句假的「这一页没打开」）、写回账本（这一路有 _drop_surrogates 兜着）。
+# 收口放在读口（唯一入口，洗的尺子仍是 clean_term）与 search_url 那把尺子上。纯函数 +
+# 假页对象 + 临时沙盒，不联网、不开浏览器、不起服务，归 --fast 静态段。
+run "安娜口令条读口（半码点脏牌不带窗口 / 搜索地址不抛 / 干净词不改）" "$PY" tests/check_anna_cmd.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 # 上面那一套走的是正常输入（章节起点递增、每段都带 id）。这一条专门打两种「归属」错：
