@@ -11113,14 +11113,13 @@ function localCard(b, back) {
     return d;
   };
   if (b.cover) {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.src = '/api/cover?book=' + encodeURIComponent(id);
+    // 和书架那一面同一条规矩：地址先暂存在 data-cover 上，等网格挂进文档、由
+    // 调用方 paintCovers(grid) 按「滚到眼前」点亮。这一格同样是一屏整批铺开
+    // （renderLocalGrid 一次把本地书全塞进 .sgrid），在游离节点上赋 src 等于
+    // 进一次本地书架就把这一批封面全砸出去。
+    const img = extCoverImg('/api/cover?book=' + encodeURIComponent(id));
     img.onerror = () => img.replaceWith(ph());
     img.onload = () => img.classList.add('in');
-    if (img.complete && img.naturalWidth) img.classList.add('in');
     cv.append(img);
   } else {
     cv.append(ph());
@@ -11324,6 +11323,9 @@ function renderLocalGrid(body) {
   const cur = [...grid.children];
   if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
   if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+  // 封面等这一屏真挂上文档之后才点亮（localCard 只把地址暂存在 data-cover 上）。
+  // paneEl 在 viewPane 里已经把这一格显出来，所以这时候量得到布局盒。
+  paintCovers(grid);
 }
 
 /* ── 导入自己的书 ─────────────────────────
@@ -11761,6 +11763,8 @@ function renderClipShelf() {
   const cur = [...grid.children];
   if (cur.length !== order.length || cur.some((c, i) => c !== order[i])) grid.append(...order);
   if (grid.parentNode !== wrap) wrap.replaceChildren(grid);
+  // 与本地书架同一处：卡片铺进文档之后再按「滚到眼前」点亮封面
+  paintCovers(grid);
 }
 
 function wireClip(p) {
