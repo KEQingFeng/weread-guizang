@@ -1091,10 +1091,27 @@ def _clean_summary(payload, title):
             "chapters": chapters[:24]}
 
 
+def _children_list(item, key="children"):
+    """节点里的「孩子」字段：只认列表（元组也收），标量一律当没有孩子。
+
+    模型偶尔把本该是数组的 `children` 写成一串数字（`"children": 1`）或一个对象，
+    照原来的 `for c in (item.get("children") or [])` 会在 int 上抛 TypeError。
+    `build_mindmap` 把这一抛当成「模型两次都不配合」，于是一张**除了这一个字段
+    全是好的**导图被整个丢掉、退成摘要兜底 —— 用户看到的是「导图没生成成」，
+    其实模型给的六个分支就在手里。字段坏不该带走整张图，坏的那一个当空即可。
+    """
+    v = item.get(key) if isinstance(item, dict) else None
+    return v if isinstance(v, (list, tuple)) else []
+
+
 def _normalize_nodes(nodes):
-    """节点白名单化：只留约定的六个字段，type 不在枚举里就按位置猜一个。"""
+    """节点白名单化：只留约定的六个字段，type 不在枚举里就按位置猜一个。
+
+    `nodes` 本身也可能是标量（`"nodes": 1`，手改过的导图 / 模型跑偏的回话）：
+    先认形状再迭代，非列表一律当空表，绝不因为顶层一个坏字段抛出去。
+    """
     out = []
-    for item in (nodes or []):
+    for item in (nodes if isinstance(nodes, (list, tuple)) else []):
         if not isinstance(item, dict):
             continue
         nid = str(item.get("id") or "").strip()
@@ -1111,7 +1128,7 @@ def _normalize_nodes(nodes):
             anchor = None
         out.append({"id": nid[:60], "label": label[:120], "type": kind,
                     "summary": str(item.get("summary") or "").strip()[:800],
-                    "children": [str(c) for c in (item.get("children") or [])
+                    "children": [str(c) for c in _children_list(item)
                                  if str(c or "").strip()][:40],
                     "time_anchor": anchor})
     return out
@@ -1164,7 +1181,7 @@ def _flatten_tree(blob, title):
         if kind not in MINDMAP_TYPES:
             kind = "root" if depth == 0 else ("theme" if depth == 1 else "leaf")
         kids = []
-        for child in (item.get("children") or []):
+        for child in _children_list(item):
             cid = walk(child, depth + 1)
             if cid:
                 kids.append(cid)
