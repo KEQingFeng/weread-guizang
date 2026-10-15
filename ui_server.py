@@ -3409,6 +3409,37 @@ RESIDUE_DIRS = ("chapters", "raw", "images")
 RESIDUE_FILES = ("_catalog.json", "_catalog.json.tmp",
                  "_progress.json", "_progress.json.tmp",
                  "_stuck.json", "_stuck.json.tmp")
+# 临时件名字现在分两族：老的是固定名（`meta.json.tmp`），新的是 pid + 一小串随机
+# （`meta.json.4242.1a2b3c4d.tmp`，见 ui_server._write_json / book_notes._tmp_name /
+# mindmap / video_note / ai_sum —— 同一份账两个写手同时进来不再互相截断）。随机名那一族
+# 一个固定名字点不到：正常路径由各自的 `except BaseException` 收干净，可断电 / SIGKILL
+# 那一档只有磁盘看得见 —— 它不进任何读口、也不在 RESIDUE_FILES 名单里，界面上删不掉，
+# 攒着就是吃盘洞（一本导图或 _ai 几 MB）。书目录里没有任何正经产物以 `.tmp` 结尾，
+# 所以清残稿时按这个尾巴统一收走。
+STRAY_TMP_SUFFIX = ".tmp"
+
+
+def drop_stray_tmps(d):
+    """收掉一本书目录里「写到一半被强杀」留下的临时件，返回个数。
+
+    只删普通文件：符号链接（哪怕指向别处）与同名目录都不碰 —— 前者不是这条路径的
+    产物，后者可能装着用户自己的东西。`os.walk` 不跟符号链接目录，所以这趟扫描走不出
+    这本书；某个子目录读不出来（被删 / 权限没了）当没有残件，清残稿本身照旧往下走。
+    """
+    gone = 0
+    for root, _dirs, files in os.walk(d):
+        for name in files:
+            if not name.endswith(STRAY_TMP_SUFFIX):
+                continue
+            p = os.path.join(root, name)
+            if os.path.islink(p) or not os.path.isfile(p):
+                continue
+            try:
+                os.remove(p)
+                gone += 1
+            except OSError:
+                pass
+    return gone
 
 
 def drop_stray_md(book_id, title=""):
@@ -3464,6 +3495,10 @@ def reset_book_output(book_id):
         if os.path.isfile(p):
             os.remove(p)
             removed += 1
+    # 上面按名字点的是三本账本的老固定名；随机名那一族（pid + 随机串）点不到，
+    # 按 `.tmp` 尾巴把书目录里剩下的半截临时件一并收走（boards / mindmaps / video /
+    # _ai 这些子目录也一起扫），免得强杀一次就在盘上留一块谁也删不掉的残件。
+    removed += drop_stray_tmps(d)
     # 合并稿有两份可能的名字：按书名的和早期按书号的，都清掉，免得留一份过期的全本假象
     removed += drop_stray_md(book_id, meta_title(book_id))
     mp = os.path.join(d, "meta.json")
