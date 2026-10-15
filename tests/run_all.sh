@@ -208,6 +208,14 @@ run "视频转笔记归属（章节起点不可用 / 新段不继承旧段字段
 # 这条把读盘归一化与纯函数的容错都钉住：坏账本不抛、转写一个字不少、好账一模不改。
 # 纯逻辑加临时目录里的一本假书，不起服务、不联网、不开浏览器，故归静态段。
 run "视频书重建脏账本（手改 summary 不甩连接 / 正文不丢 / 好账不改）" "$PY" tests/check_video_rebuild.py
+# 同一本书的另一份账：transcript.json 是 ensure_ascii=False 直写的，而云端 ASR 的回包 /
+# 编辑器存回来的段落里可能带着落单的半个代理码点（`\ud83d`）。旧写法在 json.dump 那一步
+# 抛 UnicodeEncodeError：界面「点了保存没反应」，书目录里还留一个半截 transcript.json.tmp；
+# 反过来，手改 / 旧版本写下的脏 transcript.json 读出来再存、导出、重建也炸在同一条编码上。
+# 这条把读口（_read_json / 解析缓存）、写口（_write_json / _write_text）与 save_transcript
+# 一起钉住：脏段落存得下、脏账本读得开、两处视图用同一份干净数据、真 emoji 一个字不动、
+# 好数据不改、成功与失败都不留 .tmp。纯逻辑 + 临时目录里的一本假书，归静态段。
+run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 真 emoji 不动）" "$PY" tests/check_video_surrogate.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
