@@ -243,7 +243,10 @@ def _agent_cfg_from_disk():
     """
     path = os.path.join(DATA_DIR, "cache", "config.json")
     try:
-        with open(path, encoding="utf-8") as f:
+        # 与 ui_server._load_cfg 同一把尺子：config.json 用户会拿记事本直接改，Windows
+        # 记事本默认存的 UTF-8 带 BOM；裸 utf-8 读到那三字节就当场 JSONDecodeError，被下面
+        # 的宽 except 收成「没配」——配置明明填着，视频那一栏却一直说「AI 没配」。
+        with open(path, encoding="utf-8-sig") as f:
             cfg = json.load(f)
     except Exception:
         return "", "", ""
@@ -1538,9 +1541,15 @@ def _read_json(path):
 
     读出来顺手摘掉落单的半个代理码点：这一份可能是旧版本、云同步或用户手改过的
     文本，脏值从这一道闸进来就会在「再存一次 / 导出 / 重建」时炸在编码上。
+
+    编码用 `utf-8-sig`：这也是「用户手改过的文本」——记事本在 Windows 上另存
+    UTF-8 默认带 BOM，裸 `utf-8` 读那一版会 JSONDecodeError，被下面收成 None。于是
+    `save_transcript` 把整份当成空档重写（按 id 留着的说话人 / 置信度一起没），
+    `load_transcript` 悄悄退回旧的 `transcript.txt`。与 feed / config / board /
+    写作册账那几处读口同一把尺子：BOM 只该被当成编码签名剥掉，不该被当成坏档。
     """
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             return _drop_surrogates(json.load(f))
     except Exception:
         return None

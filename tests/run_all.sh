@@ -369,6 +369,14 @@ run "视频转写落盘（临时件不共用 / 并写不扑空 / 失败不留 .t
 # 端到端回包（含 SSE）、以及源码接线；另留「旧写法确实漏 AttributeError」的对照防空转。
 # 全程离线，归静态段，--fast 也得带上。
 run "视频转笔记 LLM 回包形状（脏 choices / message / SSE 不带走整趟流水线）" "$PY" tests/check_video_llm_shape.py
+# 上面三条收的是「别人家喂进来的形状」；这一条收的是**用户自己拿记事本改过的编码**：
+# transcript.json / meta.json / config.json 都是用户会直接编辑的文本，Windows 记事本另存
+# UTF-8 默认带 BOM，而视频这条线的读口（`_read_json` / `_read_meta` / `_agent_cfg_from_disk`）
+# 原先用裸 utf-8 —— BOM 那三字节让 json.load 当场失败、被宽 except 收成空档：转写退回旧 txt、
+# save_transcript 按 id 留的说话人 / 置信度静默丢掉、视频那栏一直说「AI 没配」。其余读口
+# （feed / board / book_notes / mindmap / 写作册账）早就是 utf-8-sig，只漏了视频这几处。
+# 纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
+run "视频转写读口认 BOM（记事本另存的登记档不当坏档 / 不静默丢字段）" "$PY" tests/check_video_bom.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
