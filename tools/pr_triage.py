@@ -20,6 +20,13 @@
   同文件    —— 同文件但不同段（单独合都干净，链式合到中间才可能撞）
   独立      —— 文件都不重叠，随便合
 
+除了「撞不撞」，合并前还有一类必须当面看的：**这批改动本身该不该进来**。冲突预演
+只会告诉你「合起来干不干净」—— 一个把 `requirements.txt` 顺手改掉、或者把已有断言
+改软的 PR，合起来可以一点冲突都没有。所以再补一栏红线体检（纯路径 / 行判定）：
+禁改路径（锁文件与依赖清单 / `.github/` / 迁移 / Docker / 密钥 / `.autoloop/`）、
+已有测试被改或删（只许加不许改弱）、新增行里像凭据的串、以及改动规模。它只摆证据，
+不代替人判断：扫不到红线不等于安全，只说明这几类没有。
+
 怎么算「同一段」：拿 `git diff -U0` 的 hunk 头 `@@ -老起点,老长度 +新起点,新长度 @@`
 把每处改动折算成老文件上的一个区间，两边区间相交就算同段。`-U0` 很要紧 —— 默认的
 三行上下文会把「隔得挺远」的两处也算成重叠，全是假警报。
@@ -49,6 +56,44 @@ DIFF_RE = re.compile(r"^diff --git a/(\S+) b/(\S+)$")
 # 实现（不同函数名、同一套兜底逻辑）落在 0.6 上下，后者的两条 `run "..."` 登记行
 # 只是句式相同、内容是两回事，落在 0.3 上下。这个数只当提示，不当判决。
 DUP_HINT = 0.45
+
+# ── 红线体检的两张表（只判路径 / 行，判不了「意图」）────────────────────
+#
+# 这些路径一进来就要人当面看：它们是「环境的定义」而不是「产品的代码」—— 锁文件与
+# 依赖清单改了，别的机器上装出来的东西就跟着变；`.github/` 改了，门禁的规矩就变了；
+# 密钥文件进来了，仓库就脏了。与 worker 的验收门禁同一份口径。
+FORBIDDEN_PATTERNS = (
+    ("锁文件 / 依赖清单", re.compile(
+        r"(^|/)(requirements[\w.-]*\.txt|Pipfile(\.lock)?|poetry\.lock|"
+        r"package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|"
+        r"Gemfile\.lock|go\.sum|composer\.lock|packages\.lock\.json)$")),
+    (".github（CI / 模板）", re.compile(r"(^|/)\.github/")),
+    ("数据库迁移", re.compile(r"(^|/)migrations?/")),
+    ("Docker", re.compile(
+        r"(^|/)Dockerfile(\..*)?$|(^|/)docker-compose[\w.-]*\.ya?ml$")),
+    ("环境 / 密钥文件", re.compile(
+        r"(^|/)\.env(\..*)?$|\.pem$|\.p12$|\.key$|"
+        r"(^|/)id_(rsa|ed25519|ecdsa)(\.pub)?$|\.keystore$|\.jks$")),
+    (".autoloop 控制目录", re.compile(r"(^|/)\.autoloop/")),
+)
+
+# 凭据只认有明确前缀的那几种，再加一条最保守的「键名 = 一长串随机值」。宁可漏一个，
+# 不制造一堆假警报 —— 假警报多了，人就不看这一栏了，那比没有还坏。
+SECRET_PATTERNS = (
+    ("私钥块", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("GitHub token", re.compile(
+        r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
+    ("OpenAI 风格 key", re.compile(r"\bsk-[A-Za-z0-9]{24,}\b")),
+    ("AWS key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("疑似写死的口令", re.compile(
+        r"(?i)\b(api[_-]?key|secret|access[_-]?token|auth[_-]?token|passwd|password)\b"
+        r"\s*[:=]\s*[\"'][A-Za-z0-9_\-/+]{20,}[\"']")),
+)
+
+# 改动规模到多少行算「该多看两眼」：与 AutoLoop 那边 churn<50 算 auto-ready 同一把尺。
+CHURN_REVIEW = 50
 
 
 @dataclasses.dataclass
@@ -223,6 +268,63 @@ def pair_verdict(hunks_a, hunks_b):
     return out
 
 
+# ── 红线体检：纯路径 / 行判定，不跑 git、不联网 ──────────────────────
+
+
+def churn(hunks):
+    """这批改动的规模：`(加了几行, 删了几行)`。
+
+    `-U0` 下没有上下文行，hunk 里的 `+` / `-` 就是真实改动量，直接数得出来。
+    """
+    return (sum(len(h.added) for h in hunks),
+            sum(len(h.removed) for h in hunks))
+
+
+def red_lines(hunks):
+    """一个大 diff 的合入前体检。回 `[(档位, 路径, 说明)]`，空的就表示这几类没扫到。
+
+    只看两样看得见的东西：**改了哪些路径**、**新增/删除的是哪些行**。所以它不会
+    （也不该）替人下结论 —— 「该不该合」还得读那几行。四类：
+
+      禁改路径   锁文件 / 依赖清单、`.github/`、迁移、Docker、密钥、`.autoloop/`
+      改了已有测试  `tests/` 下的文件出现删除行（新加一个测试文件不算 —— 它没有删除行）
+      疑似凭据   新增行里带明确前缀的 token / 私钥 / 写死的口令
+      改动偏大   加了 + 删了 >= CHURN_REVIEW 行
+    空 diff 单独报一条：一条没有任何改动的分支不该被当成一个待合的 PR。
+    """
+    if not hunks:
+        return [("空改动", "", "这条分支相对 base 没有任何改动 —— 空 diff 不算数")]
+
+    out = []
+    touched_tests = {}
+    for h in sorted(hunks, key=lambda x: (x.path, x.old_start)):
+        path = h.path
+        for why, rx in FORBIDDEN_PATTERNS:
+            if rx.search(path):
+                out.append(("禁改路径", path, why))
+                break
+        # 已有测试：出现删除行就是「改了 / 删了」。新测试文件整份是新增行，removed 为空。
+        if path.startswith("tests/") or "/tests/" in path:
+            if h.removed:
+                touched_tests[path] = touched_tests.get(path, 0) + len(h.removed)
+        for line in h.added:
+            for why, rx in SECRET_PATTERNS:
+                if rx.search(line):
+                    out.append(("疑似凭据", path, "%s:%s" % (why, line.strip()[:80])))
+                    break
+
+    for path in sorted(touched_tests):
+        out.append(("改了已有测试", path,
+                    "删 / 改了 %d 行 —— 已有测试只许加，不许改弱" % touched_tests[path]))
+
+    added, removed = churn(hunks)
+    if added + removed >= CHURN_REVIEW:
+        out.append(("改动偏大", "",
+                    "加 %d 行 / 删 %d 行（>= %d 行，合之前读一遍）"
+                    % (added, removed, CHURN_REVIEW)))
+    return out
+
+
 # ── 以下是要跑 git / 联网的部分，判定逻辑已经在上面了 ──────────────────
 
 
@@ -380,6 +482,25 @@ def main(argv=None):
         info = prs.get(short(b))
         if info:
             print("             %s" % (info[1] or "")[:76])
+
+    # ── 红线体检：先看「该不该进来」，再看「撞不撞」 ───────────────
+    print("\n■ 合入前的红线体检（禁改路径 / 改已有测试 / 疑似凭据 / 改动规模）")
+    flagged = 0
+    for b in order:
+        added, removed = churn(faces[b])
+        head = "  %-10s %-34s +%d/-%d" % (label(b, prs), short(b), added, removed)
+        findings = red_lines(faces[b])
+        if not findings:
+            print(head + "  干净")
+            continue
+        flagged += 1
+        print(head)
+        for tier, path, why in findings:
+            print("      [%s] %s%s" % (tier, (path + " · ") if path else "", why))
+    if flagged:
+        print("  → %d 个分支带回线，合之前先把上面这几条读一遍。" % flagged)
+    else:
+        print("  → 这几类都没扫到（不等于安全，只说明红线表里这几条没有）。")
 
     # ── 两两预演：这是定论 ─────────────────────────────────────────
     # n 个分支就是 n(n-1)/2 次真合并。正常一批五到十个（<=45 次）没问题；真扫到几十个
