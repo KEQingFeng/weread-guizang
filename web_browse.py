@@ -14,6 +14,9 @@ macOS 是 WKWebView），可外层直接给 iframe 一个外站地址照样是�
   2. 改一改。补一条 `<base>`，让相对路径的图片、样式、脚本还有一个根可循；页面末尾接
      一小段脚本，把「点链接 / 提交表单」翻译成给父页面的一条消息，父页面收到再让这一层
      取下一页。拦的是 click 冒泡，所以站点用脚本生成的链接也逃不掉。
+     遇到 YouTube 这类「HTML 里根本没有正文、内容全在一坨 JSON 里由站点自己的脚本现渲染」
+     的站，改的那一下换成读那坨 JSON、铺一页我们自己的静态目录（`yt_static`）——因为壳里
+     那些脚本在 iframe 的不透明源上跑不动，原样重送只会得一片空白。
   3. 送回去。HTML 原样转交（站点自己的脚本照跑），图片 / PDF 这类非网页直接把字节透传，
      让内核自己渲染。
 
@@ -26,6 +29,7 @@ macOS 是 WKWebView），可外层直接给 iframe 一个外站地址照样是�
 """
 
 import html as _html
+import json
 import re
 import urllib.error
 import urllib.parse
@@ -68,6 +72,12 @@ _LINK_SCRIPT = """
     var h = n.getAttribute('href') || '';
     if (!h || h.charAt(0) === '#' || /^javascript:/i.test(h)) return;
     e.preventDefault();
+    // 带 data-gz-use 的那颗不是「再取一页」，而是「把这条链接交给界面办别的事」——
+    // 内置浏览器里认出的视频就是这么回到「视频转笔记」那一屏的。
+    if (n.hasAttribute('data-gz-use')) {
+      try { parent.postMessage({gzUseLink: abs(h)}, '*'); } catch(err){}
+      return;
+    }
     tell(h);
   }, true);
   document.addEventListener('submit', function(e){
@@ -158,6 +168,313 @@ def _looks_html(blob, ctype):
     return b"<html" in head or b"<!doctype" in head
 
 
+# ── YouTube：这一站不给「一页能看的 HTML」──────────────────────
+# 用户报的是「油管打开无法显示」。取回这一步其实成了（首页 950KB、八秒多就回来），
+# 黄掉的是后面两段：
+#   ① youtube.com 是一台纯客户端应用 —— 返回的 HTML 里只有 <ytd-app> 那副空壳，
+#      正文全在 `var ytInitialData = {…}` 这一坨 JSON 里，由站点自己的脚本再渲染。
+#   ② 我们的 iframe 带 `sandbox` 且**故意不给** allow-same-origin（不给它读归藏的
+#      localStorage），在浏览器看来这就是个不透明源：脚本一碰 localStorage 就抛
+#      SecurityError，油管那段引导脚本当场断在这里 —— 于是壳渲染不出来，一片空白。
+# 与其为了油管放宽 sandbox（那是拿用户的界面换一页视频），不如把这条 JSON 自己读了：
+# 卡片、频道、时长、缩略图都在里面，用我们自己的话铺成一页静态目录，链接照旧走
+# /api/browse。看列表、挑一支、把链接送回「视频转笔记」这三件事全都在，缺的只是
+# 播放器本身 —— 播放器是流式媒体，这一层从来也不代理（见 docs/交接说明.md 的风险段）。
+YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com",
+            "music.youtube.com", "youtu.be"}
+# 缩略图只认这两台站自己的图床，别的域名一律不往这一页里引。
+_YT_IMG_HOSTS = ("i.ytimg.com", "s.ytimg.com", "yt3.googleusercontent.com",
+                 "yt3.ggpht.com")
+_YT_ID = re.compile(r"^[A-Za-z0-9_\-]{6,20}$")
+_YT_CARDS = 24
+
+
+def is_youtube(url):
+    try:
+        host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return host in YT_HOSTS or host.endswith(".youtube.com")
+
+
+def _json_after(html, marker):
+    """从 `marker` 后面那第一个左花括号起，按配对扫出一整个 JSON 对象。
+
+    不能用贪婪正则：`{.*};` 会在字符串里的那半个 `}` 上断错，也会在几百 KB 的页面上
+     backtrack 到没脾气。这里手写一遍扫描（字符串内的花括号不算数），一次线性扫完。
+    """
+    i = html.find(marker)
+    if i < 0:
+        return None
+    j = html.find("{", i)
+    if j < 0:
+        return None
+    depth, instr, esc = 0, False, False
+    for k in range(j, len(html)):
+        c = html[k]
+        if instr:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                instr = False
+            continue
+        if c == '"':
+            instr = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(html[j:k + 1])
+                except ValueError:
+                    return None
+    return None
+
+
+def _collect(node, key, out):
+    """深度收集某个 key 下的所有 dict。
+
+    直接按「已知路径」取是取不动的：油管把这些 renderer 埋在多少层包装里随版本变。
+    认 key 不认路径，它加一层壳我们不用改。注意只收 dict 值 —— 「lockupViewModel」
+    这种名字在页面配置里也会以字符串形式出现，按值类型筛一道就不会拿错东西。
+    """
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == key and isinstance(v, dict):
+                out.append(v)
+            _collect(v, key, out)
+    elif isinstance(node, list):
+        for v in node:
+            _collect(v, key, out)
+
+
+def _runs(node):
+    """`{runs:[{text}]}` 与 `{simpleText}` 两种都见过，收成一条字符串。"""
+    if not isinstance(node, dict):
+        return ""
+    if node.get("simpleText"):
+        return str(node["simpleText"])
+    return "".join(str(r.get("text") or "") for r in (node.get("runs") or [])
+                   if isinstance(r, dict))
+
+
+def _yt_img(sources):
+    """从一组同源缩略图里挑最宽的那张。
+
+    油管按 `sources` 从低清到高清排（168×94 在前、336×188 在后），照第一个取会拿到
+    糊的那张；只认自家图床的 https 地址，别的域名一律不往这一页里引。
+    """
+    best, best_w = "", -1
+    for s in sources or []:
+        if not isinstance(s, dict):
+            continue
+        u = str(s.get("url") or "")
+        try:
+            host = (urllib.parse.urlparse(u).hostname or "").lower()
+        except ValueError:
+            continue
+        if not u.startswith("https://") or host not in _YT_IMG_HOSTS:
+            continue
+        try:
+            w = int(s.get("width") or 0)
+        except (TypeError, ValueError):
+            w = 0
+        if w > best_w:
+            best, best_w = u, w
+    return _html.escape(best, quote=True) if best else ""
+
+
+def _yt_cards(data):
+    """从 ytInitialData 里认出「一堆视频」，新旧两代 renderer 都认。
+
+    旧版是 `videoRenderer`（搜索结果、首页那一批），新版是 `lockupViewModel`
+    （watch 页的相关列表、频道页）。两代的字段路径完全不同，所以各读各的，
+    统一收成 {id,title,channel,length,when,thumb}。
+    """
+    out = []
+    renderers = []
+    _collect(data, "videoRenderer", renderers)
+    for r in renderers:
+        vid = str(r.get("videoId") or "")
+        if not _YT_ID.match(vid):
+            continue
+        card = {
+            "id": vid,
+            "title": _runs(r.get("title")),
+            "channel": _runs(r.get("ownerText")) or _runs(r.get("longBylineText")),
+            "length": _runs(r.get("lengthText")),
+            "when": _runs(r.get("publishedTimeText")),
+            "thumb": _yt_img((r.get("thumbnail") or {}).get("thumbnails") or []),
+        }
+        if card["title"]:
+            out.append(card)
+    if not out:
+        lockups = []
+        _collect(data, "lockupViewModel", lockups)
+        for x in lockups:
+            vid = str(x.get("contentId") or "")
+            if not _YT_ID.match(vid):
+                continue
+            if "VIDEO" not in str(x.get("contentType") or ""):
+                continue
+            md = (x.get("metadata") or {}).get("lockupMetadataViewModel") or {}
+            parts = []
+            meta = (md.get("metadata") or {}).get("contentMetadataViewModel") or {}
+            for row in meta.get("metadataRows") or []:
+                for p in (row.get("metadataParts") or []):
+                    txt = str(((p or {}).get("text") or {}).get("content") or "")
+                    if txt:
+                        parts.append(txt)
+            image = (x.get("contentImage") or {}).get("thumbnailViewModel") or {}
+            length = ""
+            for ov in image.get("overlays") or []:
+                for badge in (ov.get("thumbnailBottomOverlayViewModel") or {}).get("badges") or []:
+                    length = length or str(
+                        (badge.get("thumbnailBadgeViewModel") or {}).get("text") or "")
+            out.append({"id": vid,
+                        "title": str((md.get("title") or {}).get("content") or ""),
+                        "channel": parts[0] if parts else "",
+                        "length": length,
+                        "when": parts[-1] if len(parts) > 1 else "",
+                        "thumb": _yt_img((image.get("image") or {}).get("sources") or [])})
+    return [c for c in out if c.get("title")][:_YT_CARDS]
+
+
+_YT_WHY = (
+    "为什么是这一页：youtube.com 的正文不在 HTML 里，而在页面自带的一坨 JSON 里，"
+    "由它自己的脚本现渲染；归藏的 iframe 是不透明源，那些脚本一碰本地存储就断，"
+    "所以原样送回来只会是一片空白。这里读的是同一坨 JSON，铺的是自己的版式 —— "
+    "标题、频道、时长、缩略图都是油管给的原文。想整本转成笔记，点卡片上那颗"
+    "「转成笔记」，链接会送回「视频转笔记」那一屏。")
+
+_YT_STYLE = """
+html{color-scheme:light dark}
+body{margin:0;padding:16px 18px 30px;background:#f6f7f9;color:#3c4657;
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif}
+a{color:inherit;text-decoration:none}
+.gz-yt h2{font-size:15px;margin:2px 0 3px}
+.gz-yt .sub{font-size:12px;color:#6b7688;margin:0 0 14px}
+.gz-yt .why{font-size:12px;color:#6b7688;margin:0 0 16px;padding:11px 13px;border-radius:12px;
+  background:#fff;border:1px solid rgba(127,140,160,.24)}
+.gz-yt form{display:flex;gap:8px;margin:0 0 16px}
+.gz-yt input{flex:1;min-width:0;height:34px;padding:0 12px;border-radius:10px;
+  border:1px solid rgba(127,140,160,.32);background:#fff;color:inherit;font:inherit;
+  font-size:13px;outline:none}
+.gz-yt button{height:34px;padding:0 15px;border-radius:10px;border:1px solid rgba(47,127,240,.42);
+  background:rgba(47,127,240,.1);color:#2f6fd0;font:inherit;font-size:13px;cursor:pointer;
+  white-space:nowrap}
+.gz-yt .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+.gz-yt .card{display:flex;flex-direction:column;background:#fff;border-radius:14px;
+  border:1px solid rgba(127,140,160,.24);overflow:hidden}
+.gz-yt .th{position:relative;display:block;background:#e7eaef}
+.gz-yt .th img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
+.gz-yt .lg{position:absolute;right:7px;bottom:7px;padding:2px 6px;border-radius:6px;
+  background:rgba(12,16,22,.78);color:#fff;font-size:11px;font-variant-numeric:tabular-nums}
+.gz-yt .bd{padding:10px 12px 11px;display:flex;flex-direction:column;gap:6px;flex:1}
+.gz-yt .ti{font-size:13px;line-height:1.5;font-weight:600;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.gz-yt .me{font-size:11.5px;color:#6b7688;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gz-yt .go{display:flex;gap:7px;margin-top:auto;flex-wrap:wrap}
+.gz-yt .go a{height:28px;line-height:28px;padding:0 11px;border-radius:8px;font-size:12px;
+  border:1px solid rgba(127,140,160,.3);background:rgba(127,140,160,.09);white-space:nowrap}
+.gz-yt .go a.use{border-color:rgba(47,127,240,.42);background:rgba(47,127,240,.12);color:#2f6fd0}
+.gz-yt .card.hero{grid-column:1/-1;flex-direction:row}
+.gz-yt .card.hero .th{width:min(340px,46%);flex:none}
+.gz-yt .card.hero .th img{height:100%;aspect-ratio:auto}
+.gz-yt .card.hero .ti{font-size:16px;-webkit-line-clamp:3}
+.gz-yt .none{padding:22px 0;font-size:13px;color:#6b7688}
+@media (prefers-color-scheme:dark){
+  body{background:#12161d;color:#d6dce6}
+  .gz-yt .why,.gz-yt .card{background:#1a1f28;border-color:rgba(160,175,200,.22)}
+  .gz-yt input{background:#12161d;border-color:rgba(160,175,200,.28);color:#d6dce6}
+  .gz-yt .sub,.gz-yt .why,.gz-yt .me,.gz-yt .none{color:#93a0b3}
+  .gz-yt .th{background:#232a35}
+}
+"""
+
+
+def _yt_page(cards, note):
+    """把认出来的那一堆视频铺成静态目录页。链接全用绝对地址，交给补的那段脚本回传。"""
+    watch = "https://www.youtube.com/watch?v=%s"
+    items = []
+    for c in cards:
+        href = _html.escape(watch % urllib.parse.quote(c["id"]), quote=True)
+        bits = [b for b in (c.get("channel"), c.get("when")) if b]
+        img = ("<img src=\"%s\" alt=\"\" loading=\"lazy\" decoding=\"async\">" % c["thumb"]
+               if c.get("thumb") else "")
+        lg = ("<span class=\"lg\">%s</span>" % _html.escape(c["length"], quote=True)
+              if c.get("length") else "")
+        items.append(
+            "<article class=\"card%s\"><a class=\"th\" href=\"%s\">%s%s</a>"
+            "<div class=\"bd\"><b class=\"ti\">%s</b>"
+            "<span class=\"me\">%s</span>"
+            "<span class=\"go\"><a href=\"%s\">打开这支</a>"
+            "<a class=\"use\" href=\"%s\" data-gz-use"
+            " title=\"把这条链接送回「视频转笔记」，回去点手指就开始转\">转成笔记</a>"
+            "</span></div></article>"
+            % (" hero" if c.get("hero") else "", href, img, lg,
+               _html.escape(c["title"], quote=True),
+               _html.escape(" · ".join(bits), quote=True), href, href))
+    grid = ("<div class=\"grid\">%s</div>" % "".join(items)) if items \
+        else "<p class=\"none\">这一页里没认出能列的视频。</p>"
+    return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>YouTube · 归藏里的静态目录</title><style>%s</style></head><body>"
+            "<div class=\"gz-yt\"><h2>YouTube · 静态目录</h2>"
+            "<p class=\"sub\">%s</p>"
+            "<form method=\"get\" action=\"https://www.youtube.com/results\">"
+            "<input name=\"search_query\" placeholder=\"搜点什么？回车就搜（这一页由本机铺，"
+            "油管自己的播放器不在这里跑）\" autocomplete=\"off\">"
+            "<button type=\"submit\">搜索</button></form>"
+            "%s<p class=\"why\">%s</p></div></body></html>"
+            ) % (_YT_STYLE, _html.escape(note, quote=True), grid, _YT_WHY)
+
+
+def _yt_len(sec):
+    """`lengthSeconds` 是秒数，翻成「1 小时 4 分」这种看得懂的话。"""
+    try:
+        s = max(0, int(float(sec)))
+    except (TypeError, ValueError):
+        return ""
+    if not s:
+        return ""
+    h, m, r = s // 3600, s % 3600 // 60, s % 60
+    if h:
+        return "%d:%02d:%02d" % (h, m, r)
+    return "%d:%02d" % (m, r)
+
+
+def yt_static(text, url):
+    """YouTube 的一条路：认得出卡片就铺静态页，认不出也给它一页能搜的壳。
+
+    回 None 表示「这跟 YouTube 无关」，由 `shape()` 走原来那条原样重送的路。
+    """
+    if not is_youtube(url):
+        return None
+    data = _json_after(text, "ytInitialData")
+    cards = _yt_cards(data) if data else []
+    # watch 那一页的主角不在 ytInitialData 的卡片里，在播放器配置里：单独读出来放最前头，
+    # 省得用户打开一支视频却只看到「相关」。
+    player = _json_after(text, "ytInitialPlayerResponse") or {}
+    vd = player.get("videoDetails") or {}
+    hero = str(vd.get("videoId") or "")
+    if vd.get("title") and _YT_ID.match(hero) and hero:
+        cards.insert(0, {"id": hero, "hero": True,
+                         "title": str(vd.get("title") or ""),
+                         "channel": str(vd.get("author") or ""),
+                         "length": _yt_len(vd.get("lengthSeconds")),
+                         "when": "",
+                         "thumb": _yt_img((vd.get("thumbnail") or {}).get("thumbnails") or [])})
+    note = "从这页挑一支，点「转成笔记」把它送回工作台。"
+    if not cards:
+        note = ("这一页要油管自己的脚本才画得出内容，那套脚本在这个沙箱里跑不动。"
+                "先在上面搜，搜到的结果就能挑。")
+    return _yt_page(cards, note)
+
+
 def shape(blob, ctype, charset, final_url):
     """把取回来的字节收成 {ok, url, ctype, body}。纯函数，测起来不用连网。
 
@@ -167,7 +484,9 @@ def shape(blob, ctype, charset, final_url):
     ctype = (ctype or "").lower()
     if _looks_html(blob, ctype):
         text = blob.decode(clip_article.safe_charset(charset), errors="replace")
-        page = prepare(text, final_url)
+        # YouTube 那一站原样重送是一屏空白（见上面那段注释），先给它换成本机自己铺的静态页。
+        static = yt_static(text, final_url)
+        page = prepare(static if static else text, final_url)
         return {"ok": True, "url": final_url,
                 "ctype": "text/html; charset=utf-8", "body": page.encode("utf-8")}
     out = ctype or "application/octet-stream"
