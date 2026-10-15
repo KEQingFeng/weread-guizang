@@ -255,6 +255,13 @@ run "导入书（编码识别 / 格式兜底 / PDF 硬换行 / GBK 落到章标�
 # 第一章的图，不报任何错。两文档同名图、../ 相对路径、根相对路径、百分号编码的中文
 # 图名、缺图兜底各钉一条，真建一次 EPUB 走 import_book。纯内存 zip，不联网。
 run "导入书 EPUB 配图（同名不串门 / 相对路径 / 缺图兜底）" "$PY" tests/check_book_import_epub.py
+# 上一条管好包；这一条管**坏包**。`.epub` 这个扩展名一给定，guess_format 就不再回头看
+# 内容，所以「这份文件其实不是个压缩包」只有 read_epub 那一层挡得住。旧代码里
+# zipfile.BadZipFile 会穿过 import_book 到 /api/import 的兜底 except：界面拿到 500 加
+# 一句英文 `File is not a zip file`（安娜那条路账本上记的是 `BadZipFile` 这个类名）。
+# 加密条目（RuntimeError）同理。这一条把「压缩包坏法 → 人话 ValueError」钉死，并守住
+# 好包的章节、OPF 元信息与落盘正文一个字不变。纯内存 zip，不联网、不起服务。
+run "导入坏 EPUB（坏包 / 加密包翻成人话，好包零改动）" "$PY" tests/check_import_broken_epub.py
 # 写作那一格从「一叠散稿」升级成「书 → 第一章 / 第二章 …」之后，多出的一份风险在账本上：
 # `_books.json` 记的是「哪几章、按什么顺序、属于哪本书」，章本身还是原来那篇稿子
 # （目录 / rev / 快照 / MCP 一字未改）。账本一坏，界面上就是「我的章不见了」这种最要命的

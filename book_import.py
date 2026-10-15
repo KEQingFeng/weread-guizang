@@ -501,7 +501,36 @@ def _md_from_xhtml(txt):
 
 # ─────────────────────────── EPUB 拆解 ───────────────────────────
 
+def epub_zip_error(exc):
+    """压缩包这一类坏法 → 一句给用户的话。
+
+    不把 zipfile 的英文原文（`File is not a zip file` 之类）递给用户：那不是内容，
+    是解释器的措辞；加密那种还会带上压缩包里的文件名。
+    """
+    if isinstance(exc, zipfile.BadZipFile):
+        return "这个 EPUB 打不开（文件可能没下全，或者根本不是一个 EPUB 压缩包）"
+    if isinstance(exc, RuntimeError):
+        return "这个 EPUB 加了密，归藏打不开（先去掉 DRM 再导）"
+    return "这个 EPUB 用的压缩方式归藏解不开，换一份再试"
+
+
 def read_epub(data):
+    """拆一份 EPUB；压缩包坏了 / 加了密一律翻成人话的 ValueError。
+
+    扩展名一旦是 `.epub`，`guess_format` 就不再翻回头去看内容，所以「这份文件其实
+    不是个压缩包」只有这一层挡得住。不挡的话 `zipfile` 的 BadZipFile 会穿过
+    `import_book` 一路到路由的兜底 except：用户拿到的是 500 加一句英文
+    `File is not a zip file`（安娜那条路更糟，账本上记的是 `BadZipFile` 这个名字）。
+    """
+    try:
+        return _read_epub(data)
+    except ValueError:
+        raise                        # 「解压后太大」这些本来就已经是给用户的话
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as e:
+        raise ValueError(epub_zip_error(e))
+
+
+def _read_epub(data):
     """EPUB → (章节文档, 图片, 封面, 元信息)。
 
     章节文档 = [(包内路径, xhtml 文本)]（按 spine 顺序）；图片 = [(原始名, bytes)]；
