@@ -25,6 +25,7 @@
       思维导图 SVG 都写得出（SVG 还得是合法 XML）。
     F 模板：自定义模板的名字 / 正文带半个码点，存得下也读得回。
     G 口径不变：洗在截断之前，字段长度上限还是原来那个数。
+    H 章节目录（`_catalog.json`）：标题里的半个码点不再让整篇笔记导出打回。
 
 全程离线：只调 book_notes 的纯函数 + 临时目录，不 import 服务、不联网、不开浏览器。
 
@@ -195,6 +196,45 @@ chk("G1 洗在截断之前：长度仍是 4000，且不含代理码点",
     len(clip_long) == 4000 and bn.SURROGATE.search(clip_long) is None, len(clip_long))
 chk("G2 纯 ASCII 的裁剪结果与原来逐字相同",
     bn._clip("x" * 5000, 4000) == "x" * 4000)
+
+
+# ── H 章节目录（_catalog.json）的坏字符 ─────────────────────────
+# 章标题也吃盘上那一份 `_catalog.json`（手改 / 旧版本 / 云同步都会落回别的形状），
+# 导出与导图把它拼进正文（`### %s`）再落盘。修前 `str(t)[:120]` 只裁长度，落单的
+# 半个代理码点一路带到 `f.write(..., encoding="utf-8")`，整篇 notes.md 打回，
+# 盘上还留一个 `notes.md.tmp`。
+print("\n── H 章节目录坏字符 ──")
+book4 = _tmp()
+with open(os.path.join(book4, "_catalog.json"), "w", encoding="utf-8") as f:
+    json.dump(["第一" + HALF_HI + "章", "第二章" + EMOJI], f)
+_ctl_h = None
+try:
+    with open(os.path.join(book4, "ctl.md"), "w", encoding="utf-8") as f:
+        f.write("### " + "第一" + HALF_HI + "章")          # 对照：不洗就是这么抛的
+except UnicodeEncodeError as e:
+    _ctl_h = e
+chk("H0 对照：目录标题里的半个码点直接拼进正文落盘确实会 UnicodeEncodeError",
+    _ctl_h is not None, "居然写成功了 —— 这条对照本身需要重看")
+titles4 = bn.chapter_titles(book4)
+chk("H1 chapter_titles 把目录标题洗成干净字符串（真 emoji 不误伤）",
+    titles4.get("0000.md") == "第一章" and titles4.get("0001.md") == "第二章" + EMOJI,
+    titles4)
+bn.save_notes(book4, {"marks": [{"id": "c1", "text": "划一句", "ch": "0000.md",
+                                 "created_at": 1756864800}]})
+_ce = None
+try:
+    bn.export_notes(book4, bn.load_notes(book4), titles=titles4)
+except Exception as e:                                     # 修前这里就是 UnicodeEncodeError
+    _ce = e
+chk("H2 导出 notes.md 写得出（坏章标题不再带走整篇）", _ce is None and
+    os.path.isfile(os.path.join(book4, bn.EXPORT_MD)), repr(_ce))
+chk("H3 导出后没留下 notes.md.tmp 残骸",
+    not os.path.exists(os.path.join(book4, bn.EXPORT_MD + ".tmp")),
+    sorted(os.listdir(book4)))
+if os.path.isfile(os.path.join(book4, bn.EXPORT_MD)):
+    _h = _raw(os.path.join(book4, bn.EXPORT_MD))
+    chk("H4 导出稿里没有代理码点，且用上的是洗干净的那个章标题",
+        bn.SURROGATE.search(_h) is None and "### 第一章" in _h, _h[:200])
 
 
 print()

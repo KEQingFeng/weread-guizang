@@ -948,19 +948,53 @@ def _chat_url(raw):
     return url + "/v1/chat/completions"
 
 
+def _content_text(holder):
+    """一个 `delta` / `message` 容器里的正文；形状不对给空串，绝不抛。
+
+    `content` 可能是分段数组（多模态网关），拼起来再吐 —— 与 `ui_server.choice_piece`
+    的 `text_of` 同一口径。
+    """
+    if not isinstance(holder, dict):
+        return ""
+    content = holder.get("content")
+    if isinstance(content, list):        # 有些网关把 content 拆成块数组
+        content = "".join(str(p.get("text") or "") for p in content if isinstance(p, dict))
+    return str(content) if content else ""
+
+
+def _choice_text(ch):
+    """一条 `choices` → 正文文本。非表当空，`delta` / `message` 两种形状都认。
+
+    这把尺子 server 那边（`ui_server.choice_piece` / `completion_text` / `agent_deltas`）
+    早就在用：上游回 `{"choices": ["…"]}`、`{"choices": [{"message": "…"}]}`，或 SSE 里
+    `data: []` / `data: 0` 这种「是合法 JSON、但不是对象」的形状时，旧写法
+    `(ch or {}).get(...)` 当场 AttributeError —— 这句在 `llm_chat` 里没有兜底，整趟
+    视频转笔记带着英文报错结束，而不是那句「认不出来」。收口就是把同一把尺子接过来。
+    """
+    if not isinstance(ch, dict):
+        return ""
+    for key in ("delta", "message"):
+        text = _content_text(ch.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _choices_of(container):
+    """从回包 / SSE 片段里取 `choices` 列表；不是列表（对象 / 字符串 / 数字）给空表。"""
+    if not isinstance(container, dict):
+        return []
+    choices = container.get("choices")
+    return choices if isinstance(choices, list) else []
+
+
 def _llm_content(payload):
     """从 chat/completions 的响应里取正文。个别网关即使没要流式也回 SSE，一并兼容。"""
-    if not isinstance(payload, dict):
+    choices = _choices_of(payload)
+    if not choices:
         return ""
-    choices = payload.get("choices")
-    if isinstance(choices, list) and choices:
-        message = (choices[0] or {}).get("message") or {}
-        text = message.get("content")
-        if isinstance(text, list):        # 有些网关把 content 拆成块数组
-            text = "".join(str((c or {}).get("text") or "") for c in text)
-        if text:
-            return str(text)
-    return ""
+    ch = choices[0]
+    return _content_text(ch.get("message")) if isinstance(ch, dict) else ""
 
 
 def llm_chat(cfg, messages, timeout=180):
@@ -1003,8 +1037,10 @@ def llm_chat(cfg, messages, timeout=180):
                 item = json.loads(chunk)
             except ValueError:
                 continue
-            for ch in (item.get("choices") or []):
-                pieces.append(str(((ch or {}).get("delta") or {}).get("content") or ""))
+            for ch in _choices_of(item):
+                piece = _choice_text(ch)
+                if piece:
+                    pieces.append(piece)
         if pieces:
             return "".join(pieces)
         raise ValueError("LLM 回的既不是 JSON 也不是 SSE，认不出来")

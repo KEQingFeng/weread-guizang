@@ -60,15 +60,16 @@ chk("renderPickView 里不再出现 viewHeader（标题 / 计数都让掉）",
 chk("冷启动骨架是 skelCards(6)（先看到的就是六张）",
     "skelCards(6)" in pickview, pickview[:200])
 
-# ── ③ 推荐的书能直接加进微信书架（1.2.1 · R4-9）────────────────
+# ── ③ 推荐 / 搜索的书都能直接加进微信书架（1.2.1 · R4-9，本轮扩到搜索）──
 # 卡片动作条上的「加入书架」不是另起一套：复用详情页那颗的 addToShelf，
 # 状态判据也复用 onOwnShelf（拿到过真书架就以它为准）。
+# 名字从 pickShelfButtons 改成 addShelfButtons —— 因为它不再只服务推荐那一屏。
 paint = fn_body("paintPick")
-chk("paintPick 铺完卡会补书架按钮（pickShelfButtons）",
-    "pickShelfButtons(grid)" in paint, paint[:220])
-psb = fn_body("pickShelfButtons")
-chk("找得到 pickShelfButtons（推荐卡的书架动作）", bool(psb))
-chk("推荐卡的书架按钮复用 addToShelf（与详情页同一套写回）",
+chk("paintPick 铺完卡会补书架按钮（addShelfButtons）",
+    "addShelfButtons(grid)" in paint, paint[:220])
+psb = fn_body("addShelfButtons")
+chk("找得到 addShelfButtons（卡片书架动作，推荐与搜索共用）", bool(psb))
+chk("书架按钮复用 addToShelf（与详情页同一套写回）",
     "addToShelf(t.store, t.title, b)" in psb, psb[:240])
 chk("书架按钮认 cardIds 里的书城短 id（阅读器 id 加不了）",
     "cardIds.get" in psb and "/^\\d{5,20}$/" in psb, psb[:240])
@@ -78,6 +79,14 @@ chk("老节点复用时不重复补按钮（.tkadd 只一颗）",
     "strip.querySelector('.tkadd')" in psb, psb[:240])
 chk("按钮挂在卡片动条 .strip 上（沿用摊开动作条那套交互）",
     "querySelector('.strip')" in psb, psb[:240])
+# 用户这条是「现在微信搜索的书籍也支持加入微信书架了」：搜索结果那一路必须真接上，
+# 而不是只有推荐还在用 —— 断在 searchWeRead 里（铺完 grid 之后补一次）。
+sw = re.search(r"async function searchWeRead\(.{0,1800}?\n  \}", SRC, re.S)
+chk("微信读书搜索那一路也补了书架按钮（searchWeRead → addShelfButtons）",
+    bool(sw) and "fillGrid(g, books)" in sw.group(0)
+    and "addShelfButtons(g)" in sw.group(0), sw.group(0)[:260] if sw else "没找到 searchWeRead")
+chk("pickShelfButtons 这个旧名字不再出现（改名要改干净，别留两副本）",
+    "pickShelfButtons" not in SRC)
 
 bad = [c for c in checks if not c[0]]
 print("\n推荐页体检：%d 项通过，失败 %d 项" % (len(checks) - len(bad), len(bad)))

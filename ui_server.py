@@ -4980,7 +4980,56 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def handle_one_request(self):
+        """每个请求的总兜底：任何一条路由没料到的异常，也要回一句人话。
+
+        这条规矩是 `/api/action` 那一族先立的（见 `_action` 的注释）：操作抛异常 →
+        异常穿出 `do_POST` → `BaseHTTPRequestHandler` 把连接直接关掉 → 前端
+        `await post(...)` 收到 RemoteDisconnected、onclick 里没 catch → 页面上就是
+        「点按钮毫无反应」。可那层兜底只长在 `/api/action` 一条路由上，其余路由
+        （`/api/book_state` / `/api/config` / `/api/import` …）各自只有局部的 try ——
+        落盘那一步（账本位置被占成目录、盘写满、目录只读）没被局部 try 圈住时，
+        异常照样穿出去，用户看到的还是同一个「点了没反应」。
+
+        所以把兜底提到这一层。路由自己接住过的照旧（它们的 try 先接，行为一字不变），
+        漏出来的在这里收成 200 + 一句人话 + 几行可追的日志。放在 `handle_one_request`
+        而不是再写一层 `do_POST`：读写两条路一起盖住，也不必为了套一层 try 去重排
+        六百行路由体。真有一条路由自己漏接了，`tests/check_post_guard.py` 会红。
+
+        只补「还没回过话」的那些：`_send` / `_sse_start` 一旦动过，`_sent_response`
+        就是 True，绝不在一条已经发出去的响应后面再接一段 JSON（流式那一族本就
+        改不了状态码，由各自的 try 就地收尾）。接住之后主动断连 —— 请求体可能没
+        读完，keep-alive 会把剩下那半截当成下一个请求的开头。
+        """
+        try:
+            return super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # 客户端自己先走了（换页时把连接收了）：这不是「操作失败」，不刷进展栏。
+            self.close_connection = True
+            return None
+        except Exception as e:
+            self.close_connection = True
+            try:
+                log("--- 操作失败（%s %s）：%s: %s ---"
+                    % (getattr(self, "command", "?"), str(getattr(self, "path", "?"))[:120],
+                       type(e).__name__, e))
+                for line in traceback.format_exc().strip().splitlines()[-4:]:
+                    log("    " + line)
+            except Exception:
+                pass
+            if not getattr(self, "_sent_response", False):
+                try:
+                    self._json({"ok": False,
+                                "msg": "这个操作没做成：%s: %s"
+                                       % (type(e).__name__, str(e)[:140])})
+                except Exception:
+                    pass
+            return None
+
     def _send(self, code, ctype, body, extra=None):
+        # 这一发已经回过话了（见 handle_one_request 的总兜底）：它只对「还没回过话」
+        # 的异常补一句，绝不往一条已经发出去的响应后面再接一段 JSON。
+        self._sent_response = True
         if isinstance(body, str):
             body = _encode_body(body)
         extra = extra or {}
@@ -5004,6 +5053,7 @@ class Handler(BaseHTTPRequestHandler):
     # 走 chunked：每段正文一个 JSON 行，最后来一个收尾块。写完主动断连 ——
     # 本机自己的页面，重连一次的开销远小于把 chunked 的半开连接留在那儿的风险。
     def _sse_start(self):
+        self._sent_response = True
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-store")

@@ -282,6 +282,17 @@ run "视频转笔记归属（章节起点不可用 / 新段不继承旧段字段
 # 跳系统浏览器 —— 那正是需求想避免的。名册只有 VT_PORTALS 一处，按钮与接线都照它来；这条
 # 静态钉住名册、顶部渲染、接线与「复用同一条 /api/browse」四件事，纯文件走查 + 离线纯函数。
 run "视频转笔记顶部入口（哔哩哔哩 / YouTube 走内置浏览器）" "$PY" tests/check_video_portal.py
+# 用户要的是「砍掉识别、变成剪藏那颗手指、一点即可」。这一条把三件事钉在源码上：
+# ① 这屏真的换成 .clipfinger（图标 + 外圈那道环），旧的步骤条与「识别」那颗钮不在了；
+# ② 点一下就是「认链接 + 开跑」一条道走到底，中间不再要人第二次确认，也没有剪贴板
+# 权限时只出一句提示、不报错；③ 进度收在那圈环上（只有一处半径 33 的周长真相），
+# 面板出现用的是那条自带 reduce 的动画。纯文件走查 + 离线读常量，--fast 带上。
+run "视频转笔记手指（一点就跑 / 环即进度 / 旧识别步骤条不在）" "$PY" tests/check_video_finger.py
+# RSS 订阅那一栏的文本框原来定高两行，长链接把字挤成一团。现在改成「一行起步、跟着
+# 内容自己长，长到上限再内部滚」。这一条钉住 clipGrow 只对带 .one 的框起作用、高度
+# 只由 JS 一处写（CSS 里那份 max-height 不再被脚本覆盖）、#fTa / #vTa 都用 rows="1"
+# 且占位文案是单行、以及长链接靠 word-break 断开而不是把行高压扁。纯静态。
+run "订阅文本框自适应（一行起步 / 长到上限再滚 / 一处真相）" "$PY" tests/check_clip_grow.py
 # 「重建」读的是磁盘上那份 summary.json（用户改得动），不是模型刚给的那一份：一章被
 # 改成字符串、或少了 title，`_chapter_bodies` 原先就 AttributeError / KeyError，而
 # /api/video 只接 ValueError —— 异常穿出去就是连接被甩（界面上是「点了没反应」）。
@@ -319,6 +330,18 @@ run "转写时长越界值（inf / NaN 不再变成时间轴里的 Infinity）" 
 # 一起钉住：脏段落存得下、脏账本读得开、两处视图用同一份干净数据、真 emoji 一个字不动、
 # 好数据不改、成功与失败都不留 .tmp。纯逻辑 + 临时目录里的一本假书，归静态段。
 run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 真 emoji 不动）" "$PY" tests/check_video_surrogate.py
+# 视频转笔记最后一步要问外站的 LLM（/chat/completions）。对方回的正文形状没人保证，
+# 而 `_llm_content` 与 SSE 兜底那两段都是裸的 `.get` 链 —— `{"choices": ["oops"]}`、
+# `{"choices": [{"message": "hi"}]}`、SSE 里 `data: []` / `data: 0` 这些「是合法 JSON、
+# 但不是对象」的回包，`.get` 当场 AttributeError。这两段都在 `urlopen` 的 try **之外**，
+# 异常一路穿出 `llm_chat`（调用方只接 ValueError），整趟转笔记带着英文报错结束，而不是
+# 本就说好的「认不出来 / 这次没说话」。server 那边 `choice_piece` / `completion_text` /
+# `agent_deltas` 早就是这把尺子（非表当空、choices 不是列表当空表、content 分段数组拼起来），
+# 同一个文件里的 `_post_audio` 也兜过 `isinstance(payload, dict)`。这一条把 `llm_chat` 的
+# 两个读口接到同一把尺子上，钉四层：纯函数、_llm_content 各级脏形状、假 urlopen 的十条
+# 端到端回包（含 SSE）、以及源码接线；另留「旧写法确实漏 AttributeError」的对照防空转。
+# 全程离线，归静态段，--fast 也得带上。
+run "视频转笔记 LLM 回包形状（脏 choices / message / SSE 不带走整趟流水线）" "$PY" tests/check_video_llm_shape.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
@@ -606,6 +629,19 @@ run "封面规则（首图挑选 / 内网拦截 / 落盘与补取）" "$PY" test
 # 就是 60 个请求同时砸出去（实测首屏可见的只有 12 张）。这一条把「滚到眼前才点亮」的接线
 # 钉在静态段，同时守住那几代收口（Referer / 协议归一 / 图床退路 / 首字书脊）没被顺手拆掉。
 run "封面按需加载（滚到眼前才点亮 / 不一次砸出 60 个请求）" "$PY" tests/check_cover_lazy.py
+# 上一条修的是瀑布那一面；叠卡那一面当时留了一句没核对的假设 ——「一次只摊 7 张，
+# 都在视口里」，于是把整张舞台都交给了 paintCovers（margin 无穷大）。可 fillGrid 把
+# **整批**（SHELF_BATCH = 60 本）都塞进舞台，applyStack 只把远的那几张贴上 opacity:0 的
+# saway / sgone —— 它们仍在文档里、仍有布局盒，于是 60 张封面照样一次全发出去。
+# 2026-10-16 真机实测：修前叠卡 60 个 /api/cover，修后 4 个（光标在最前）＋ 每翻一下补 1 张。
+# 这一条把「叠卡只点亮扇形里那几张、翻页再跟上」的接线钉住，同时守住瀑布那面不被误伤。
+run "封面按需加载·叠卡（只点亮扇形 / 翻页跟上 / 不整批砸出）" "$PY" tests/check_cover_stack_lazy.py
+# 前两条管的是书架那一面；书库里还有一处自己造封面图的地方 —— localCard()，本地书架与
+# 「已入库的剪藏」两格共用。这两格是一次把整格的书全铺进 .sgrid（没有书架那种分批），
+# 而卡片原来在游离节点上就赋了 src，于是进一次本地书架就是多少个封面请求同时砸出去。
+# 现在改走 extCoverImg + 铺完 paintCovers(grid)，和书架那面同一套；这一条把接线钉住，
+# 并守住瀑布 / 叠卡两面与详情大图不被误伤。
+run "封面按需加载·本地书架（整格铺完再点亮 / 藏着的格不点亮 / 不直接糊 src）" "$PY" tests/check_local_cover_lazy.py
 # 云同步是唯一一条「把用户文件写到本机之外」的通路：配置怎么合、密码会不会回显、
 # 路径怎么拼（WebDAV 建目录曾经拼出 …/files/u//guizang，和 PUT 的落点不是同一处）、
 # 传输失败怎么收尾。真实请求由记账的假 _http 顶掉，一次网络都不出，归静态段。
@@ -654,6 +690,13 @@ run "AI 小结 JSON 抠取（花括号开场白不吃掉后面的真导图）" "
 # 这一条把「落盘前先摘掉落单的半个代理码点、真 emoji 与 ZWJ 一个字不动」钉住，并带
 # 一条「不清就写当场 UnicodeEncodeError」的对照。纯函数 + 临时沙盒，归静态段。
 run "AI 小结坏字符（半个代理码点不再让小结悄悄存不下去）" "$PY" tests/check_ai_sum_surrogate.py
+# 上三条管的是小结的「内容」，这一条管小结的「按钮」：模式条 #aiSumStyle 借了阅读设置
+# 的 .rdseg 外观类，而点击委托原来按这个类名一把抓，点「学习理解」先落进 rdPickCfg
+# ——拿 undefined 当键写进 rdCfg 然后 return，模式换不掉、learn 那份不落盘（真机套件
+# check_ai_summary_ui 里红的那 6 条全是这一条的后果）。这一条钉住「阅读偏好认的是
+# data-rd 这个记号，不是类名」，并把产品里那份 rdPickCfg 抽到 node 里跑：脏分段一个键
+# 都不许动，真设置行照旧改得动；外加一条「改之前那份会写出 'undefined' 键」的对照。
+run "AI 小结模式条（借样子的分段不吃点击 / 不偷改阅读偏好）" "$PY" tests/check_ai_sum_style.py
 # Markdown 里 `# 注释` 和 `# 标题` 只差「在不在围栏代码块里」，凡按 `^#+ ` 认结构的地方
 # 漏了这一层就会把代码当章节讲。这一条把尺子（两串围栏 / 收尾同种且不短于开头 / 未收尾
 # 吃到文末 / 行号仍按原文）与两处接线（ai_sum 的兜底导图、book_notes 的条目子分支）一起钉住。
@@ -747,6 +790,14 @@ run "内置浏览器（内网拦截 / base 与跳转脚本 / 透传 / 接线）"
 # 事件来收，提示就永久留在页面上。三处开关（真取才亮 / load 收 / 离开这一屏收）在假 DOM 里
 # 真调一遍，纯静态 + node，不联网、不起服务，归 --fast。
 run "内置浏览器加载提示（同一地址不残留 / 取回收 / 离开收）" "$PY" tests/check_browse_loading.py
+# 用户报「油管打开无法显示」。取回其实成了，黄在后面两段：YouTube 返回的 HTML 只有
+# 一层空壳，正文全在 `var ytInitialData = {…}` 那坨 JSON 里；而 iframe 的 sandbox
+# 故意不给 allow-same-origin（不让它读归藏的 localStorage），脚本一碰就抛 —— 放宽
+# sandbox 等于拿用户的界面换一页视频，所以改为自己读那坨 JSON、用我们自己的话铺一
+# 页静态目录。这一条离线钉住：认站（含 youtube.com.evil.cn 这种假域名不认）、配对扫
+# JSON、新旧两代 renderer 都收、缩略图只引本站图床、视频 id 形状不放行内注入、目录里
+# 那枚「转成笔记」接回 vidUseLink、以及只在 YouTube 上换这一页（哔哩哔哩照旧原样）。
+run "油管静态目录（自己读 ytInitialData / 两代 renderer / 转成笔记接回）" "$PY" tests/check_youtube.py
 # 上面那两条管的是「取什么」，这一条管的是「取回来怎么解」。`charset=…` 是对方站点声明的，
 # 一个手滑的名字（实测有页面写 `charset=x-unknown`）或一个压根不是文本编码的名字会让
 # bytes.decode 抛 LookupError —— `errors="replace"` 管字节不管名字，于是剪藏冒出运行期错误、
@@ -794,9 +845,21 @@ run "跳转护栏（302 到内网不算数 / 五条取页路都过闸 / 公网�
 # --main-w 一处定义、main 的 max-width 只认它、任何按页给 main 另开宽度的口子都判失败，
 # 顺带守住滚动条常驻槽位与「视图常驻、只挪 hidden」这两条不闪的前提。
 run "切页一致性（一块舞台 / 无横跳 / 常驻视图）" "$PY" tests/check_pane_uniform.py
+# 上一条管的是「左右不跳」，这一条管用户报的另一半：「每次切换不同页面都会上下闪动」。
+# 根子是视图切换时谁也没把窗口滚回开头，上一屏滚到哪儿、新屏就落在哪儿，看着像闪一下
+# 还把人甩到半空。现在 paneEl 只在真的换屏时把窗口带回顶端（本来就贴着顶就不动它），
+# 全局只留这一处 scrollTo；阅读器「续读回上次那一行」仍照旧，因为它在换屏之后才铺。这
+# 一条钉住顺序（先认新屏再滚再滑入）、钉住不留下另一个 paneScroll 的旁路、也钉住别把
+# 续读改坏。纯文件走查，不联网、不开浏览器。
+run "换屏落回开头（一处 scrollTo / 不闪动 / 续读照旧）" "$PY" tests/check_view_switch.py
 # 叠卡快速切书那条 bug（R4-4）：常驻 will-change 堆合成层、applyStack 无条件重刷整台卡、
 # 批尾每翻一步同步重铺 —— 这三条都随书量放大成卡顿，且都能在源码里一眼钉死。只读 ui.html。
 run "叠卡性能（只在翻动提层 / 位置没变不碰卡 / 批尾补卡去抖）" "$PY" tests/check_stack_perf.py
+# 用户报「叠卡布局下左右切换页数，底部和书籍重叠」。那些边距是写在 CSS 里的数，
+# 光看源码看不出够不够，所以这条把数读出来自己算一遍：卡最矮时侧边那两张的投影
+# 落不进导航那一栏、卡面最宽的三档都落在容器里、封面 2:3 不歪、挪开的距离小于底部
+# 留白、层的 z-index 都在导航之下。数字只在 CSS 一处，这条就是那条尺子。纯静态。
+run "叠卡几何（投影不压导航 / 卡宽三档 / 封面 2:3）" "$PY" tests/check_stack_fit.py
 # 划线笔记那一屏改成书籍卡片瀑布流，并把「取书」时在本机划的线也并进来（R4-6）。
 # 前端读源码钉瀑布流版式与两个来源的合并、后端直接落一份 notes.json 再读回来，全离线。
 run "划线笔记瀑布流（书卡版式 / 微信 + 取书合并 / 同一套功能）" "$PY" tests/check_notebooks.py
@@ -989,6 +1052,14 @@ run "请求体数字字段脏形状（订阅整理的 index / limit / days 写�
 # 被 _action 的兜底接住后，递到界面上的是 `AttributeError: 'int' object has no attribute
 # 'strip'` 这类解释器原文。这一条补上那段盲区 + 真机回话体检，静态段跑。
 run "动作分派字段脏形状（/api/action 的 name / module / add / ids 写脏不再回 Python 报错）" "$PY" tests/check_action_dirty.py
+# 上面几条收的都是「服务怎么应答脏输入」；这一条补的是**兜底盖多宽**：/api/action 那一族
+# 的异常由 _action 就地接住，可其余 POST 路由（/api/book_state / /api/config / /api/import …）
+# 各自只有局部 try —— 落盘那一步（账本位置被占成目录、盘满、目录只读）没被圈住时，异常
+# 穿出 do_POST，http.server 只是把连接关掉，前端 await 收到 RemoteDisconnected，页面上
+# 就是「点按钮毫无反应」（与 test_server_fallback.py 立的规矩同一个症状，只是那条只盯
+# /api/action）。兜底提到 handle_one_request 之后，这一条用真服务把两条路由各喂一次落盘
+# 失败，钉住 200 + 人话 + 日志 + 对照组。自己起服务、自己临时目录，不联网、不开浏览器。
+run "POST 路由总兜底（一条路由漏接的异常不再掐断连接）" "$PY" tests/check_post_guard.py
 # 上面收的都是「服务怎么应答脏输入」；这一条管的是**干活的人自己**：tools/pr_triage.py
 # 是合 PR 之前用来摊开「哪些会撞、哪些疑似同一件事做了两遍」的预扫描。它平时不在提交流程
 # 里跑，坏了没人知道 —— 直到某次漏掉该裁的重复、或把干净的一批报成一堆假冲突。判定全靠
