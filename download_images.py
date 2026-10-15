@@ -9,6 +9,11 @@
 半截图；下一轮只看大小（>1KB 就跳过），半截图正好过线，于是被当成下好了，
 一张裂图就此钉死到用户手动去删。所以除了原子改名，这里还顺着文件头认一眼
 是不是真图片，老版本留下的坏文件也能重下。
+
+地址也要过一道闸：`url` 是从网页扒下来的，默认 opener 连 `file:///etc/passwd`
+都会读回来写进 images/（之后还会跟着书库同步出去）。跳转那道闸只管跳转目标，
+管不了「一开始喂进来的就是 file://」，所以取之前先按 clip_article 那一份 scheme
+名单核一遍；清单阶段的跳过与 download_one 自己的拒绝共用同一个判据。
 """
 import json, glob, os, re, socket, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -81,6 +86,26 @@ def is_complete(fpath, min_bytes=SKIP_BYTES):
         return False
 
 
+def fetchable_url(url):
+    """这个地址够不够格替用户去取：只认 http / https。
+
+    `url` 是从网页扒下来的 raw/*.json 里的外部数据，什么都可能是：
+
+      · `file:///etc/passwd` —— 默认 opener 会老老实实把本机文件读回来写进
+        images/，之后还会跟着书库同步出去；`data:` / `ftp:` / `gopher:` 同理，
+        都不是「下了一张插图」；
+      · 半截 IPv6（`http://[::1`）让 urlparse 自己抛 ValueError —— 一条脏记录
+        不该带走整批图，解不出来一律当不合法。
+
+    scheme 名单不在这里另抄一份：与剪藏 / 平台解析 / 内置浏览器共用
+    `clip_article.ALLOWED_SCHEMES`，以后加规则只改一处。
+    """
+    if not isinstance(url, str):
+        return False
+    parts = clip_article.split_url(url)
+    return bool(parts) and parts[0] in clip_article.ALLOWED_SCHEMES
+
+
 def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
     """下一张图，返回 "ok" / "skip" / "fail:…"。
 
@@ -89,6 +114,10 @@ def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
     """
     if is_complete(fpath):
         return "skip"
+    if not fetchable_url(url):
+        # 一开始就不该取的地址（file: / data: / scheme 空）：一次都别发，
+        # 也别把重试次数浪费在它身上。
+        return "fail:blocked-url"
     tmp = fpath + ".part"
     last = "fail:empty"
     for attempt in range(retries):
@@ -172,7 +201,13 @@ def collect_tasks(raw_dir, img_dir):
                 continue
             url = im.get("url")
             target = safe_target(img_dir, im.get("file"))
+            # 认不出的 scheme（file: / data: / ftp: / 空）与缺 url / 越界文件名同一档：
+            # 只跳过这一条，不进任务清单。download_one 自己还会再核一次（它是公开入口，
+            # 导出收尾那条路直接调它）。
             if not isinstance(url, str) or not url.strip() or target is None:
+                skipped += 1
+                continue
+            if not fetchable_url(url):
                 skipped += 1
                 continue
             if target in seen:
