@@ -94,8 +94,13 @@ def _fenced_mask(text):
     口径（开栏三个以上同种字符、反引号 info string 里不许再有反引号、收栏同种且不短于
     开栏并只剩空白、没有收栏的块一直吃到文末）只有一份实现，在 `md_fence`；这一层
     只负责「按 \\n 切行」，好让返回的 mask 与 `text.split("\\n")` 逐行对得上。
+
+    切行本身也走 `md_fence.split_lines`，不再自己写 `.split("\\n")`：md_fence 的
+    `prose_lines`（大纲 / 导图 / 笔记）与这里必须是同一条行尺子，各写一份迟早分叉
+    —— `str.splitlines()` 认的那串 Unicode 换行就是分叉点，一分开切章与大纲就会
+    对同一段稿子给出两种结构。
     """
-    return md_fence.fence_mask((text or "").split("\n"))
+    return md_fence.fence_mask(md_fence.split_lines(text))
 
 
 def _split_at(text, pattern):
