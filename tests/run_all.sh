@@ -594,6 +594,16 @@ run "flomo 便签半个代理码点（手记 / 脏账本 / 清空 / CSV 不整�
 # 随机串），写失败先把临时件收干净再抛。纯函数 + 系统临时目录 + 两个真线程并写，
 # 不联网、不开浏览器、不起服务。
 run "flomo 账本落盘（两个线程不共用临时件 / 写失败不留 .tmp）" "$PY" tests/check_flomo_atomic.py
+# 账本之外，flomo 这条路上还有两个写口把临时件写死成固定名：`to_shelf` 往书目录写的
+# 那份 meta.json（`mp + ".tmp"`）、`write_portrait` 写的画像 JSON 与 Markdown
+# （`name + ".tmp"`）。两条笔记被收进同一个书目录时，先收尾的 os.replace 把件搬走，
+# 后一个当场 FileNotFoundError —— 书进了书架，回包却是「收进书架失败」；画像缺失时
+# `read_portrait` 现算一份落盘，Agent 两条读画像的请求也会撞上同一个固定名。这一条
+# 把两处都换到 `_write_text_atomic`（与账本共用 `_tmp_for`：pid + 随机串，写崩收干净
+# 再抛），并拿 replace 探针钉住「两次写给出的临时件名不同」；旧的固定名跑这一条必红
+# （已实测：并发收书会真抛 FileNotFoundError）。纯函数 + 系统临时目录 + 真线程并写，
+# 不联网、不开浏览器、不起服务。
+run "flomo 收书 meta / 画像落盘（固定临时名收口 / 两个线程不扑空）" "$PY" tests/check_flomo_text_atomic.py
 # 写作那一格是同一个故事的另一本账：meta.json（rev / words / created / updated / 灵感角度）
 # 与 _books.json（每本书的 created / updated / chapters）同样会被手工编辑、被旧版本写成别的
 # 形状，而读它们的地方原来一律 `int(v or 0)`、`list(v or [])` 直读直用：一个 "很多" 让写作屏

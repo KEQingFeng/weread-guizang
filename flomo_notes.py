@@ -507,6 +507,42 @@ def load(flomo_dir):
     return d
 
 
+def _tmp_for(path):
+    """这条写口自己的临时件名：pid + 一小串随机，不再用固定的 `path + ".tmp"`。
+
+    后端是 `ThreadingHTTPServer`，同一个目标可能被两个请求线程同时写（用户点一下 +
+    Agent 读一次、或两个窗口各按一下）。共用同一个临时件时：
+
+      · 先收尾的 `os.replace` 把临时件整个搬走，后一个写手轮到自己那一句时文件名
+        已经不在，抛 `FileNotFoundError`（用户看到的是「点了没反应」）；
+      · 后来者 `open(tmp, "w")` 还会把前一个人写了一半的临时件截断，两边各自按自己的
+        偏移往下写，顶成正式文件的是两份内容交织的那一份。
+
+    名字一次一个，两条写就互不打扰。口径与 `save` / `anna_state._atomic_write` /
+    `ui_server._write_json` 一致。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _write_text_atomic(path, text):
+    """文本类落盘：先写同目录的独名临时件，写完 `os.replace` 一次顶替。
+
+    写崩（磁盘满、坏码点、被强杀）时先把临时件收干净再抛，旧档在整个过程里始终是
+    完整的那一份，也不在目录里留没人认领的 `.tmp`。
+    """
+    tmp = _tmp_for(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save(flomo_dir, data):
     """整本账落盘（先写 .tmp 再 replace，写一半不毁旧档）。
 
@@ -531,7 +567,7 @@ def save(flomo_dir, data):
     """
     os.makedirs(flomo_dir, exist_ok=True)
     dest = path_in(flomo_dir)
-    tmp = "%s.%d.%s.tmp" % (dest, os.getpid(), uuid.uuid4().hex[:8])
+    tmp = _tmp_for(dest)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(drop_lone_surrogates(data), f, ensure_ascii=False, indent=1)
@@ -944,10 +980,10 @@ def to_shelf(flomo_dir, memo_id, out_root, import_fn=None):
                  "tags": list(m.get("tags") or []), "words": int(m.get("words") or 0),
                  "chars": int(m.get("words") or 0), "images": saved,
                  "imported_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    tmp = mp + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, mp)
+    # 这份 meta.json 与账本走同一把尺子：临时名一次一个、写完原子顶替、写崩收干净再抛。
+    # 固定名（`mp + ".tmp"`）下同一条笔记被两处同时收进书架时，先收尾的那个 replace 会把
+    # 件搬走，后一个当场 FileNotFoundError —— 书已经进了书架，回包却是「收进书架失败」。
+    _write_text_atomic(mp, json.dumps(meta, ensure_ascii=False, indent=2))
     info["meta"] = meta
     info["title"] = info.get("title") or memo_title(m)
     set_book(flomo_dir, m["id"], info.get("id"))
@@ -1095,16 +1131,19 @@ def portrait_dir(flomo_dir):
 
 
 def write_portrait(flomo_dir, data=None):
-    """算一次、写一份（JSON 给机器、Markdown 给人和 Agent）。返回两个路径。"""
+    """算一次、写一份（JSON 给机器、Markdown 给人和 Agent）。返回两个路径。
+
+    `read_portrait` 在画像缺失时会现算一份落盘，而 Agent 读画像的请求可以有两条同时
+    进来 —— 固定的 `name + ".tmp"` 会让先 rename 的那个把件搬走，后一个 rename 当场
+    FileNotFoundError。两份都走 `_write_text_atomic`：临时名带 pid 与随机串，写崩把
+    件收干净再抛。
+    """
     data = data if data is not None else load(flomo_dir)
     p = build_portrait(data)
     d = portrait_dir(flomo_dir)
     for name, text in ((PORTABLE_JSON, json.dumps(p, ensure_ascii=False, indent=1)),
                         (PORTABLE_MD, portrait_markdown(p))):
-        tmp = os.path.join(d, name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp, os.path.join(d, name))
+        _write_text_atomic(os.path.join(d, name), text)
     return {"json": os.path.join(d, PORTABLE_JSON),
             "md": os.path.join(d, PORTABLE_MD), "portrait": p}
 
