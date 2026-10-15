@@ -579,6 +579,15 @@ run "写作坏字符（半个代理码点不把保存打成失败 / emoji 不动
 # 「干净账读得出 → 加 BOM 后逐字段相同 → 旧读法确实抛的对照 → 带 BOM 再建书原来那本还在
 # 且写回不带 BOM」。纯离线，临时沙盒书库，归静态段。
 run "写作册账 BOM（带 BOM 的书目不再被当成空账冲掉）" "$PY" tests/check_writer_bom.py
+# 上面两条管的是「脏字符写不进 utf-8」与「带 BOM 的册账读不出」。这一条管同一格的反面：
+# **读进来**的那一刀。draft.md 与 versions/*.md 是用户能直接编辑的正文，也会被云同步 /
+# 旧版本 / 别的编辑器写回来；`read_text`（read / brief / note / save / 书架卡片共用的唯一
+# 读口）与 `_read_file`（快照列表 / 回退）原来是裸 `open(..., encoding="utf-8")`、只兜
+# OSError —— 一个手滑另存成 GBK 的稿子、或一次写到一半的断电，严格 UTF-8 读法当场
+# UnicodeDecodeError，整篇打不开、存盘被顶回、快照一列都列不出来。章节正文早按「坏字节
+# 换 U+FFFD、其余照旧」收在 `book_export.read_chapter_file` 一处，写作这一格接过去即可。
+# 这一条钉「六个入口都不抛 / 坏字节只丢它自己 / 干净正文一字不动 / 接线同一把尺」，离线。
+run "写作坏字节（另存成 GBK / 写一半的稿子读得了、存得回、快照列得出）" "$PY" tests/check_writer_badbytes.py
 # 转写这条线 1.0.8 整体云化：本地那套（mlx-whisper / faster-whisper、权重缓存、镜像回退）
 # 全砍了，只留云端一路。条约是「引擎恒为 cloud、老配置里的 mlx / faster 静默归正不报错、
 # 地址与 Key 存得下也读得回、回显只给末四位不许吐明文」，外加「本地模型那一问必须明说移除

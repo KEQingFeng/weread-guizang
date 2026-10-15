@@ -30,6 +30,7 @@ import re
 import time
 import uuid
 
+import book_export
 import book_layout
 from md_fence import prose_lines
 
@@ -272,11 +273,17 @@ def load_meta(draft_dir):
 
 
 def read_text(draft_dir):
-    try:
-        with open(draft_path(draft_dir), encoding="utf-8") as f:
-            return _drop_surrogates(f.read())
-    except OSError:
-        return ""
+    """读正文。文件不在回空串，坏字节按书库那把共用的容错尺换成替代符。
+
+    draft.md 是用户能直接编辑的正文，也可能被云同步 / 旧版本 / 别的编辑器写回来：
+    一个手滑另存成 GBK 的稿子、或一次写到一半的断电，严格 UTF-8 读法当场
+    UnicodeDecodeError —— 而这里是 read / brief / note / save / 书架卡片共用的
+    唯一读口，一句异常就让整篇稿子打不开、存盘也被顶回。章节正文早就按「认不出的
+    字节换 U+FFFD、正文其余照旧」的口径收在 `book_export.read_chapter_file`
+    一处（书库第七格的稿子本来也是书库里的一本书），这里接过去，不再各写一把。
+    """
+    text = book_export.read_chapter_file(draft_path(draft_dir))
+    return _drop_surrogates(text) if text is not None else ""
 
 
 def read(books_root, book_id):
@@ -417,11 +424,13 @@ def versions(draft_dir):
 
 
 def _read_file(p):
-    try:
-        with open(p, encoding="utf-8") as f:
-            return f.read()
-    except OSError:
-        return ""
+    """读一份快照正文：与 read_text 同一把尺（坏字节换替代符），读不到回空串。
+
+    快照和 draft.md 是同一类东西（用户能直接改的 .md），`versions()` / 回退都从
+    这里读 —— 一份另存成 GBK 的旧快照不该让整列快照列不出来、也回退不了。
+    """
+    text = book_export.read_chapter_file(p)
+    return text if text is not None else ""
 
 
 def version_text(draft_dir, name):
