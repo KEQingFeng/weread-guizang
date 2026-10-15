@@ -13750,6 +13750,11 @@ function renderFlomoView() {
    知识笔记 / 思维导图 → 落成书库里的一本，之后阅读、划词笔记、导出 EPUB/PDF 全走现成那套。
    这条线是分钟级长任务：进度从「进展」日志里读那一行 [阶段 45%] 说明，收尾用##GUIZANG##那行
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
+/* 顶部右侧那两颗入口：想让用户先逛着挑，就不必跳出归藏开浏览器。点开走的是共用的
+   内置浏览器（openBrowse → /api/browse），逛到想转的那条再把链接贴回下面的输入框。
+   名册只写这一处：按钮与接线都照着它来，日后加一个站点不用改两遍。 */
+const VT_PORTALS = [['vBili', '哔哩哔哩', 'https://www.bilibili.com/'],
+                    ['vYt', 'YouTube', 'https://www.youtube.com/']];
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
 let vidStopping = false;   // 「停止」已经点下、收尾还没走完：按钮立刻改成「正在停」
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
@@ -14839,6 +14844,11 @@ function wireVideo(p) {
   const open = p.querySelector('#vOpen');
   if (open) open.onclick = () => post('openbooks', {module: 'video'})
     .then(r => whisper(r.msg || '已打开')).catch(() => {});
+  // 顶部那两个外站入口：复用共用的内置浏览器，不另开弹窗、也不跳系统浏览器。
+  VT_PORTALS.forEach(([id, , url]) => {
+    const b = p.querySelector('#' + id);
+    if (b) b.onclick = () => openBrowse(url);
+  });
   if (VIDEO.plan) VIDEO.plan.onclick = vidDoPlan;
   if (VIDEO.start) VIDEO.start.onclick = vidStart;
   if (VIDEO.stop) VIDEO.stop.onclick = vidStop;
@@ -14905,8 +14915,12 @@ function wireVideo(p) {
 }
 
 function renderVideoView() {
+  // 顶部右侧：先两个「去逛」的外站入口，再是原来那颗打开文件夹的钮。
+  const portals = VT_PORTALS.map(([id, name]) =>
+    `<button class="deed" id="${id}" style="height:30px"
+       title="在归藏的内置浏览器里逛${name}">${name}</button>`).join('');
   const {p, body, fresh} = viewPane('video', viewHeader('视频转笔记',
-    `<button class="deed" id="vOpen" style="height:30px">打开这一格的文件夹</button>`, 'video'));
+    `${portals}<button class="deed" id="vOpen" style="height:30px">打开这一格的文件夹</button>`, 'video'));
   if (fresh) {
     const fmts = VT_FMTS.map(([k, n]) => `<option value="${k}">${n}</option>`).join('');
     body.innerHTML = `<div class="vtwrap" id="vWrap">
