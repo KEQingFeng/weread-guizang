@@ -128,6 +128,66 @@ def _drop_surrogates(v):
     return v
 
 
+# ---------- 落盘：临时件一次一个名字 ----------
+
+def _tmp_name(path):
+    """同目录临时件，一次一个名字（进程号 + 一小串随机）。
+
+    写作这一格有三个写口会撞在同一个目标上，而后端是 `ThreadingHTTPServer`：
+
+      · 正文 `draft.md` —— 编辑器的自动存盘与「手动保存」并着来，两个请求各自带着
+        自己的 rev 进 `save`，落的是同一个 `draft_path`；
+      · `meta.json` —— `/api/writer` 那次 `save` 与「让 AI 给几个方向」回包后的
+        `remember_sparks` 都写它（`ui_server.writer_ai_after`），两次写之间隔着一趟
+        模型调用，最容易撞上；
+      · 册账 `books.json` —— 建书 / 归章 / 排序 / 删章各是一条 POST，两次点击就是
+        两个请求线程。
+
+    `tmp = path + ".tmp"` 的老写法下有两种代价：先收尾的那个 `os.replace` 把共用的
+    临时件整个搬走，后一个写手轮到自己那一句时件已经不在，抛 `FileNotFoundError`
+    （界面上是「存不下」，可前一笔明明落盘了）；更坏的是后来者 `open(..., "w")` 把
+    前一个人写了一半的件截断，两边各按自己的偏移往下写，`os.replace` 顶成正式文件的
+    是**两份内容交织**的那一份 —— `draft.md` 的读口认它就是全部正文，册账解不动就
+    整份退回空账（写作屏的书树跟着一起空）。
+
+    口径与 `book_notes._tmp_name` / `ui_server._write_json` 一致：临时件名字一次一个。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """把写坏的临时件收掉；收不动（已被别人搬走 / 权限）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def _write_text(path, text):
+    """正文类落盘：先写旁边的临时件，写完一次性改名顶替，失败收掉残件再抛。"""
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        # 中止信号不继承 Exception，只兜 except Exception 会在半路上漏件。
+        _discard(tmp)
+        raise
+
+
+def _write_json(path, obj):
+    """账本类落盘：与 `_write_text` 同一把尺子，只是序列化那一步不同。"""
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        _discard(tmp)
+        raise
+
+
 # ---------- 路径与 id ----------
 
 def new_id():
@@ -344,10 +404,7 @@ def save(books_root, book_id, text, title=None, rev=None):
     # 书架卡片、AI 小结、MCP 列书看到的字数才和写作平台里那个「字数」是同一个。
     meta["chars"] = meta["words"]
     meta["updated"] = int(time.time())
-    tmp = draft_path(d) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(body)
-    os.replace(tmp, draft_path(d))
+    _write_text(draft_path(d), body)
     meta = _write_meta(d, meta)
     return True, meta
 
@@ -359,11 +416,7 @@ def _write_meta(draft_dir, meta):
     只洗要写盘的副本：留在手里那一份带着坏字符，下一步就是发响应时 UnicodeEncodeError。
     """
     meta = _drop_surrogates(dict(meta or {}))
-    tmp = meta_path(draft_dir) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        import json
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, meta_path(draft_dir))
+    _write_json(meta_path(draft_dir), meta)
     return meta
 
 
@@ -584,14 +637,11 @@ def load_books(books_root):
 
 
 def save_books(books_root, books):
-    p = books_path(books_root)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        # 册账同样是 ensure_ascii=False 写的：一处落单的半个代理码点就能让整本册账
-        # 写不出去（写作屏的书树跟着一起空），落盘前统一摘干净。
-        json.dump(_drop_surrogates({"v": 1, "books": list(books or [])}),
-                  f, ensure_ascii=False, indent=2)
-    os.replace(tmp, p)
+    # 册账同样是 ensure_ascii=False 写的：一处落单的半个代理码点就能让整本册账
+    # 写不出去（写作屏的书树跟着一起空），落盘前统一摘干净。临时名一次一个，
+    # 两次建书 / 归章并着来时不会互相把对方的临时件搬走或截断。
+    _write_json(books_path(books_root),
+                _drop_surrogates({"v": 1, "books": list(books or [])}))
     return True
 
 
