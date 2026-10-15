@@ -507,6 +507,29 @@ def load(flomo_dir):
     return d
 
 
+def _tmp_name(path):
+    """同目录临时件名：进程号 + 一小串随机，两个写手不撞同一个名字。
+
+    便签这一族（账本 `save`、画像 `write_portrait`）都挂在 `ThreadingHTTPServer`
+    的请求线程上，而同一个落点有两条路会同时走到：账本是「手记 / 打标签 / 忘一条 /
+    清空 / 导入」几条路由，画像则是界面那一次「生成画像」与 Agent 走
+    `mode=portrait` 的那一次（`read_portrait` 在文件还不存在时会现算一份并落盘）。
+    固定临时名会让先收尾的那个 `os.replace` 把共用的件整个搬走，后一个写手当场
+    `FileNotFoundError`（请求带异常出去，用户看到「点了没反应」）；更坏的是后来者
+    `open(..., "w")` 把前一人写了一半的件截断，两边各按自己的偏移往下写，顶成正式
+    文件的是两份内容交织的那一份。名字带 pid 与随机串之后，各写各的、互不踩。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """收走写崩的临时件。清理自己失败（含路径不合法）不该把原异常换掉。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def save(flomo_dir, data):
     """整本账落盘（先写 .tmp 再 replace，写一半不毁旧档）。
 
@@ -531,17 +554,14 @@ def save(flomo_dir, data):
     """
     os.makedirs(flomo_dir, exist_ok=True)
     dest = path_in(flomo_dir)
-    tmp = "%s.%d.%s.tmp" % (dest, os.getpid(), uuid.uuid4().hex[:8])
+    tmp = _tmp_name(dest)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(drop_lone_surrogates(data), f, ensure_ascii=False, indent=1)
         os.replace(tmp, dest)
     except BaseException:
         # 与 board / mindmap / login / sync / anna_state 那几个写口同一档：收走残件再抛。
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        _discard(tmp)
         raise
 
 
@@ -1095,16 +1115,36 @@ def portrait_dir(flomo_dir):
 
 
 def write_portrait(flomo_dir, data=None):
-    """算一次、写一份（JSON 给机器、Markdown 给人和 Agent）。返回两个路径。"""
+    """算一次、写一份（JSON 给机器、Markdown 给人和 Agent）。返回两个路径。
+
+    画像这一格有两只手，而且都在请求线程上：
+
+      · 界面那次「生成画像」——`/api/flomo/notes?mode=portrait`（`ui_server.py:4624`）；
+      · Agent 那次「先读画像再动手」——同一个路由，但走的是
+        `read_portrait()` 在 `portrait.json` 还不存在时现算一份并落盘那条路
+        （MCP 的 `flomo_portrait` 工具直接打这个口）。
+
+    两份文件原先各自共用一个固定名的临时件（`portrait.json.tmp` /
+    `portrait.md.tmp`）：两处同时第一次问画像时，先收尾的 `os.replace` 把共用的
+    件搬走，后一个写手轮到自己那一句就 `FileNotFoundError` —— 画像没写出来，
+    请求带着异常出去；反过来后开的那只手也可能把前一人写了一半的件截断，
+    顶上正式文件的是一份半截 JSON / 拼接过的 Markdown。现在两份文件都走
+    `_tmp_name`（pid + 随机串），写完原子顶替，写崩先把残件收干净再抛。
+    """
     data = data if data is not None else load(flomo_dir)
     p = build_portrait(data)
     d = portrait_dir(flomo_dir)
     for name, text in ((PORTABLE_JSON, json.dumps(p, ensure_ascii=False, indent=1)),
                         (PORTABLE_MD, portrait_markdown(p))):
-        tmp = os.path.join(d, name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp, os.path.join(d, name))
+        dest = os.path.join(d, name)
+        tmp = _tmp_name(dest)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, dest)
+        except BaseException:
+            _discard(tmp)
+            raise
     return {"json": os.path.join(d, PORTABLE_JSON),
             "md": os.path.join(d, PORTABLE_MD), "portrait": p}
 

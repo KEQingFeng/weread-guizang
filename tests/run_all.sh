@@ -580,6 +580,17 @@ run "flomo 便签半个代理码点（手记 / 脏账本 / 清空 / CSV 不整�
 # 随机串），写失败先把临时件收干净再抛。纯函数 + 系统临时目录 + 两个真线程并写，
 # 不联网、不开浏览器、不起服务。
 run "flomo 账本落盘（两个线程不共用临时件 / 写失败不留 .tmp）" "$PY" tests/check_flomo_atomic.py
+# 便签账本那一格收完了，画像这一格当时留在原地：`write_portrait` 写两份文件
+# （portrait.json / portrait.md），两份各自共用一个固定名临时件。这一格比账本更容易
+# 够着并发 —— 它有两只手，都在请求线程上：界面那次「生成画像」直接调
+# `flomo_notes.write_portrait`，而 Agent 走 MCP 的 flomo_portrait 打同一个 `mode=portrait`
+# 路由，`read_portrait()` 在文件还不存在时会现算一份并落盘（README 就是这么叮嘱 Agent
+# 的）。固定名下的两种代价与账本那格一模一样：先收尾的 replace 把共用的件搬走、后一个
+# 当场 FileNotFoundError；或者后来者把前一人写了一半的件截断，顶上的是半截 JSON /
+# 拼接过的 Markdown。现在两份都走 pid + 随机串，写完原子顶替，`except BaseException`
+# 先收残件再抛（中止信号不继承 Exception，这一档单有一条）。纯函数 + 系统临时目录 +
+# 六个真线程并写，不联网、不起服务、不开浏览器。
+run "flomo 记忆画像落盘（两只手不共用临时件 / 中止信号不留 .tmp）" "$PY" tests/check_flomo_portrait_atomic.py
 # 写作那一格是同一个故事的另一本账：meta.json（rev / words / created / updated / 灵感角度）
 # 与 _books.json（每本书的 created / updated / chapters）同样会被手工编辑、被旧版本写成别的
 # 形状，而读它们的地方原来一律 `int(v or 0)`、`list(v or [])` 直读直用：一个 "很多" 让写作屏
