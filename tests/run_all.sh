@@ -980,6 +980,14 @@ run "请求体数字字段脏形状（订阅整理的 index / limit / days 写�
 # 被 _action 的兜底接住后，递到界面上的是 `AttributeError: 'int' object has no attribute
 # 'strip'` 这类解释器原文。这一条补上那段盲区 + 真机回话体检，静态段跑。
 run "动作分派字段脏形状（/api/action 的 name / module / add / ids 写脏不再回 Python 报错）" "$PY" tests/check_action_dirty.py
+# 上面几条收的都是「服务怎么应答脏输入」；这一条补的是**兜底盖多宽**：/api/action 那一族
+# 的异常由 _action 就地接住，可其余 POST 路由（/api/book_state / /api/config / /api/import …）
+# 各自只有局部 try —— 落盘那一步（账本位置被占成目录、盘满、目录只读）没被圈住时，异常
+# 穿出 do_POST，http.server 只是把连接关掉，前端 await 收到 RemoteDisconnected，页面上
+# 就是「点按钮毫无反应」（与 test_server_fallback.py 立的规矩同一个症状，只是那条只盯
+# /api/action）。兜底提到 handle_one_request 之后，这一条用真服务把两条路由各喂一次落盘
+# 失败，钉住 200 + 人话 + 日志 + 对照组。自己起服务、自己临时目录，不联网、不开浏览器。
+run "POST 路由总兜底（一条路由漏接的异常不再掐断连接）" "$PY" tests/check_post_guard.py
 # 上面收的都是「服务怎么应答脏输入」；这一条管的是**干活的人自己**：tools/pr_triage.py
 # 是合 PR 之前用来摊开「哪些会撞、哪些疑似同一件事做了两遍」的预扫描。它平时不在提交流程
 # 里跑，坏了没人知道 —— 直到某次漏掉该裁的重复、或把干净的一批报成一堆假冲突。判定全靠
