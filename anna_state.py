@@ -294,12 +294,24 @@ def write_cmd(data_dir, term):
 
 
 def read_cmd(data_dir):
+    """读口令条唯一入口：坏 JSON / 半截档 / 非对象一律当「没写过」。
+
+    这一份和账本一样会被人手改、也可能留着旧版本写下的脏值，所以 `term` 在**读口**
+    就过一遍 `clean_term`（写口令条时用的是同一把尺子）。不洗的话，一个落单的半个
+    代理码点（形如 `{"term": "三体\\ud800"}`）会跟着 term 一路走到窗口那边：拼搜索
+    地址时 `quote` 抛 UnicodeEncodeError（这一句在 `check_cmd` 的 try 之外，异常直接
+    穿出、整趟窗口以「这一趟没走通」收摊），打进日志时 stdout 也抛同一个错（被 catch
+    成一句假的「这一页没打开」）。洗在唯一入口上，三个下游（搜地址 / 日志 / 写回账本）
+    都不必各自再防。
+    """
     try:
         with open(cmd_path(data_dir), encoding="utf-8-sig") as f:
             d = json.load(f)
-        return d if isinstance(d, dict) else {}
     except Exception:
         return {}
+    if not isinstance(d, dict):
+        return {}
+    return dict(d, term=clean_term(d.get("term")))
 
 
 # ── 地址与域名 ────────────────────────────────────────────────────
@@ -325,9 +337,14 @@ def search_url(term, domain=None):
     会照常画出四十行搜索结果，但那批书目与关键词毫无关系（换三个不同的词拿到同
     一列俄语书），而页面自己的搜索框提交的是 `/search?q=…`、搜出来才对得上。
     写成 `term` 不是报错、是「看着像结果」，比报错更坑，所以钉在这里。
+
+    关键词仍要先过 `clean_term`：`quote` 把字符串编成 utf-8，落单的半个代理码点
+    （来自手改的口令条 / 旧版本写下的脏值）在那一步抛 UnicodeEncodeError，而这一句
+    在窗口主循环里、调用处没有各自的兜底。`term` 是外部文本，这把尺子又是唯一
+    那把（口令条 / 状态账 / 界面回话共用），所以在这里再收一道。
     """
     from urllib.parse import quote
-    kw = str(term or "").strip()
+    kw = clean_term(term)
     base = with_scheme(domain or DEFAULT_DOMAIN)
     return base + "/search?q=" + quote(kw)
 

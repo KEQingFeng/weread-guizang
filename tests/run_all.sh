@@ -237,6 +237,15 @@ run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY
 # 不认识的键本身照留），外加真机 /api/state 必须是严格 JSON 与一条「旧写法确实写出
 # Infinity」的对照。纯函数 + 源码走查 + 进程内真 Handler，不联网、不开浏览器，归静态段。
 run "安娜账本行脏数字（越界值不打废 /api/state，不认识的键照留）" "$PY" tests/check_anna_rows.py
+# 上面三条管的是账本与文件名「写出去」那一侧，这一条管口令条「读回来」那一侧。
+# cache/anna_cmd.json 是界面递给窗口的「该搜这个词」牌子，会被手改、云同步落回、或
+# 留着旧版本写下的脏值。`term` 要拿去做三件事：拼搜索地址（quote 把关键词编成 utf-8，
+# 落单的半个代理码点在那一步抛 UnicodeEncodeError，而这一句在 check_cmd 的 try 之外，
+# 异常直接穿出去把整扇窗口带成「这一趟没走通」）、打进日志（stdout 抛同一个错，会被
+# catch 成一句假的「这一页没打开」）、写回账本（这一路有 _drop_surrogates 兜着）。
+# 收口放在读口（唯一入口，洗的尺子仍是 clean_term）与 search_url 那把尺子上。纯函数 +
+# 假页对象 + 临时沙盒，不联网、不开浏览器、不起服务，归 --fast 静态段。
+run "安娜口令条读口（半码点脏牌不带窗口 / 搜索地址不抛 / 干净词不改）" "$PY" tests/check_anna_cmd.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 # 导图的输入是「别人家的 JSON」：节点里本该是数组的 `children` 偶尔写成标量
