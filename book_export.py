@@ -28,6 +28,8 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import md_fence
+
 
 # ─────────────────────────── 极简 Markdown → HTML ───────────────────────────
 
@@ -245,18 +247,27 @@ def _restore(text, keep):
 
 
 def md_to_html(md):
-    """块级语法。返回一段一段的 HTML，句首句尾都不带换行，方便拼。"""
+    """块级语法。返回一段一段的 HTML，句首句尾都不带换行，方便拼。
+
+    围栏代码块只认 `md_fence` 那一把尺子。导出此前自带一份「行首是不是 ```」的
+    开关，于是同一段稿子在这里和大纲 / 切章那一侧有了两副面孔：
+
+      · `` ``` a`b ``（反引号信息串里还有反引号）按 CommonMark 只是普通正文，
+        旧写法却当它开栏，把后面真正的标题与正文一路吞进 `<pre>` —— 导出丢内容，
+        还丢得看不出是丢在哪；
+      · `~~~` 起的围栏不认，代码块被拆成一堆 `<h1>` 与 `<p>`；
+      · 收围栏不比长度、不比字符：短一行或另一种字符也能把块收掉。
+
+    这些正是 `md_fence` 已经收口过、`check_fence_rulers` 钉过的那几条，只是导出
+    这条路没接上。现在抽取反斜杠转义与块级判定都过同一份状态机，两边不会再走散。
+    """
     raw = (_CTRL_DROP.sub("", md or "")
            .replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     keep = []
-    lines = []
-    fenced = False
-    for s in raw:
-        if s.strip().startswith("```"):
-            fenced = not fenced
-            lines.append(s)
-            continue
-        lines.append(s if fenced else _stash_line(s, keep))
+    # 哪些行在代码块里由 md_fence 说了算；代码块内的反斜杠是字面量，不进抽取。
+    in_code = md_fence.fence_mask(raw)
+    lines = [s if coded else _stash_line(s, keep)
+             for s, coded in zip(raw, in_code)]
     out = []
     i, n = 0, len(lines)
     while i < n:
@@ -265,14 +276,20 @@ def md_to_html(md):
             i += 1
             continue
         # 围栏代码块
-        if s.startswith("```"):
-            lang = s[3:].strip()
+        mark = md_fence.fence_mark(lines[i])
+        if mark:
+            ch, run, info = mark
+            lang = info.strip()
             buf = []
             i += 1
-            while i < n and not lines[i].strip().startswith("```"):
+            while i < n:
+                close = md_fence.fence_mark(lines[i])
+                # 收围栏必须同种字符、不短于起围栏、后面没有别的东西。
+                if close and close[0] == ch and close[1] >= run and not close[2].strip():
+                    i += 1
+                    break
                 buf.append(lines[i])
                 i += 1
-            i += 1
             # 围栏的语言串也来自外部内容（导入书 / 剪藏原文），落点又是 class="…"
             # 这个属性，所以和图片地址一样得先过 _attrq：`_esc` 只转 &<>，双引号
             # 留着就能关掉属性再挂一个 onmouseover=…。
@@ -332,7 +349,7 @@ def md_to_html(md):
         i += 1
         while i < n:
             nxt = lines[i].strip()
-            if (not nxt or nxt.startswith("```") or nxt.startswith(">")
+            if (not nxt or md_fence.fence_mark(lines[i]) or nxt.startswith(">")
                     or _HR.fullmatch(nxt) or re.match(r"#{1,6}\s+", nxt)
                     or _UL.match(nxt) or _OL.match(nxt) or _table_at(lines, i)):
                 break
