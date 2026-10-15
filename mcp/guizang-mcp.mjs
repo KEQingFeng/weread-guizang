@@ -2554,6 +2554,11 @@ rl.on("line", async line => {
   } catch {
     return;
   }
+  // `null` 是合法 JSON，解出来真的是 null；`const {…} = null` 当场抛，而 readline
+  // 的回调是 async 的，异常变成 unhandledRejection —— 整个适配器进程退 1（实测
+  // Node 22 直接打栈退出），61 个工具跟着一起死，宿主机只看到「MCP 服务掉了」。
+  // 非对象的行一律按「读不懂」对待，和上面 catch 同一个出口：不猜、不回、不崩。
+  if (!msg || typeof msg !== "object") return;
   const { id, method, params } = msg;
 
   if (method === "initialize") {

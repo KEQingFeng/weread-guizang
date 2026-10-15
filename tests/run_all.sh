@@ -50,6 +50,12 @@ run "内联 JS 语法" "$PY" tests/check_inline_js.py
 # 语法过得了不代表点得动：这一条查「调一个从没写出来的函数」，
 # 那类 bug 在界面上的表现就是「按下去没反应」，浏览器不打开永远看不出来。
 run "内联 JS 引用体检" "$PY" tests/check_js_refs.py
+# MCP 适配器是一行一条 JSON-RPC 的 stdio 服务：宿主喂进来一条 `null`（合法 JSON、
+# 不是请求对象），`const {…} = null` 当场抛，async 回调没人接就变成 unhandledRejection，
+# 整个适配器进程退 1 —— 61 个工具一起消失，宿主只看到「MCP 服务掉了」。这条把这类
+# 「合法 JSON 但不是请求对象」的形状全喂一遍，每喂一条跟一条 ping：进程不许退、必须回话。
+# 要 node（和内联 JS 那两条同一档），指着一个没人听的端口，不联网、不起服务。
+run "MCP 标准输入脏行（坏行不许带走适配器）" "$PY" tests/check_mcp_stdin.py
 run "控件体检" "$PY" tests/audit_ui.py
 run "个人信息扫描" "$PY" tests/check_privacy.py
 run "跨平台口径" "$PY" tests/test_platform_compat.py
