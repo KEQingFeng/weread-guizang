@@ -1099,8 +1099,11 @@
     word-break:break-all;
   }
   .clipta::placeholder{color:var(--ink-3)}
-  /* 订阅那一屏的地址栏：一行就够（贴一个链接不是写一段话）， taller 反而占掉正文的高度 */
-  .clipta.one{min-height:0; height:34px; line-height:1.5; resize:none; padding:0 13px}
+  /* 订阅与视频那两行的地址框：起步一行高，贴进去的东西长就自己长（见 clipGrow），
+     长到 max-height 封顶后交给框自己滚。原来写死 34px 又 resize:none，B 站那种
+     「链接 + 一串分享文案」贴进来会被挤掉半截，用户以为没贴全。 */
+  .clipta.one{min-height:0; height:34px; max-height:118px; overflow-y:auto;
+    line-height:1.55; resize:none; padding:7px 13px}
   .clipta:focus{border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft)}
   .clipin .stools{padding:11px 0 12px; border-bottom:1px solid var(--line)}
   /* 顶部不再放常驻粘贴框：复制链接后点这颗手指，自己去读剪贴板并开始解析。
@@ -1442,12 +1445,19 @@
   .bzbody{position:relative; flex:1; min-height:0}
   .bzframe{width:100%; height:100%; min-height:320px; border:0; display:block; background:#fff}
   body.feedfit .bzframe{min-height:0}
-  /* 「正在取回」压在 iframe 上：页面自己会盖住它，取回来那一刻才淡出。 */
-  .bzload{position:absolute; inset:0; display:grid; place-items:center; z-index:1;
-    background:var(--surface-2); color:var(--ink-3); font-size:12.5px;
-    transition:opacity .22s ease; pointer-events:none}
-  .bzload.off{opacity:0}
-  @media (prefers-reduced-motion:reduce){ .bzload{transition:none} }
+  /* 「正在取回」压在 iframe 上：必须是**不透明**的一整块。
+     上一版这里铺的是 rgba(.045) 那层薄雾，等于半张透明玻璃 —— 换页时旧页面（比如刚从
+     B 站跳到油管）还画在 iframe 里，隔着这层玻璃照样看得见，用户读到的就是「点开了油管，
+     屏幕上却还是哔哩哔哩」。取回一整页要几秒，这几秒足够让人以为程序卡在了上一页。
+     顺带把点击也接住：这一层在「正在取」时是挡住的，别让人点到底下那张旧页去。 */
+  .bzload{position:absolute; inset:0; display:grid; place-items:center; align-content:center;
+    gap:11px; z-index:2; background:var(--paper); color:var(--ink-3); font-size:12.5px;
+    transition:opacity .22s ease; pointer-events:auto}
+  .bzload.off{opacity:0; pointer-events:none}
+  .bzload .bz-spin{width:18px; height:18px; border-radius:50%; border:2px solid var(--accent);
+    border-top-color:transparent; animation:spin .8s linear infinite}
+  .bzload p{margin:0; max-width:min(520px,84%); text-align:center; line-height:1.7}
+  @media (prefers-reduced-motion:reduce){ .bzload{transition:none} .bzload .bz-spin{animation:none} }
   /* 中栏与右栏自己不平滚：滚的必须是里面那一片（列表 / 正文）。三层都开 overflow
      的话，鼠标滚轮一碰到就整栏一起动，工具条会被滚出视野，也就白设了。 */
   .fewrap > .felist, .fewrap > .feread{overflow:hidden}
@@ -1509,21 +1519,32 @@
   .vcap .it.no i{background:#c8554a; opacity:1}
   .vcap .it.no{color:var(--err)}
   .vcap .grow{flex:1}
-  /* 任务区先把「要做什么」摆清楚：贴链接 → 认一下 → 开始转，最后一步的去向也写在旁边。
-     学生看一遍就知道下一步点哪，不用在按钮之间试。字号压小、不抢正文的位。 */
-  .vtsteps{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 15px;
-    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-3);
-    background:var(--paper-2)}
-  .vtsteps b{font-size:11.5px; font-weight:600; color:var(--ink-2); margin-right:2px}
-  .vtsteps .st{display:inline-flex; align-items:center; gap:5px; color:var(--ink-2)}
-  .vtsteps .st i{font-style:normal; width:15px; height:15px; border-radius:50%; text-align:center;
-    line-height:15px; font-size:10px; color:var(--accent); background:var(--accent-soft)}
-  .vtsteps .arw{color:var(--ink-3); opacity:.7}
-  .vtsteps .tip{margin-left:auto; color:var(--ink-3)}
-  @media (max-width:860px){ .vtsteps .tip{margin-left:0} }
+  /* 任务区就一件事：把链接交给那颗手指。原来这里是「贴链接 → 点识别 → 点开始转笔记」三步，
+     用户要的是剪藏那一屏的手感 —— 一点即可，中间不需要再确认第二次。所以三步条整块拆掉，
+     改成一颗手指 + 一行链接框 + 一句话：认链接、下音频、转文字、落书全在这一下里。
+     手指和剪藏共用 .clipfinger/.cf-ring 那套（同一个 72px 圆钮、同一条环形进度），
+     两屏一个手感，也少一份会走神的副本。 */
+  .vthero{display:flex; align-items:flex-start; gap:14px; padding:13px 15px 12px;
+    border-bottom:1px solid var(--line); background:var(--paper-2)}
+  .vthero .clipfinger{flex:none}
+  .vthin{flex:1; min-width:0; display:flex; flex-direction:column; gap:8px}
+  .vthin .clipta{margin:0}
+  .vline{display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-3)}
+  .vline .grow{flex:1}
+  .vline .cnt{font-variant-numeric:tabular-nums}
+  .vthin .cliphelp{text-align:left; min-height:0; line-height:1.6}
+  @media (max-width:860px){
+    .vthero{flex-direction:column; align-items:stretch; gap:11px}
+    .vthero .clipfinger{align-self:center}
+  }
   /* 识别结果与进度：视频转笔记是分钟级长任务，得有一处能看着它往前走 */
   .vbox{padding:13px 15px; border-bottom:1px solid var(--line); display:none}
   .vbox.on{display:block}
+  /* 这一块是任务区里唯一会自己冒出来的东西：直接「啪」地撑开很生硬，给一点向下的位移。
+     动效只在这一处，收尾靠 reduce 那条关掉 —— 手指上那圈环已经够忙了，不必再到处动。 */
+  .vbox.on{animation:vpop .3s var(--spring) backwards}
+  @keyframes vpop{from{opacity:0; transform:translateY(-5px)}to{opacity:1; transform:none}}
+  @media (prefers-reduced-motion:reduce){ .vbox.on{animation:none} }
   .vbox .t{font-size:13px; color:var(--ink); line-height:1.5}
   .vbox .s{margin-top:4px; font-size:11.5px; color:var(--ink-3); line-height:1.6}
   .vbox .bar{margin-top:9px; height:5px; border-radius:999px; background:rgba(127,140,160,.18); overflow:hidden}
@@ -1881,7 +1902,12 @@
      0.9.9 之前只有右侧摊开、左侧那一张写成 opacity:0 的 sgone，于是「翻过去的
      那本」明明就在左手边却看不见，只能朝一个方向翻 —— 用户报的就是这个。 */
   .sstack{position:relative; width:min(880px,100%); margin:0 auto; padding:22px 16px 6px}
-  .sstage{position:relative; height:clamp(430px,64vh,600px);
+  /* 舞台高度只在这里写一次（--sh），卡片再拿它反推自己该多宽 —— 见下面 --sw 那条。
+     --sm 是卡片除了封面之外要占的竖排地方：书名最多两行 + 作者那行 + .mt 的上下内边距，
+     再加上两侧那几张往下错开的那 30px。留够这个数，卡的下缘就永远不会压到舞台底下那排页码
+     （用户报的「左右切换时底部和书籍重叠」：翻到一半，卡的下边正好搭在 .snav 上）。 */
+  .sstage{--sh:clamp(430px,64vh,600px); --sm:112px;
+    position:relative; height:var(--sh);
     perspective:1400px; perspective-origin:50% 44%;
     container-type:inline-size; container-name:sst}
   /* 卡宽与扇形步长一律按**舞台自己**算（cqw = 容器宽度单位），不再按视口。
@@ -1889,8 +1915,11 @@
      右缘就溢出窗口（实测 1024 越 123px、760 越 147px），只能靠三档容器查询救。
      换成 cqw 后约束变成一次算清的代数式：最外那张的远缘 = f3 + sw/2 = 31cqw +
      16.5cqw = 47.5cqw ≤ 50cqw —— 左右都成立，任何宽度都不会溢出舞台。
+     封面是 2:3，所以横向受完限还得让竖方向也受完：高 = sw × 1.5 + 文字那一块，
+     倒推就是 sw 不能超过 (sh − sm) / 1.5。窗口矮的时候卡跟着变矮，不再顶穿舞台。
      变量得落在卡上：.sstage 自己就是容器，在它身上用 cqw 会往上找祖先容器。 */
-  .sstage>.wcard{--sw:clamp(168px,33cqw,300px); --f1:16cqw; --f2:24cqw; --f3:31cqw;
+  .sstage>.wcard{--sw:clamp(168px, min(33cqw, (var(--sh) - var(--sm)) / 1.5), 300px);
+    --f1:16cqw; --f2:24cqw; --f3:31cqw;
     position:absolute; left:50%; top:0; width:var(--sw);
     margin-left:calc(var(--sw) / -2); opacity:0; pointer-events:none;
     animation:none; box-shadow:var(--shadow);
@@ -1942,7 +1971,10 @@
   /* 文字只给正面那一张：两侧摊开的书名和「已取回 N 章」叠在一起全是糊掉的字，
      读不到反而显脏。扇形要的是封面排开，书名跟着翻过来的那一下再出现。 */
   .sstage>.wcard:not(.s0) .mt{display:none}
-  .snav{display:flex; align-items:center; justify-content:center; gap:14px; padding:6px 0 12px}
+  /* 页码那一排压在舞台之后：卡片万一（超长书名 + 两行作者）超出舞台，也得让它看得见、点得到，
+     而不是被一张正在翻过去的卡盖住 —— 叠卡那一下重叠就是这么来的（配合上面 --sw 的竖向限）。 */
+  .snav{position:relative; z-index:30;
+    display:flex; align-items:center; justify-content:center; gap:14px; padding:6px 0 12px}
   .snav .sp{font-size:11.5px; color:var(--ink-3); letter-spacing:.05em; min-width:74px; text-align:center}
   .snav button{width:34px; height:34px; flex:none; border:1px solid var(--line-2); border-radius:50%;
     cursor:pointer; font:inherit; font-size:14px; line-height:1; color:var(--ink-2);
@@ -9581,7 +9613,6 @@ function preStats() {
 const PANES = {};
 const SPRING = 'cubic-bezier(.32,.72,0,1)';
 let shownPane = '';        // 当前可见的视图
-let paneScroll = {};       // 每个视图离开时的滚动深度，回来时停在上次那一屏
 let slideDir = 'pd';       // 这一次交接往上还是往下滑（侧边栏按顺序判断）
 
 function paneEl(name) {
@@ -9594,7 +9625,6 @@ function paneEl(name) {
     PANES[name] = p;
   }
   const changed = shownPane !== name;
-  if (changed && PANES[shownPane]) paneScroll[shownPane] = window.scrollY;
   if (changed && shownPane === 'write' && name !== 'write') wrFlush();
   if (changed && shownPane === 'read' && name !== 'read') {
     rdTimeStop();          // 离开阅读器就停表
@@ -9615,11 +9645,12 @@ function paneEl(name) {
     || name === 'search' || name === 'browse');
   if (changed) {
     shownPane = name;
+    // 换屏一律回到开头。以前这里把上一页的滚动深度搬过来（「停在上次那一屏」），代价是
+    // 交接动画跑到一半 window 被滚走 —— 用户看到的就是那下「上下闪动」，而且每进一屏
+    // 都要重新找位置。现在先归零、再做交接，动画从头到尾待在同一个地方。
+    // （阅读器不算：它自己在渲染时把「读到哪一行」滚回去，那一路发生在下面之后。）
+    if (window.scrollY) window.scrollTo(0, 0);
     slideView(slideDir, name);
-    // 整页滚动，切换时要把新视图的滚动位置接手过来：回到书架就停在上次那一屏，
-    // 不是从头再滚一遍；新开的视图则回到顶部，不会停在上一页的深度里。
-    const y = paneScroll[name] || 0;
-    if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
     // 切回书架：面板藏着的时候 IntersectionObserver 把它们全判成「不在眼前」
     // 复位掉了，所以进来得补一遍，不然会看见一屏空白卡。
     if (name === 'shelf') revealInView();
@@ -11304,6 +11335,16 @@ const CLIP = {list: null, shelf: null, cnt: null, all: null, pick: null, hint: n
 const CLIP_RING_C = 2 * Math.PI * 33;   // 与 SVG 里 r=33 对齐：解析完成正好转满一圈
 const CLIP_ST = {pending: '待抓', doing: '抓取中', ready: '已解析', done: '已入库', bad: '没抓到'};
 
+/** 一行高的地址框按内容长高：贴进去的往往是「链接 + 一串分享文案」（B 站就是这么发的），
+ *  写死高度会把后半句挤没，用户看不出自己贴全了没有。撑到 CSS 的 max-height 就交框自己滚，
+ *  所以上限只在 .clipta.one 里写一次，这里不重复那个数。
+ *  +2 是因为一圈 1px 的边框不计入 scrollHeight，不加回来高度会对不上。 */
+function clipGrow(ta) {
+  if (!ta || !ta.classList.contains('one')) return;
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight + 2) + 'px';
+}
+
 /** 粘贴框里常有的脏东西：前后的引号、书名号、序号点。两端剥干净再判断。 */
 function clipClean(raw) {
   return String(raw || '')
@@ -12660,7 +12701,7 @@ async function feedSubscribe(url) {
   feedBusy = false;
   setNote('feed', '');
   if (!r.ok) { whisper(r.msg || '没能订上这个源'); renderFeedTools(); return; }
-  if (FEED.ta) FEED.ta.value = '';
+  if (FEED.ta) { FEED.ta.value = ''; clipGrow(FEED.ta); }
   feedCands = [];
   if (r.subs) feedSubs = r.subs;
   feedSideSig = '';
@@ -13005,6 +13046,8 @@ function wireFeed(p) {
       if (!feedBusy) feedAdd();
     }
   });
+  // 地址长到能看见为止：一行起、撑到上限自己滚，不用贴完再猜后半句在不在框里
+  FEED.ta.addEventListener('input', () => clipGrow(FEED.ta));
   let feedQTimer = null;
   FEED.q.addEventListener('input', () => {
     clearTimeout(feedQTimer);
@@ -13054,8 +13097,8 @@ function renderFeedView() {
         </div>
         <div class="felist">
           <div class="feaddr">
-            <textarea class="clipta one" id="fTa" spellcheck="false"
-              placeholder="粘贴站点首页或订阅地址，它会自己找背后的 RSS / Atom / JSON Feed&#10;例：https://www.ruanyifeng.com/blog/"></textarea>
+            <textarea class="clipta one" id="fTa" rows="1" spellcheck="false"
+              placeholder="粘贴站点首页或订阅地址"></textarea>
             <div class="row2">
               <span class="cnt" id="fCnt"></span>
               <span class="grow"></span>
@@ -13749,17 +13792,19 @@ function renderFlomoView() {
 }
 
 /* ── 视频转笔记 ─────────────────────────────
-   粘一个视频链接 → 认一下是哪支视频 → 下载音频、语音转文字、（配了大模型时）整理摘要 /
-   知识笔记 / 思维导图 → 落成书库里的一本，之后阅读、划词笔记、导出 EPUB/PDF 全走现成那套。
+   一颗手指：链接（剪贴板里的或这行里贴的）交出去 → 认是哪支视频、下音频、语音转文字、
+   （配了大模型时）整理摘要 / 知识笔记 / 思维导图 → 落成书库里的一本，之后阅读、划词笔记、
+   导出 EPUB/PDF 全走现成那套。手感照剪藏那一屏：点一下就走完，中间不再要一次「确认」。
    这条线是分钟级长任务：进度从「进展」日志里读那一行 [阶段 45%] 说明，收尾用##GUIZANG##那行
    的结果说话 —— 成功说落成哪本书，失败把原因端出来，不悄悄消失。 */
 /* 顶部右侧那两颗入口：想让用户先逛着挑，就不必跳出归藏开浏览器。点开走的是共用的
-   内置浏览器（openBrowse → /api/browse），逛到想转的那条再把链接贴回下面的输入框。
+   内置浏览器（openBrowse → /api/browse），逛到想转的那条点「转成笔记」，链接自己回到这一屏。
    名册只写这一处：按钮与接线都照着它来，日后加一个站点不用改两遍。 */
 const VT_PORTALS = [['vBili', '哔哩哔哩', 'https://www.bilibili.com/'],
                     ['vYt', 'YouTube', 'https://www.youtube.com/']];
 let vidPlan = null, vidBusy = false, vidWasRunning = false, vidShelfSig = '', vidProgSig = '';
 let vidStopping = false;   // 「停止」已经点下、收尾还没走完：按钮立刻改成「正在停」
+let vidRingT = null;       // 手指外圈那条环的收尾定时器（补满一圈后复位）
 let asrDirty = false;   // 设置里的转写偏好被改过、还没保存（轮询据此别去覆盖）
 // 安娜的档案那一栏的状态账本（最近搜过什么、窗口开没开）。
 // 1.2.1 起这一屏只剩搜索框与搜索键，账本只在 paintAnna() 一处写入。
@@ -13768,7 +13813,7 @@ let annaState = {};
 // 组件没装好时这一路起不来，界面提前拦一道、说清去哪儿修，而不是点了没反应。
 let browserReady = true;
 const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHead: null,
-               cnt: null, plan: null, start: null, stop: null};
+               cnt: null, start: null, ring: null, stop: null};
 const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
   summary: '整理摘要', note: '写知识笔记', mindmap: '画思维导图',
   save: '落成一本书', done: '完成'};
@@ -13896,7 +13941,8 @@ function vidRenderPlan() {
   const s = document.createElement('div');
   s.className = 's';
   s.textContent = bits.join(' · ')
-    + '。确认是这支再点「开始转笔记」—— 音频只落在临时目录里，转完就清掉。';
+    + '。认出来就接着往下走：取音频、转文字、落成一本书 —— '
+    + '音频只落在临时目录里，转完就清掉。';
   box.append(hd, s);
 }
 
@@ -13923,6 +13969,13 @@ async function vidStart() {
   if (!vidPlan) { await vidDoPlan(); if (!vidPlan) return; }
   vidBusy = true; vidTools();
   vidProgSig = '';
+  // 环归零再亮「busy」：上一支留下的那一圈不能带到这一支上
+  if (VIDEO.ring) {
+    VIDEO.ring.style.transition = 'none';
+    VIDEO.ring.style.strokeDasharray = CLIP_RING_C;
+    VIDEO.ring.style.strokeDashoffset = CLIP_RING_C;
+  }
+  vidRingBusy(true);
   const body = {act: 'start', url};
   // 转写偏好就在设置那一格上摆着 —— 直接读它，「看到什么就用什么」，不再存一份会走神的副本。
   // 接口地址 / Key / 模型同理：填了就用这一份，没填就听后端从配置里拿（Key 留空＝不改）。
@@ -13941,6 +13994,7 @@ async function vidStart() {
   const r = await videoPost(body);
   vidBusy = false;
   if (!r.ok) {
+    vidRingBusy(false);
     whisper(r.msg || '没能起这个任务');
     vidTools();
     return;
@@ -13966,6 +14020,79 @@ async function vidStop() {
     vidTools();
     whisper(r.msg || '没能停下来，再点一次试试');
   }
+}
+
+/** 手指这一颗：这行里已经贴了链就用这行的，空着就去读剪贴板 —— 点一下直接开跑，
+ *  不再要「先识别、再点开始」那第二次确认（认链接本来就藏在 vidStart 里，用户看不见它）。
+ *  读不到剪贴板时不弹手填的层：这一屏自带一行输入框，说一句「贴进来再点」比多开一层省。 */
+async function vidFinger() {
+  if (vidBusy) return;
+  let url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
+  if (!url) {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard');
+      url = clipLinks(await navigator.clipboard.readText())[0] || '';
+    } catch (e) { url = ''; }
+    if (!url) {
+      whisper('剪贴板里没找到视频链接：复制好再点这颗手指，或把链接贴进这行');
+      return;
+    }
+    if (VIDEO.ta) {
+      VIDEO.ta.value = url;
+      clipGrow(VIDEO.ta);
+      vidPlan = null; vidRenderPlan();   // 上一支的「认出来的是」不能挂在新链接上
+    }
+    vidTools();
+  }
+  await vidStart();
+}
+
+/** 内置浏览器里点「转成笔记」：链接自己回到这一屏并当场开跑，不用再复制一遍、再点一次。 */
+function vidUseLink(url) {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+  setView('video');
+  if (!VIDEO.ta) return;
+  VIDEO.ta.value = url;
+  clipGrow(VIDEO.ta);
+  vidPlan = null; vidRenderPlan();
+  vidTools();
+  vidStart();
+}
+
+/** 手指外圈那条环走的是这一趟的**真实**进度 —— 剪藏那一屏是「猜」的（解析只有几秒，
+ *  环慢慢走到 92% 等结果），转写是分钟级任务，日志里既然报了百分比，就照它画，
+ *  别用一条假动的环糊弄人。拿不到百分比时不硬编一个数上去，环停在原地等下一拍。 */
+function vidRing(pct) {
+  const bar = VIDEO.ring;
+  if (!bar) return;
+  if (pct == null || pct < 0) return;
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  bar.style.strokeDasharray = CLIP_RING_C;
+  bar.style.transition = 'stroke-dashoffset .45s cubic-bezier(.32,.72,0,1)';
+  bar.style.strokeDashoffset = CLIP_RING_C * (1 - p / 100);
+}
+
+function vidRingBusy(on) {
+  if (VIDEO.start) VIDEO.start.classList.toggle('busy', !!on);
+}
+
+/** 收尾：环补满一圈、亮一下「成了」再复位。失败与被停也走这条路，只是不挂 done 那一下。 */
+function vidRingFinish(ok) {
+  const bar = VIDEO.ring;
+  clearTimeout(vidRingT);
+  if (bar && ok) {
+    bar.style.transition = 'stroke-dashoffset .35s ease-out';
+    bar.style.strokeDashoffset = 0;
+  }
+  vidRingT = setTimeout(() => {
+    if (bar) { bar.style.transition = 'none'; bar.style.strokeDasharray = CLIP_RING_C;
+      bar.style.strokeDashoffset = CLIP_RING_C; }
+    vidRingBusy(false);
+    if (VIDEO.start && ok) {
+      VIDEO.start.classList.add('done');
+      setTimeout(() => { if (VIDEO.start) VIDEO.start.classList.remove('done'); }, 800);
+    }
+  }, ok ? 900 : 0);
 }
 
 /** 进度条：从日志里读最后一行 [阶段 45%] 说明。阶段拿不到就报「正在准备」。 */
@@ -13994,6 +14121,7 @@ function vidShowProg(pct, note, stage) {
   const unk = pct == null || pct < 0;
   fill.className = unk ? 'unk' : '';
   if (!unk) fill.style.width = Math.max(2, Math.min(100, pct)) + '%';
+  vidRing(unk ? -1 : pct);              // 条子和手指上那圈环走同一个数
   box.querySelector('.hd .t').textContent = stage ? (VID_STAGES[stage] || stage) : '正在准备';
   box.querySelector('.hd .p').textContent = unk ? '' : pct + '%';
   box.querySelector('.s').textContent = note || '';
@@ -14027,6 +14155,7 @@ async function vidTick() {
 /** 完成：进度条换成结果，能直接开读；书架那面网格也一起接手。 */
 function vidFinish(r) {
   const box = VIDEO.prog;
+  vidRingFinish(!!(r && r.ok));   // 手指上那圈环跟着这一趟一起收尾
   if (!box) return;
   vidPendingClear();      // 转完了（或失败 / 被停）：左栏那行「转写中」可以撤了
   vidProgSig = '';
@@ -14789,15 +14918,14 @@ function renderVideoShelf() {
   VIDEO.shelf.replaceChildren(...rows);
 }
 
-/** 起没起得来、能不能点，全看后端那一句 running。运行中按钮换成「停止」。
- *  后端一次只跑一个任务，所以「有别的任务在跑」时也把这两个按钮按住 —— 点了
+/** 起没起得来、能不能点，全看后端那一句 running。运行中只留「停止」那颗。
+ *  后端一次只跑一个任务，所以「有别的任务在跑」时也把手指按住 —— 点了
  *  也只会回「已有任务在运行」，不如当场说明白。 */
 function vidTools() {
   const busy = !!(running && runningKind === 'video');
   const other = !!(running && runningKind !== 'video');
   if (!busy) vidStopping = false;   // 任务翻面了，重新给「停止」让路
   if (VIDEO.start) VIDEO.start.disabled = vidBusy || running;
-  if (VIDEO.plan) VIDEO.plan.disabled = vidBusy || running;
   if (VIDEO.stop) {
     VIDEO.stop.hidden = !busy;
     VIDEO.stop.disabled = vidStopping;
@@ -14807,7 +14935,8 @@ function vidTools() {
     const url = (VIDEO.ta ? VIDEO.ta.value : '').trim();
     VIDEO.cnt.textContent = other ? '有别的任务在跑，等它完了再转视频'
       : busy ? '正在转，进度在下面'
-      : url ? (vidPlan ? '已认出这支，可以开跑' : '点「识别」先认一下是哪支视频')
+      : url ? (vidPlan ? '已认出：' + (vidPlan.title || '这支视频')
+        : '链接在这儿，点手指就开始')
       : '把视频链接贴进来';
   }
 }
@@ -14821,8 +14950,8 @@ function wireVideo(p) {
   VIDEO.shelf = p.querySelector('#vShelf');
   VIDEO.shelfHead = p.querySelector('#vShelfHead');
   VIDEO.cnt = p.querySelector('#vCnt');
-  VIDEO.plan = p.querySelector('#vPlan');
   VIDEO.start = p.querySelector('#vStart');
+  VIDEO.ring = p.querySelector('#vRing');
   VIDEO.stop = p.querySelector('#vStop');
   VIDEO.pick = p.querySelector('#vPick');
   VIDEO.rows = p.querySelector('#vRows');
@@ -14852,8 +14981,7 @@ function wireVideo(p) {
     const b = p.querySelector('#' + id);
     if (b) b.onclick = () => openBrowse(url);
   });
-  if (VIDEO.plan) VIDEO.plan.onclick = vidDoPlan;
-  if (VIDEO.start) VIDEO.start.onclick = vidStart;
+  if (VIDEO.start) VIDEO.start.onclick = vidFinger;
   if (VIDEO.stop) VIDEO.stop.onclick = vidStop;
   if (VIDEO.foldBtn) VIDEO.foldBtn.onclick = () => vtSetNav(VIDEO.wrap.classList.contains('nonav'));
   if (VIDEO.unfold) VIDEO.unfold.onclick = () => vtSetNav(true);
@@ -14897,15 +15025,16 @@ function wireVideo(p) {
   });
 
   if (VIDEO.ta) {
-    // 贴完直接 Cmd/Ctrl+Enter 认链接，和订阅那一屏一个手感
+    // 贴完直接 Cmd/Ctrl+Enter 开跑，和点那颗手指同一件事
     VIDEO.ta.addEventListener('keydown', e => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (!vidBusy) vidDoPlan();
+        if (!vidBusy) vidFinger();
       }
     });
     // 换了链接，上一支的「认出来的是」就作废 —— 留着会让人以为认的是新那条
     VIDEO.ta.addEventListener('input', () => {
+      clipGrow(VIDEO.ta);
       if (vidPlan) { vidPlan = null; vidRenderPlan(); }
       vidTools();
     });
@@ -14941,24 +15070,30 @@ function renderVideoView() {
       <div class="vtmain">
         <div class="vttask">
           <div class="vcap" id="vCap"></div>
-          <div class="vtsteps">
-            <b>转成笔记，三步</b>
-            <span class="st"><i>1</i>贴链接</span>
-            <span class="arw">→</span>
-            <span class="st"><i>2</i>点「识别」认一下</span>
-            <span class="arw">→</span>
-            <span class="st"><i>3</i>点「开始转笔记」</span>
-            <span class="tip">转完自动进左边书架，点开就能改听错的字、导字幕</span>
-          </div>
-          <div class="clipin">
-            <textarea class="clipta" id="vTa" spellcheck="false"
-              placeholder="粘贴视频链接。B 站（BV 号或整段分享文案）、YouTube 都认。&#10;例：https://www.bilibili.com/video/BV1xx411c7mD"></textarea>
-            <div class="stools">
-              <span class="cnt" id="vCnt"></span>
-              <span class="grow"></span>
-              <button class="deed" id="vPlan" style="height:30px">识别</button>
-              <button class="deed" id="vStop" style="height:30px" hidden>停止</button>
-              <button class="deed sure" id="vStart" style="height:30px">开始转笔记</button>
+          <div class="vthero">
+            <button class="clipfinger" id="vStart" type="button"
+              title="复制视频链接后点一下：认出是哪支、取音频、转文字，一步到位"
+              aria-label="读取剪贴板并开始转笔记">
+              <svg class="cf-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.6 11.2V4.9a1.7 1.7 0 0 1 3.4 0v6.3"/>
+                <path d="M13 11V9.7a1.55 1.55 0 0 1 3.1 0V11"/>
+                <path d="M16.1 11.3v-.6a1.55 1.55 0 0 1 3.1 0v4.2a6.1 6.1 0 0 1-6.1 6.1h-1.2a5.2 5.2 0 0 1-3.7-1.5l-3.1-3.1a1.6 1.6 0 0 1 2.3-2.3l1.6 1.6"/>
+              </svg>
+              <svg class="cf-ring" viewBox="0 0 72 72" aria-hidden="true">
+                <circle class="cf-track" cx="36" cy="36" r="33"/>
+                <circle class="cf-bar" id="vRing" cx="36" cy="36" r="33"/>
+              </svg>
+            </button>
+            <div class="vthin">
+              <textarea class="clipta one" id="vTa" rows="1" spellcheck="false"
+                placeholder="视频链接：B 站 BV 号、YouTube 都认"></textarea>
+              <div class="vline">
+                <span class="cnt" id="vCnt"></span>
+                <span class="grow"></span>
+                <button class="deed" id="vStop" style="height:28px" hidden>停止</button>
+              </div>
+              <div class="cliphelp">复制链接后点手指，或把链接贴进这行再点手指 —— 认链接、取音频、转文字、落成一本书，中间不用再点第二次</div>
             </div>
           </div>
           <div class="vbox" id="vPlanBox"></div>
@@ -15546,13 +15681,14 @@ function paintPick(body) {
   }
   fillGrid(grid, pickList.map(x => x.bookInfo || x.book || x));
   [...grid.children].forEach((c, i) => fxIn(c, i));
-  pickShelfButtons(grid);
+  addShelfButtons(grid);
 }
 
-/** 推荐卡片的动条上补一颗「加入书架」：推荐来的书多半还没进微信书架，
+/** 卡片动条上补一颗「加入书架」：搜来的、推荐的书多半还没进微信书架，
  *  点一下就走 addToShelf（和详情页那颗同一套，写回微信读书并同步）。
- *  fillGrid 会复用老节点，所以这里「补」而不是重建：已有那颗只刷状态。 */
-function pickShelfButtons(grid) {
+ *  fillGrid 会复用老节点，所以这里「补」而不是重建：已有那颗只刷状态。
+ *  推荐那一屏和搜索那一屏共用这一份，按钮的措辞与判定只在这一处（见 addShelfButtons 的调用）。 */
+function addShelfButtons(grid) {
   for (const c of grid.children) {
     const t = cardIds.get(c.dataset.id);
     if (!t || !/^\d{5,20}$/.test(String(t.store || ''))) continue;
@@ -15761,6 +15897,9 @@ function renderSearchView() {
       g.className = 'sgrid';
       fillGrid(g, books);          // 卡片自身带「取书 / 查看详情」，与书架同一套
       col.replaceChildren(g);
+      // 搜到的书也能一步加进微信书架：点开那张卡，抽屉里第一颗就是它。
+      // 和「为我推荐」共用同一份逻辑，措辞与「已在书架」的判定只有一处（见 addShelfButtons）。
+      addShelfButtons(g);
       return books.length;
     } catch (e) {
       col.innerHTML = `<div class="emptyline"><b>搜索失败</b>${esc(e.message)}</div>`;
@@ -15952,7 +16091,10 @@ function renderBrowseView() {
           <button class="deed" id="bzGo" style="height:30px">访问</button>
         </div>
         <div class="bzbody">
-          <div class="bzload" id="bzLoad">正在取回这一页</div>
+          <div class="bzload" id="bzLoad"><span class="bz-spin"></span>
+            <span>正在取回这一页</span>
+            <p>外站由本机取回再送出，几秒是常态。YouTube 这类站取回来的是本机铺的静态目录，
+              挑中一支点「转成笔记」就能送回工作台。</p></div>
           <iframe class="bzframe" id="bzFrame" title="内置浏览器"
             referrerpolicy="no-referrer"
             sandbox="allow-scripts allow-forms"></iframe>
@@ -15984,14 +16126,17 @@ function wireBrowse(p) {
 }
 
 // 网页里点链接 → 那一段补的脚本 postMessage 回来 → 这里接着取下一页。
+// 带 data-gz-use 的那一颗不算「再取一页」：它是「把这条链接交给界面办一件事」——
+// 油管那一屏铺的静态目录就用它把「转成笔记」送回工作台，省掉复制链接再贴一遍。
 // 认一下 e.source：别的窗口 / 扩展发来的消息一概不理。
 window.addEventListener('message', e => {
   const d = e.data;
-  if (!d || typeof d !== 'object' || typeof d.gzBrowse !== 'string' || !d.gzBrowse) return;
+  if (!d || typeof d !== 'object') return;
   const p = PANES.browse;
   const f = p && p.querySelector('#bzFrame');
   if (!f || e.source !== f.contentWindow) return;
-  bzLoad(d.gzBrowse, true);
+  if (typeof d.gzUseLink === 'string' && d.gzUseLink) { vidUseLink(d.gzUseLink); return; }
+  if (typeof d.gzBrowse === 'string' && d.gzBrowse) bzLoad(d.gzBrowse, true);
 });
 
 /* ── 书籍详情页 ───────────────────────── */
