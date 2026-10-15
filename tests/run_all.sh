@@ -330,6 +330,18 @@ run "转写时长越界值（inf / NaN 不再变成时间轴里的 Infinity）" 
 # 一起钉住：脏段落存得下、脏账本读得开、两处视图用同一份干净数据、真 emoji 一个字不动、
 # 好数据不改、成功与失败都不留 .tmp。纯逻辑 + 临时目录里的一本假书，归静态段。
 run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 真 emoji 不动）" "$PY" tests/check_video_surrogate.py
+# 视频转笔记最后一步要问外站的 LLM（/chat/completions）。对方回的正文形状没人保证，
+# 而 `_llm_content` 与 SSE 兜底那两段都是裸的 `.get` 链 —— `{"choices": ["oops"]}`、
+# `{"choices": [{"message": "hi"}]}`、SSE 里 `data: []` / `data: 0` 这些「是合法 JSON、
+# 但不是对象」的回包，`.get` 当场 AttributeError。这两段都在 `urlopen` 的 try **之外**，
+# 异常一路穿出 `llm_chat`（调用方只接 ValueError），整趟转笔记带着英文报错结束，而不是
+# 本就说好的「认不出来 / 这次没说话」。server 那边 `choice_piece` / `completion_text` /
+# `agent_deltas` 早就是这把尺子（非表当空、choices 不是列表当空表、content 分段数组拼起来），
+# 同一个文件里的 `_post_audio` 也兜过 `isinstance(payload, dict)`。这一条把 `llm_chat` 的
+# 两个读口接到同一把尺子上，钉四层：纯函数、_llm_content 各级脏形状、假 urlopen 的十条
+# 端到端回包（含 SSE）、以及源码接线；另留「旧写法确实漏 AttributeError」的对照防空转。
+# 全程离线，归静态段，--fast 也得带上。
+run "视频转笔记 LLM 回包形状（脏 choices / message / SSE 不带走整趟流水线）" "$PY" tests/check_video_llm_shape.py
 # 导图与画板两条新线也是纯逻辑自测：排版差分、环检测、存读导删全在系统临时目录的
 # 沙盒里跑，不起服务、不开浏览器、不截图 —— 所以归静态段，--fast 也得把它们带上。
 run "思维导图（清洗 / 上限 / 环检测 / 四形态坐标 / SVG）" "$PY" tests/check_mindmap.py
