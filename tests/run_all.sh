@@ -377,6 +377,13 @@ run "flomo 便签半个代理码点（手记 / 脏账本 / 清空 / CSV 不整�
 # 书树 / 存盘 / 快照 / 挪章都不抛、认得出的数字照认、裸字符串收成一个元素、条目不丢，并把
 # rev 冲突协议与「存一次盘账本自己修好」一起钉住。纯离线，全在临时沙盒书库里跑。
 run "写作脏账本兜底（脏字段不翻车 / 存得进 / 裸字符串不拆字）" "$PY" tests/check_writer_dirty.py
+# 写作导出这条路上，scale 是地址来的字符串（`?scale=abc` / `1e400` / `nan`），
+# 原来直接 `int(opts.get("scale") or 2)`：脏值当场抛，路由的兜底把它接住之后回的是
+# 500 加一句 Python 报错原文（「invalid literal for int() with base 10: 'abc'」）。
+# 界面上只有 1/2/3 三档，脏值该当没传：回缺省 2、再夹在 1..3 —— 与 _qint 同一把尺子。
+# 离线的写法是在 writer_export() 这一层下探针（那条 HTTP 路前面有 chromium_ready()
+# 前置拦，门禁里到不了 scale 这一段），不起浏览器、不碰真实书库。
+run "写作导出参数（脏 scale 当没传 / 越界夹住 / 一处接线）" "$PY" tests/check_writer_export_args.py
 # 上一条管「脏字段折不成数」，这一条管「脏字符写不进 utf-8」。写作这一格的正文按
 # utf-8 写、meta.json 与 _books.json 按 ensure_ascii=False 写，而浏览器把 JS 字符串
 # 拦腰截断时会留下落单的半个代理码点（json.loads 收得下 "\ud83d"）：老代码在
