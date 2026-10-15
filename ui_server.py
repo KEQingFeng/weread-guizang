@@ -6240,7 +6240,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self, body):
         action = (body or {}).get("action")
-        book = (body or {}).get("book", "")
+        # 这一族手写动作的字段全走 _body_str / _body_list：与 do_POST 那几条路由
+        # 同一把尺子（见 tests/check_action_dirty.py）。以前这里是裸的
+        # `(body.get("book", "") or "").strip()` 与 `body.get("module")`，脏形状
+        # 抛出的 AttributeError / unhashable TypeError 会被 _action 的兜底接住，
+        # 然后把解释器的报错原文递到界面上 —— 脏字段该当「没写」，不该当报错。
+        book = _body_str(body, "book")
 
         if action == "stop":
             ok, msg = stop_task()
@@ -6250,15 +6255,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(clear_log())
 
         if action == "export_dir":
-            ok, msg = set_export_dir(body.get("dir"))
+            ok, msg = set_export_dir(_body_str(body, "dir", None))
             return self._json({"ok": ok, "msg": msg, "dir": export_dir()})
 
         if action == "agent.save":
-            ok, msg = set_agent_cfg(body.get("url"), body.get("key"), body.get("model"))
+            ok, msg = set_agent_cfg(_body_str(body, "url", None),
+                                    _body_str(body, "key", None),
+                                    _body_str(body, "model", None))
             return self._json({"ok": ok, "msg": msg, "agent": agent_state()})
 
         if action == "ai.save":
-            ok, msg = set_ai_cfg(body.get("url"), body.get("key"), body.get("model"))
+            ok, msg = set_ai_cfg(_body_str(body, "url", None),
+                                 _body_str(body, "key", None),
+                                 _body_str(body, "model", None))
             return self._json({"ok": ok, "msg": msg, "ai": ai_state()})
 
         if action == "agent.test":
@@ -6283,9 +6292,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "plan": cleanup.plan(what)})
 
         if action == "media.save":
-            ok, msg = set_media_cfg(body.get("engine"), body.get("lang"),
-                                    url=body.get("url"), key=body.get("key"),
-                                    model=body.get("model"))
+            # url / key / model 传 None 表示「这次不动这一项」：脏形状必须落回 None，
+            # 落成空串会被 set_media_cfg 当成「清掉」，等于替用户抹掉配置。
+            ok, msg = set_media_cfg(_body_str(body, "engine", None),
+                                    _body_str(body, "lang", None),
+                                    url=_body_str(body, "url", None),
+                                    key=_body_str(body, "key", None),
+                                    model=_body_str(body, "model", None))
             video_avail_forget()
             return self._json({"ok": ok, "msg": msg, "asr": asr_cfg_view(),
                                "available": video_avail()})
@@ -6365,7 +6378,12 @@ class Handler(BaseHTTPRequestHandler):
             # 带 dir 时（划线笔记导出 CSV 落到用户自设的导出位置）只放行「用户自己设过的
             # 那个导出目录」，别的路径一概不理：这个动作能开的文件夹永远只有归藏自己
             # 写进去的那两个，用户传什么进来都越不出去。
-            want = (body.get("dir") or "").strip()
+            # 只放行真字符串：这里保留 `body.get("dir")` 的读法（tests/check_notes_csv.py
+            # 的 W5 认这一行），但先过 isinstance，脏形状当没写 —— 老写法紧跟的
+            # `.strip()` 会在数字 / 对象上抛 AttributeError，被 _action 接住后把
+            # 解释器原文递到界面（见 tests/check_action_dirty.py）。
+            _want = body.get("dir")
+            want = _want.strip() if isinstance(_want, str) else ""
             d = DOWNLOAD_DIR
             chosen = export_dir()
             if want and chosen and os.path.abspath(want) == os.path.abspath(chosen) \
@@ -6379,7 +6397,7 @@ class Handler(BaseHTTPRequestHandler):
         # 各开各的，剪藏那一屏不必把微信读书那一大堆一起摊在访达里。
         if action == "openbooks":
             ensure_books_dir()
-            mod = (body.get("module") or "").strip()
+            mod = _body_str(body, "module")
             named = mod if mod in book_layout.DIR_OF else ""
             pc.open_in_file_manager(module_dir(named) if named else OUT_DIR)
             return self._json({"ok": True,
@@ -6387,23 +6405,23 @@ class Handler(BaseHTTPRequestHandler):
                                else "已打开书库文件夹"})
 
         if action == "folder.new":
-            name = (body.get("name") or "").strip()[:40]
+            name = _body_str(body, "name")[:40]
             if not name:
                 return self._json({"ok": False, "msg": "文件夹需要一个名字"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             fid = "f" + uuid.uuid4().hex[:8]
             s["folders"].append({"id": fid, "name": name})
             save_lib(lib)
             return self._json({"ok": True, "id": fid, "msg": "已新建"})
 
         if action == "folder.rename":
-            fid = (body.get("id") or "").strip()
-            name = (body.get("name") or "").strip()[:40]
+            fid = _body_str(body, "id")
+            name = _body_str(body, "name")[:40]
             if not (fid and name):
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             if not any(f["id"] == fid for f in s["folders"]):
                 return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
             for f in s["folders"]:
@@ -6413,9 +6431,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已改名"})
 
         if action == "folder.drop":
-            fid = (body.get("id") or "").strip()
+            fid = _body_str(body, "id")
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             keep = [f for f in s["folders"] if f["id"] != fid]
             if len(keep) == len(s["folders"]):
                 return self._json({"ok": False, "msg": "这个模块里没有这个文件夹"})
@@ -6427,8 +6445,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "文件夹已删除，书回到未归类"})
 
         if action == "book.move":
-            bid = (body.get("book") or "").strip()
-            folder = (body.get("folder") or "").strip()
+            bid = _body_str(body, "book")
+            folder = _body_str(body, "folder")
             d = safe_book_dir(bid)
             if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6447,8 +6465,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已归入"})
 
         if action == "book.order":
-            bid = (body.get("book") or "").strip()
-            before = (body.get("before") or "").strip()
+            bid = _body_str(body, "book")
+            before = _body_str(body, "before")
             mod = book_module(bid)
             if not safe_book_dir(bid):
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6466,21 +6484,21 @@ class Handler(BaseHTTPRequestHandler):
         if action == "book.tag":
             # 给一篇文章 / 一本书贴标签（可多张）。只在它自己那个模块里贴：
             # 剪藏那套「随笔 / 待读」不会冒到微信读书的整本书上去。
-            bid = (body.get("book") or "").strip()
+            bid = _body_str(body, "book")
             mod = book_module(bid)
             if not safe_book_dir(bid):
                 return self._json({"ok": False, "msg": "找不到这本书"})
-            add = body.get("add") or []
-            drop = body.get("remove") or ""
-            if isinstance(add, str):
-                add = [add]
+            # add 可以是一张标签（字符串）也可以是一组：字符串特殊放行成单元素表，
+            # 别的脏形状一律当没写（数字直接 `for x in add` 会 not iterable）。
+            add = [body.get("add")] if isinstance(body.get("add"), str) \
+                else _body_list(body.get("add"))
+            drop = _body_str(body, "remove")[:20]
             lib = load_lib()
             s = lib_scope(lib, mod)
             cur = [str(t) for t in (s["tags"].get(bid) or [])]
             for t in [str(x).strip()[:20] for x in add if str(x).strip()]:
                 if t and t not in cur:
                     cur.append(t)
-            drop = str(drop).strip()[:20]
             if drop:
                 cur = [t for t in cur if t != drop]
             if len(cur) > 12:
@@ -6493,12 +6511,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "tags": cur, "msg": "标签已更新"})
 
         if action == "tag.rename":
-            old = str(body.get("from") or "").strip()[:20]
-            new = str(body.get("to") or "").strip()[:20]
+            old = _body_str(body, "from")[:20]
+            new = _body_str(body, "to")[:20]
             if not (old and new):
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             n = 0
             for bid, tags in list(s["tags"].items()):
                 if old in tags:
@@ -6510,11 +6528,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": n > 0, "msg": f"已改 {n} 篇" if n else "没有用到这个标签"})
 
         if action == "tag.drop":
-            old = str(body.get("name") or "").strip()[:20]
+            old = _body_str(body, "name")[:20]
             if not old:
                 return self._json({"ok": False, "msg": "缺少参数"})
             lib = load_lib()
-            s = lib_scope(lib, body.get("module"))
+            s = lib_scope(lib, _body_str(body, "module"))
             n = 0
             for bid, tags in list(s["tags"].items()):
                 if old in tags:
@@ -6528,7 +6546,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": f"已从 {n} 篇摘掉"})
 
         if action == "book.delete":
-            bid = (body.get("book") or "").strip()
+            bid = _body_str(body, "book")
             d = safe_book_dir(bid)
             if not d:
                 return self._json({"ok": False, "msg": "找不到这本书"})
@@ -6543,10 +6561,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "msg": "已从书架移除"})
 
         if action == "shelf.add":
-            ids = body.get("ids") or []
-            if isinstance(ids, str):
-                ids = [ids]
-            one = (body.get("book") or "").strip()
+            # ids 本是列表；前端历史上有过传单张字符串的写法，仍然放行。数字 / 对象
+            # 之类当没写，别让 `list(ids)` 抛出 not iterable。
+            ids = [body.get("ids")] if isinstance(body.get("ids"), str) \
+                else _body_list(body.get("ids"))
+            one = _body_str(body, "book")
             if one:
                 ids = list(ids) + [one]
             return self._json(shelf_add(ids))
