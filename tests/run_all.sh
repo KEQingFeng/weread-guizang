@@ -790,6 +790,14 @@ run "书城短 id 的 ASCII 口径（全角 / 阿拉伯-印度数字不算数，
 # 原子替换（写失败不毁旧档、不留 .tmp），外加界面与 MCP 都兜住了「没有秒数」这一档。
 # 全离线、不联网、不开浏览器、不需要 playwright。归静态段，--fast 也得带上。
 run "登录态账本（形状一处真相 / 原子落盘 / 半截档 / 三处读者兜底）" "$PY" tests/check_login.py
+# 上一条钉的是浮点那一档的越界（NaN / inf），这一条钉**整数**那一档：`json` 把账本里
+# 一长串数字解成 Python 大整数，`login._seconds` 的 `float(v)` 在它上面抛 OverflowError，
+# `math.isfinite` 还没轮到 —— 异常穿出 normalize_state、被 read_state 那把宽 except 接住，
+# 整份登录态回 None：`logged_in: true` 连同 url / note 一起没了，界面把「已登录」显示成
+# 「未检测」。与 web_parse._fmt_epoch 收的是同一种越界。这一条要求坏时间收成 None、
+# 其余字段一个字不改、能装进 float 的值口径不变，另加一条「旧写法确实抛」的对照防门禁
+# 空转。纯函数 + 临时沙盒，不联网、不开浏览器，归静态段，--fast 也得带上。
+run "登录态越界整数（400 位 checked_at 不再把整份登录态带走）" "$PY" tests/check_login_overflow.py
 # 只听回环不等于「只有归藏自己的页面打得进来」：别的网页发的简单请求，浏览器照样
 # 从用户这台机器送到后端，而删书 / 清数据 / 起任务「做成了」就是攻击的全部。这一条
 # 前半段打纯函数边界表（谁算同源、谁算不是浏览器），后半段自己起一个服务、用裸 HTTP
