@@ -31,10 +31,21 @@ def _seconds(v):
 
     `"昨天" * 1000` 是 NaN、`True * 1000` 是 1000（1970 年那条假时间），
     两者都会让界面和 MCP 印出一句看着像后端坏了的胡话。
+
+    `float(v)` 这一步自己也要兜 `OverflowError`：`json` 把账本里一长串数字解成一个
+    Python 大整数（`{"checked_at": 10**400}` 就是），而大整数到 float 装不下时会抛
+    —— `math.isfinite` 还没轮到，异常先穿出 `normalize_state`，被 `read_state` 那把
+    宽 except 接住，于是**整份登录态回 None**：`logged_in: true` 连同 url / note 一起
+    没了，界面上是「已登录」显示成「未检测」。这与 `web_parse._fmt_epoch` 收的是同一
+    种越界（那里专门 catch 了 OverflowError），口径也照旧：认不出的时间给 None，
+    其余字段一个字不改。
     """
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    v = float(v)
+    try:
+        v = float(v)
+    except OverflowError:
+        return None
     if not math.isfinite(v) or v <= 0:
         return None
     return v
