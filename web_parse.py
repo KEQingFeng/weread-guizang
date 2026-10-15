@@ -234,7 +234,13 @@ def _base36(value):
 
 def _tweet_token(tweet_id):
     """react-tweet 那套 token：id / 1e15 × π，转 36 进制，去掉 0 与小数点。"""
-    return _base36((int(tweet_id) / 1e15) * math.pi).replace("0", "").replace(".", "")
+    # 第二道闸：进来的编号必须是 1–25 位的 ASCII 数字。`_tweet_id` 已经收过一道口，
+    # 这里是防将来别的调用方（或全角数字这种 `\d` 认、`int()` 也认的写法）绕过上界，
+    # 把 OverflowError 甩到剪藏那一层。认不出就抛人话，与上面「没有推文编号」同一口径。
+    text = str(tweet_id if tweet_id is not None else "").strip()
+    if not re.fullmatch(r"[0-9]{1,%d}" % _X_ID_MAX, text):
+        raise ValueError("这个 X 链接里的推文编号认不出")
+    return _base36((int(text) / 1e15) * math.pi).replace("0", "").replace(".", "")
 
 
 def _fmt_epoch(ts):
@@ -293,7 +299,16 @@ def _result(title, author, site, date, cover, url, markdown, words):
 
 # ─────────────────────────────── X / Twitter ───────────────────────────────
 
-_X_STATUS = re.compile(r"/status(?:es)?/(\d+)")
+# X 的推文编号是雪花 id，真实长度 1–19 位；上限放到 25 位是给未来留的量级。
+# 这个上限不是洁癖：`/status/` 后面接一串几百位的数字（手写的、别人构造的链接）时，
+# 编号本身 `int()` 收得下，但 `int(tid) / 1e15` 抛的是 OverflowError
+# （"int too large to convert to float"）—— 它不在 ValueError 之内，`/api/clip` 那条
+# 「抓取失败全是人话、原样递出去」的兜底接不住，用户拿到的是一行看不懂的英文报错。
+# 上界一旦收在这儿，超长的编号根本不算编号，走的是 `_x` 里那句现成的人话。
+# 末尾的 `(?![0-9])` 不能省：没有它，四百位的数字会被当成「前 25 位 id」照发不误，
+# 那是个静默的错请求，比抛错更难查。
+_X_ID_MAX = 25
+_X_STATUS = re.compile(r"/status(?:es)?/([0-9]{1,%d})(?![0-9])" % _X_ID_MAX)
 # i/web/status/<id> 也带 /status/，上面那条就能捞到；这里只兜住没有 /status 的短链形态
 _X_BARE = re.compile(r"/(\d{10,25})(?:[/?#]|$)")
 
