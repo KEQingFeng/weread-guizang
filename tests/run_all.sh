@@ -392,6 +392,13 @@ run "画板存盘收尾（坏字符 / 不留 .tmp / purge 清 .prev）" "$PY" te
 # 「没存进去」可画已经落了一半。临时名改成 pid + 随机串（与 ui_server 的三条写口同一
 # 口径），delete_board 也按这个形状把残件一并收走。纯逻辑 + 临时目录，不联网、不起服务。
 run "画板落盘并发原子性（同一块板两个写者不扑空 / 不留 .tmp / 残件收得掉）" "$PY" tests/check_board_atomic.py
+# 导图这一格：`save_map` 有两个调用侧（界面的 /api/mindmap 与 AI 画图那条任务线），
+# 后端又是 ThreadingHTTPServer，同一本书被两处同时存时，固定的 `path + ".tmp"` 会让
+# 先收尾的那个把临时件搬走、后一个 os.replace 当场 FileNotFoundError（界面「保存失败」
+# 可前一笔已落盘），或者两份内容交织着顶成正式 mindmap.json。临时名同样换成 pid +
+# 随机串。笔记 / 画板 / 视频那三格各有更严的专条（check_notes_atomic / check_board_atomic /
+# check_video_atomic），这一条只钉导图，同一把尺子不量三遍。纯函数 + 线程 + 临时沙盒。
+run "导图落盘临时件（两个写手不共用固定名 / 失败不留残件 / 并发落地的那份解得动）" "$PY" tests/check_write_tmp_unique.py
 # 书库从「全挤一个文件夹」改成一个模块一个文件夹，账本也跟着分格。这一条管三件事：
 # 老书归置会不会搬丢/搬坏（绝不覆盖）、按模块列清单会不会串门（剪藏不许出现在微信读书）、
 # 账本分格后建夹贴标签只动自己那一格（空文件夹不许被清理那一刀悄悄削掉）。全在临时沙盒里跑。
