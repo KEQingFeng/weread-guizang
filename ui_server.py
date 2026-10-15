@@ -1458,7 +1458,11 @@ def writer_export(kind, book_id, opts):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     note = ""
     if kind == "png":
-        scale = max(1, min(int(opts.get("scale") or 2), 3))
+        # ?scale= 是地址上来的字符串，界面上只有 1/2/3 三档，但手改地址
+        # （`scale=abc` / `1e400` / `nan`）不能把这一趟导出 500 掉，更不该把
+        # `invalid literal for int() with base 10: 'abc'` 原样递到用户眼前 ——
+        # 与 _qint / _body_int 同一把尺子：认不出回缺省 2，再夹在 1..3。
+        scale = _qint(opts.get("scale"), 2, lo=1, hi=3)
         tpl = str(opts.get("tpl") or "plain")
         width = writer_mod.tpl_width(tpl)
         dest = os.path.join(DOWNLOAD_DIR, "%s.png" % stem)
