@@ -797,6 +797,33 @@ def _make_book_dir(dest_root, title, prefix="imp"):
     return d, bid
 
 
+def _discard_import(book_dir, cover_file=""):
+    """一次没收成的导入：把刚开出来的那个半截书目录收干净。
+
+    为什么非收不可：`import_book` 是「先把章节 / 图片铺进目录、最后才写 meta 与目录账」，
+    中途断在盘满 / 编码不过 / 中止信号（Ctrl-C、关窗口，`KeyboardInterrupt` /
+    `SystemExit` 不继承 `Exception`）时，书目录里已经有几章正文却没有 `meta.json`；
+    而 `list_books` 按目录列书、缺 meta 只是「允许没 meta」那一档 —— 书架上于是多出
+    一本点开没内容、也没有正式痕迹的幽灵书。整本书的产物都在这个刚建的目录里，收它
+    一个就够了，不必叫醒上面那把清理刀（那里按书号走，这本还没进册账）。
+
+    只在**新建**的那个目录上动手（`_make_book_dir` 的名字带 `uuid4().hex[:8]`，不会
+    撞上别人的书）；符号链接不碰（`shutil.rmtree` 对链接会抛，且链接另一头不该由这里
+    删）。收残件自己再失败也绝不能盖住真正的错 —— 调用方固定是
+    `except BaseException: _discard_import(...); raise`。
+    """
+    try:
+        if cover_file:
+            try:
+                os.remove(cover_file)
+            except OSError:
+                pass
+        if os.path.isdir(book_dir) and not os.path.islink(book_dir):
+            shutil.rmtree(book_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+
 def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
                 book_id_prefix="imp", source="local"):
     """把一份文件收进 dest_root，返回「像取回来的书」的元信息。
@@ -805,6 +832,11 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
     _catalog.json + _progress.json），所以阅读器、导出 EPUB/PDF、在文件管理器里
     定位这些现成能力一行都不用改；只有 meta.source（"local" 或 "clip"）用来和
     微信读书来的书区分，前端据此分开显示。
+
+    失败路径只留一个结果：目录开了之后任何一步没走完（盘满 / 编码不进去 / Ctrl-C），
+    刚开的那个半截书目录连同一张顺手写下的封面一起收掉再原样抛出（见 `_discard_import`），
+    书架上不会多出一本点开没内容的幽灵书。目录开之前的失败（空文件 / 太大 / 认不出格式 /
+    坏 EPUB）本来就什么都没落下。
     """
     if not data:
         raise ValueError("这份文件是空的")
@@ -853,55 +885,65 @@ def import_book(dest_root, filename, data, title="", author="", cover_dir=None,
         raise ValueError("这份文件里没读出正文，换一份再试")
 
     d, bid = _make_book_dir(dest_root, title, book_id_prefix)
-    ch_dir = os.path.join(d, "chapters")
-    os.makedirs(ch_dir, exist_ok=True)
-    catalog, total_chars = [], 0
-    for i, (ctitle, body) in enumerate(chapters):
-        with open(os.path.join(ch_dir, "%04d.md" % i), "w", encoding="utf-8") as f:
-            f.write("# %s\n\n%s\n" % (ctitle, body))
-        catalog.append(ctitle)
-        total_chars += len(body)
+    cover_file = ""
+    # 从这里到 return 之间，任何一步失败（盘满、编码不进去、Ctrl-C / 关窗口）都已经
+    # 在书库里开出了目录，所以整段兜住：收掉这个半截书目录再原样抛出。范围只圈在
+    # 「刚建的这个目录 + 它可能顺手写下的那张封面」上，不动别的书、也不吞错。
+    try:
+        ch_dir = os.path.join(d, "chapters")
+        os.makedirs(ch_dir, exist_ok=True)
+        catalog, total_chars = [], 0
+        for i, (ctitle, body) in enumerate(chapters):
+            with open(os.path.join(ch_dir, "%04d.md" % i), "w", encoding="utf-8") as f:
+                f.write("# %s\n\n%s\n" % (ctitle, body))
+            catalog.append(ctitle)
+            total_chars += len(body)
 
-    saved = 0
-    if images:
-        img_dir = os.path.join(d, "images")
-        os.makedirs(img_dir, exist_ok=True)
-        namemap = namemap or _unique_names([n for n, _ in images])
-        for orig, blob in images:
-            flat = namemap.get(orig)
-            if not flat:
-                continue
-            with open(os.path.join(img_dir, flat), "wb") as f:
-                f.write(blob)
-            saved += 1
-        # 封面：是 JPEG 就另存一份到封面缓存，书架缩略图直接用（PNG 不强转）
-        if cover_orig and cover_dir and namemap.get(cover_orig):
-            flat = namemap[cover_orig]
-            if os.path.splitext(flat)[1].lower() in (".jpg", ".jpeg"):
-                try:
-                    os.makedirs(cover_dir, exist_ok=True)
-                    shutil.copyfile(os.path.join(img_dir, flat),
-                                    os.path.join(cover_dir, bid + ".jpg"))
-                except Exception:
-                    pass
+        saved = 0
+        if images:
+            img_dir = os.path.join(d, "images")
+            os.makedirs(img_dir, exist_ok=True)
+            namemap = namemap or _unique_names([n for n, _ in images])
+            for orig, blob in images:
+                flat = namemap.get(orig)
+                if not flat:
+                    continue
+                with open(os.path.join(img_dir, flat), "wb") as f:
+                    f.write(blob)
+                saved += 1
+            # 封面：是 JPEG 就另存一份到封面缓存，书架缩略图直接用（PNG 不强转）
+            if cover_orig and cover_dir and namemap.get(cover_orig):
+                flat = namemap[cover_orig]
+                if os.path.splitext(flat)[1].lower() in (".jpg", ".jpeg"):
+                    try:
+                        os.makedirs(cover_dir, exist_ok=True)
+                        cover_file = os.path.join(cover_dir, bid + ".jpg")
+                        shutil.copyfile(os.path.join(img_dir, flat), cover_file)
+                    except Exception:
+                        # 复制到一半失败也不清空 cover_file：盘上可能已经留下半张，
+                        # 收尾那把刀按同一个路径再删一次（删不到就是 OSError，已兜住）。
+                        pass
 
-    meta = {
-        "title": title,
-        "author": author,
-        "done": True,
-        "source": source or "local",
-        "format": fmt,
-        "chars": total_chars,
-        "imported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "updated_at": int(time.time()),
-    }
-    _write_json(os.path.join(d, "meta.json"), meta)
-    _write_json(os.path.join(d, "_catalog.json"), catalog)
-    _write_json(os.path.join(d, "_progress.json"),
-                {"at": len(chapters), "max": len(chapters)})
-    return {"id": bid, "dir": d, "title": title, "author": meta["author"],
-            "format": fmt, "label": FORMAT_LABEL.get(fmt, fmt.upper()),
-            "chapters": len(chapters), "chars": total_chars, "images": saved}
+        meta = {
+            "title": title,
+            "author": author,
+            "done": True,
+            "source": source or "local",
+            "format": fmt,
+            "chars": total_chars,
+            "imported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": int(time.time()),
+        }
+        _write_json(os.path.join(d, "meta.json"), meta)
+        _write_json(os.path.join(d, "_catalog.json"), catalog)
+        _write_json(os.path.join(d, "_progress.json"),
+                    {"at": len(chapters), "max": len(chapters)})
+        return {"id": bid, "dir": d, "title": title, "author": meta["author"],
+                "format": fmt, "label": FORMAT_LABEL.get(fmt, fmt.upper()),
+                "chapters": len(chapters), "chars": total_chars, "images": saved}
+    except BaseException:
+        _discard_import(d, cover_file)
+        raise
 
 
 if __name__ == "__main__":
