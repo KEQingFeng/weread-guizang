@@ -66,30 +66,39 @@ def _rich(text):
     return text
 
 
-# 「XML 1.0 里没有合法写法」的两类字符，收成一把尺子（_xml_clean）：
-#   · C0 控制符（\t \n \r 除外）：XHTML / EPUB 里非法；正文那一路还得靠它躲开
-#     占位记号（\x00N\x00 / \x01N\x01）撞车，理由写在 _stash_line 那段。
+# 「XML 1.0 里没有合法写法」的字符，收成一把尺子（_xml_clean 与正文入口共用）：
+# XML 1.0 的 Char 产生式只认 `\t \n \r`、`[#x20-#xD7FF]`、`[#xE000-#xFFFD]`、
+# `[#x10000-#x10FFFF]` 这几段，落在它外面的写不出合法 XML：
+#   · C0 控制符（\t \n \r 除外）与 DEL（`\x7f`）：XHTML / EPUB 里非法；正文那一路
+#     还得靠它躲开占位记号（\x00N\x00 / \x01N\x01）撞车，理由写在 _stash_line 那段。
 #   · 落单的半个代理码点（U+D800–U+DFFF 不成对）：JSON 的 `"\ud800"` 转义读得回来，
 #     可 utf-8 里编不出来 —— zipfile.writestr 在 encode 那一步就抛。
+#   · **U+FFFE / U+FFFF**：Char 产生式在 BMP 里排除的只有这两个 + 代理码点，而手写
+#     清单最容易漏的就是它们。旧写法只列 C0 + 代理码点，书名里一个 U+FFFF 照样把
+#     content.opf / nav.xhtml 打成「不是合法 XML」（阅读器整本拒收），导出却报成功。
+#     所以判据按 Char 产生式的补集写、不再逐个点名；DEL 比 XML 多摘一个也不放宽
+#     （`tests/check_export_placeholder.py` 从 0.9.x 起就说正文里的 `\x7f` 要洗掉）。
 # 量哪儿是清楚的一条线：**按整份文本走转义管线的正文不动**（它中间夹着占位记号，
 # 顺手洗掉 C0 反而会把 \\# \\* 这些转义连同记号一起抹掉 —— 实测过，正文里的转义
-# 会当场消失），洗的是**书的身份**：书名 / 作者。它们从手改 / 云同步 / 导入的
-# meta.json 直接过来，而 `book_layout.read_meta` 只摘代理码点、**不摘控制符**。
+# 会当场消失），洗的是**书的身份**：书名 / 作者（正文入口 `md_to_html` 是同一条尺子
+# 在整段开头扫一遍，那儿要的是占位记号与非法字符再无交集，理由见下一段）。
+# 它们从手改 / 云同步 / 导入的 meta.json 直接过来，而 `book_layout.read_meta`
+# 只摘代理码点、**不摘控制符**。
 # 于是标题里一个换页符（`"\u000c"`，从 PDF 里粘书名就会带进来）就能让 content.opf
 # 与 cover.xhtml「不是合法 XML」，阅读器把整本书拒收 —— 而导出这一步返回成功，
 # 界面上看是「导出好了」，用户点开是报错或空白。收口落在 build_epub / build_pdf
 # 两个入口（元数据进成品之前那一步），_esc / _attrq 一个字不改。
-_SURROGATE = re.compile("[\ud800-\udfff]")
-_CTRL_DROP = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_XML_ILLEGAL = re.compile(
+    "[^\t\n\r\x20-\x7e\x80-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 
 
 def _xml_clean(s):
     """书的身份（书名 / 作者）落进 XML 之前摘掉 XML / utf-8 都不接受的字符。
 
-    正常文字一个字不改；`\\t \\n \\r` 是合法 XML，留着。
+    正常文字一个字不改；`\\t \\n \\r` 是合法 XML，留着。尺子是 `_XML_ILLEGAL`
+    （XML 1.0 的 Char 产生式补集），正文入口 `md_to_html` 走的是同一把。
     """
-    s = _SURROGATE.sub("", str(s if s is not None else ""))
-    return _CTRL_DROP.sub("", s)
+    return _XML_ILLEGAL.sub("", str(s if s is not None else ""))
 
 
 def _esc(s):
@@ -211,7 +220,7 @@ _STASH_MARK = re.compile(r"\x01(\d+)\x01")
 # IndexError 把整趟导出打抛（界面上「导不出来」），序号落回范围内则更阴 —— 一段
 # 正文被悄悄替换成另一个转义字符。C0 控制符（\t \n \r 除外）本来也不合法于
 # XHTML / EPUB，落进成品还可能被阅读器拒收，所以入口一次洗掉，占位与正文再无交集。
-# （那把尺子 `_CTRL_DROP` 现在定义在上面，_xml_clean 与正文共用同一份。）
+# （那把尺子 `_XML_ILLEGAL` 现在定义在上面，_xml_clean 与正文共用同一份。）
 
 
 def _stash_line(line, keep):
@@ -261,7 +270,7 @@ def md_to_html(md):
     这些正是 `md_fence` 已经收口过、`check_fence_rulers` 钉过的那几条，只是导出
     这条路没接上。现在抽取反斜杠转义与块级判定都过同一份状态机，两边不会再走散。
     """
-    raw = (_CTRL_DROP.sub("", md or "")
+    raw = (_XML_ILLEGAL.sub("", md or "")
            .replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     keep = []
     # 哪些行在代码块里由 md_fence 说了算；代码块内的反斜杠是字面量，不进抽取。
