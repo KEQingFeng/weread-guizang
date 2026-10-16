@@ -212,40 +212,61 @@ def _tmp_for(path) -> str:
 def _write_json(path, obj):
     """原子写 JSON：先写临时名再 os.replace，中途崩了也不会留下半截文件。
 
-    与 book_notes._write_json 同一路子，覆盖前留一份 .prev —— 画板是用户画出来的东西，
-    存坏了比笔记更心疼。（.prev 结尾不是 .json，不进列表、不占 MAX_BOARDS 的名额。）
+    与 book_notes._write_json / mindmap._write_json 同一路子，覆盖前留一份 .prev ——
+    画板是用户画出来的东西，存坏了比笔记更心疼。（.prev 结尾不是 .json，不进列表、
+    不占 MAX_BOARDS 的名额。）
 
-    序列化/写盘这一步失败（写不进 utf-8、塞了不该塞的东西）时自己把 .tmp 收掉：
-    留着它既没用，又会让 boards/ 里多一个只有磁盘看得见的垃圾。**只在写这一步失败时
-    收** —— 后面半步是「旧档挪成 .prev、新档顶上」，那半步失败时 .tmp 里是新内容，
-    删掉才是真的丢东西。
+    收口的两半跟笔记 / 导图那两格对齐（原先这一格两半都缺）：
+      · **中止信号**（KeyboardInterrupt / SystemExit）不继承 Exception，只兜 Exception
+        时它从写入 / 改名这一步穿出去，boards/ 里会多一个随机名残件；
+      · **旧档已挪去 `.prev`、新稿那句 `os.replace` 又失败**（磁盘满 / 只读、Windows 上
+        杀毒软件钳住目标）时，`<id>.json` 原先整个消失，列表与 `board_counts` 都当这块
+        板从没存在过 —— 用户画了半天的那张点进去就没了，而它其实好好躺在 `.prev` 里。
+        把旧档搬回来，失败照旧往上报。
+
+    写入这一步就失败时 `.tmp` 里是半截内容，收掉它才是对的；后面半步（旧档挪成
+    `.prev`、新稿顶上）失败时要先把旧档搬回来再删临时件，否则删掉的才是真东西。
     """
     tmp = _tmp_for(path)
+    prev = path + ".prev"
+    backed = False
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2, allow_nan=False)
-    except Exception:
+        if os.path.exists(path):
+            try:
+                os.replace(path, prev)            # 覆盖前留一份上一版
+                backed = True
+            except Exception:
+                backed = False                    # 留档失败不该拦下这次保存
+        os.replace(tmp, path)
+    except BaseException:
+        # 走到这一步说明新稿没顶上去：临时件收掉；若旧档已经被挪去 .prev，
+        # 把它搬回来 —— 不能因为一次落盘失败就让用户的画板整个不见。
         try:
             os.remove(tmp)
         except OSError:
             pass
+        if backed:
+            try:
+                os.replace(prev, path)
+            except Exception:
+                pass
         raise
-    if os.path.exists(path):
-        try:
-            os.replace(path, path + ".prev")
-        except OSError:
-            pass                    # 留档失败不该拦下这次保存
-    os.replace(tmp, path)
 
 
 def _write_bytes(path, raw):
-    """二进制导出物走同一个原子路子，但不留 .prev：导出物随时能从画布重画，不值得占双倍盘。"""
+    """二进制导出物走同一个原子路子，但不留 .prev：导出物随时能从画布重画，不值得占双倍盘。
+
+    残件收口也与 `_write_json` 对齐：只兜 OSError 时，中止信号（KeyboardInterrupt /
+    SystemExit）从 `f.write` 那一步穿出去会在 boards/ 里留下一个随机名 `.tmp`。
+    """
     tmp = _tmp_for(path)
     try:
         with open(tmp, "wb") as f:
             f.write(raw)
         os.replace(tmp, path)
-    except OSError:
+    except BaseException:
         try:
             os.remove(tmp)          # 半截的临时文件必须收掉，不然目录里全是垃圾
         except OSError:
