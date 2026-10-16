@@ -3031,11 +3031,14 @@ def list_books(module=None):
             if os.path.isdir(img_dir) else []
         chars = 0
         if os.path.isdir(raw_dir):
+            # 取书这几本账（_catalog / _progress / raw）与引擎同一把尺子：用户会拿
+            # 记事本直接改，另存成带 BOM 的 UTF-8 时裸 utf-8 读当场失败、被收成
+            # 「没有目录 / 没有进度 / 零字」，进度条与「取回多少」跟着一起错。
             for rf in sorted(os.listdir(raw_dir)):
                 if rf.endswith(".json"):
                     try:
                         chars += int(json.load(open(os.path.join(raw_dir, rf),
-                                                    encoding="utf-8")).get("text_len") or 0)
+                                                    encoding="utf-8-sig")).get("text_len") or 0)
                     except Exception:
                         pass
         # 读得开不等于是个对象：meta.json 被手改成 `[]` / `"书名"` 也照样是合法 JSON，
@@ -3053,7 +3056,7 @@ def list_books(module=None):
         cat = os.path.join(d, "_catalog.json")
         if os.path.exists(cat):
             try:
-                total = len(json.load(open(cat, encoding="utf-8")))
+                total = len(json.load(open(cat, encoding="utf-8-sig")))
             except Exception:
                 total = 0
         # 导入的本地书没有「目录/已取」这层差别，总数＝现有章数
@@ -3064,7 +3067,7 @@ def list_books(module=None):
         pp = os.path.join(d, "_progress.json")
         if os.path.exists(pp):
             try:
-                progress = json.load(open(pp, encoding="utf-8"))
+                progress = json.load(open(pp, encoding="utf-8-sig"))
             except Exception:
                 progress = {}
         # 同 meta.json 那道：`_progress.json` 里是个数组 / 字符串时也要当「没有进度」，
@@ -3295,7 +3298,7 @@ def book_outline(book_id):
     cp = os.path.join(d, "_catalog.json")
     if os.path.exists(cp):
         try:
-            catalog = json.load(open(cp, encoding="utf-8"))
+            catalog = json.load(open(cp, encoding="utf-8-sig"))
         except Exception:
             catalog = []
     chapters = []

@@ -164,7 +164,10 @@ def write_progress(book_dir, **fields):
     data = {}
     try:
         if os.path.exists(path):
-            data = json.load(open(path, encoding="utf-8"))
+            # utf-8-sig：与目录 /「钉不住」那两本账同一把尺子。这几份都是书目录里
+            # 用户能直接改的 JSON（见 _catalog_items 里那段为什么），记事本另存成
+            # 带 BOM 的 UTF-8 时，裸 utf-8 读会 JSONDecodeError、被收成空账。
+            data = json.load(open(path, encoding="utf-8-sig"))
     except Exception:
         data = {}
     # 读得开不等于是个对象：_progress.json 被手改成 `[]` / `"书名"` / `123` 也是合法
@@ -201,7 +204,7 @@ def _seen_image_urls(raw_dir):
         if not jf.endswith(".json"):
             continue
         try:
-            with open(os.path.join(raw_dir, jf), encoding="utf-8") as f:
+            with open(os.path.join(raw_dir, jf), encoding="utf-8-sig") as f:
                 doc = json.load(f)
         except Exception:
             continue
@@ -570,9 +573,17 @@ def _catalog_items(catalog_path):
     这句话垮掉；`"abc"` / 字典更阴，不报错，却把单个字符或 key 当成目录项，续传
     锚点钉到错的位置。认不出的项丢掉（与「标题为空的那一项」同一档），能认的
     原样保留，顺序不动。
+
+    编码按 `utf-8-sig` 读：这本账是用户会拿记事本直接改的文本，Windows 记事本
+    另存 UTF-8 默认带 BOM，裸 `utf-8` 会让 `json.load` 当场 JSONDecodeError、
+    被上面那个宽 `except` 收成空账 —— 目录一空，续传锚点（`resume_catalog_index`
+    的落点、`first_catalog_title`）全没了，引擎要么从第一页重来、要么钉不到该
+    接着读的那一节。与 feed / 便签账 / 视频三份登记档 / 写作册账同一把尺子：
+    BOM 只该被当成编码签名剥掉，不该被当成坏档。（`_progress.json` /
+    `_stuck.json` / `raw/*.json` 是同一批写口出去的账，读口一并按这把尺子。）
     """
     try:
-        with open(catalog_path, encoding="utf-8") as f:
+        with open(catalog_path, encoding="utf-8-sig") as f:
             raw = json.load(f)
     except Exception:
         return []
@@ -698,7 +709,7 @@ def load_stuck(stuck_path, catalog_len):
     拿老记录去跳新目录只会跳过本该读的那一节。
     """
     try:
-        with open(stuck_path, encoding="utf-8") as f:
+        with open(stuck_path, encoding="utf-8-sig") as f:
             data = json.load(f)
     except Exception:
         return {}
@@ -1301,7 +1312,7 @@ async def run_session(book_id, md_dir, raw_dir, start_idx, seen_imgs,
     if book_dir:
         try:
             page_base = int(json.load(open(os.path.join(book_dir, "_progress.json"),
-                                           encoding="utf-8")).get("pages", 0))
+                                           encoding="utf-8-sig")).get("pages", 0))
         except Exception:
             page_base = 0
     last_cat_title = load_last_catalog_title(catalog_path) if catalog_path else ""
