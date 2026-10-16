@@ -357,6 +357,14 @@ run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 
 # 这条钉住「一次一个名字 + 带进程号、失败收干净、并写不抛、缓存不回旧字」，另留
 # 「固定名确实扑空」的对照防空转。纯函数 + 线程 + 临时沙盒，不联网、不起服务，归静态段。
 run "视频转写落盘（临时件不共用 / 并写不扑空 / 失败不留 .tmp）" "$PY" tests/check_video_atomic.py
+# 上一条管「写失败 / 两个写手」；这一条管**中止信号**那一档：Ctrl-C / 停止键走的是
+# `KeyboardInterrupt`，它不继承 `Exception` —— 清理分支只兜 `Exception`，就会恰好在
+# 退出路径上把半截临时件留下（`ui_server.start_task` 起的 `video_note.py --task` 那条
+# 独立进程收 Ctrl-C 就走这里）。《开发规范》给这一族定的口径是 `except BaseException`，
+# 视频这两把是最后没对齐的（导图那件在未并的 PR 里）。这条钉 json 与 text 两个口：
+# 中止信号照原样穿出、残件收干净、旧档逐字节不动，外加「老写法确实会留下 .tmp」的
+# 对照与源码接线检查。纯函数 + 临时目录，归静态段。
+run "视频转写中止信号落盘（Ctrl-C / SystemExit 不留 .tmp / 清理分支兜 BaseException）" "$PY" tests/check_video_abort_tmp.py
 # 视频转笔记最后一步要问外站的 LLM（/chat/completions）。对方回的正文形状没人保证，
 # 而 `_llm_content` 与 SSE 兜底那两段都是裸的 `.get` 链 —— `{"choices": ["oops"]}`、
 # `{"choices": [{"message": "hi"}]}`、SSE 里 `data: []` / `data: 0` 这些「是合法 JSON、

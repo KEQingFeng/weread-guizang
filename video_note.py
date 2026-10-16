@@ -1525,9 +1525,13 @@ def _write_json(path, obj):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
-    except Exception:
+    except BaseException:
         # 写这一步失败时把临时件收干净再抛（内容里还有落单码点这类），
-        # 别在书目录里留一个只有磁盘看得见的垃圾。
+        # 别在书目录里留一个只有磁盘看得见的垃圾。兜 `BaseException` 而不是
+        # `Exception`：用户按停止 / Ctrl-C 走的是 `KeyboardInterrupt`，那一档
+        # 不继承 `Exception`，只兜 `Exception` 就恰好在退出路径上漏下这一件。
+        # 与 `book_notes` / `flomo_notes` / `export_precise` 那几把同一口径
+        # （《交接说明》§2 定过这条）。
         try:
             os.remove(tmp)
         except OSError:
@@ -1590,7 +1594,9 @@ def _write_text(path, text):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(_drop_surrogates(text))
-    except Exception:
+    except BaseException:
+        # 与上面 `_write_json` 同一把尺子：中止信号不继承 `Exception`，只兜
+        # `Exception` 会在「停止 / Ctrl-C」那条退出路径上把半截临时件留在书目录里。
         try:
             os.remove(tmp)
         except OSError:
