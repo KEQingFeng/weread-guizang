@@ -21,6 +21,7 @@
 import os
 import signal
 import time
+import uuid
 
 import platform_compat as pc  # noqa: F401  —— 导入即抹掉 XPC_FLAGS 的 0x2 位（见该模块说明）
 
@@ -94,11 +95,38 @@ def open_first_page(page, dd, term=""):
     return False, ""
 
 
+def _part_name(target):
+    """临时件名：目标旁边 + 进程号 + 一小串随机，以 `.part` 收尾。
+
+    与 `sync._write_atomic` / `download_images.download_one` / `ffmpeg_tool._download`
+    同一族：名字一次一个，两个写手不共用同一个件；以 `.part` 收尾的普通文件按定义
+    就是没写完的中间件（书目录里那一刀由 `ui_server.drop_stray_tmps` 收，下载格
+    这一头由「清除本地数据」整格带走）。
+    """
+    return "%s.%d.%s.part" % (target, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _drop(path):
+    """收残件：收不掉也不算错（它不属于任何读口，最多占一份盘）。"""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def handle_download(dd, queue, download):
     """接住一份下载：先原样落到原始下载格，再排队等主循环转成书。
 
     这一步只做「存下来」，不做解析：EPUB 拆章要几秒，卡在事件回调里会把后面的
     下载和点词一起拖住。存完把路径丢进队列，主循环一件件处理。
+
+    落盘走「先写同目录 `.part`、下完整了再一次改名」这把尺子，而不是让 `save_as`
+    直接往最终名上写。理由与插图 / 云同步 / 装组件那三处同一条：写到一半被打断
+    （用户关掉窗口、站点把连接断了、磁盘满、进程被收走）会在**最终名**上留一个
+    长度不对却「存在」的半截件 —— 它看着像一份已经接住的下载，「补收」下一轮拿它
+    去解析，用户等到的是一句「这个 zip 打不开」；而且同名文件此后一律加时间戳
+    绕开它，那份半截件再也没人重下。写 `.part` 再改名之后，最终名上要么没有文件、
+    要么是一份完整的下载；同名的下一份因此走得通，不会被一个坏件顶掉。
     """
     name = anna.safe_name(getattr(download, "suggested_filename", "") or "")
     target = os.path.join(anna.incoming_dir(dd, create=True), name)
@@ -119,13 +147,23 @@ def handle_download(dd, queue, download):
             n += 1
             name = "%s-%d-%d%s%s" % (stem, stamp, n, dot, tail)
             target = os.path.join(folder, name)
+    tmp = _part_name(target)
     try:
-        download.save_as(target)
+        download.save_as(tmp)
+        os.replace(tmp, target)
     except Exception as e:
+        # 写这一步失败：半截件收干净再报，最终名上不许留下任何东西 —— 下一份同名
+        # 的下载还得用回这个名字（不会被一个没人认领的坏件顶去加时间戳）。
+        _drop(tmp)
         msg = "这份没接住：%s" % (type(e).__name__)
         log(msg)
         anna.counted(dd, {"note": msg, "last_error": msg})
         return
+    except BaseException:
+        # 中止信号（KeyboardInterrupt / SystemExit）不继承 Exception：收掉半截件之后
+        # 原样往上传，别把一次收摊装成「这份没接住」。
+        _drop(tmp)
+        raise
     size = os.path.getsize(target) if os.path.exists(target) else 0
     log("接到一份下载：%s（%d KB）" % (name, max(size // 1024, 0)))
     anna.counted(dd, {"caught_delta": 1, "note": "接到一份下载：%s" % name,

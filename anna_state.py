@@ -41,6 +41,13 @@ INCOMING_DIR = os.path.join("cache", "downloads", "anna")
 # 但界面会明说「这本没进书架，因为格式不认」，不假装成功。
 KEEP_EXT = ("epub", "pdf", "txt", "md")
 
+# 没写完的下载：Chromium 自己的半截件是 `<名>.crdownload`（downloads_path 指的就是
+# 这一格），归藏这一侧在原子改名之前落的是随机名 `.part`（anna_browser.handle_download），
+# 旧版本改名之前还会留固定名 `.tmp`。它们都不是「一份可以补收的下载」——真拿半截
+# EPUB / PDF 去解析，用户等到的是一句「这个 zip 打不开」，界面上还多一份永远收不进来
+# 的条目。列清单时整份跳过（文件仍在盘上，由「清除本地数据」整格带走）。
+TEMP_SUFFIXES = (".crdownload", ".part", ".tmp")
+
 BOOKS_KEEP = 12          # 「最近入库」最多记几本
 PENDING_KEEP = 12        # 「没进书架」最多记几本
 SEEN_KEEP = 300          # 去重账最多记多少条摘要（超出从最旧裁）
@@ -471,11 +478,23 @@ def push_pending(state, row):
     return st
 
 
+def _unfinished(name):
+    """这份文件名算不算「没写完」：Chromium 的 `.crdownload` 与那两族临时尾巴。"""
+    return str(name or "").lower().endswith(TEMP_SUFFIXES)
+
+
 def incoming_listing(dirpath, limit=20):
-    """列一眼原始下载那一格：文件名、字节、时间。只给名字不给路径。"""
+    """列一眼原始下载那一格：文件名、字节、时间。只给名字不给路径。
+
+    没写完的下载（`.crdownload` / `.part` / `.tmp`）整份跳过：它们只可能在断电、
+    强杀或浏览器自己写到一半时出现，既转不成书，也不该让「补收」去试 —— 见
+    `TEMP_SUFFIXES` 那段。正常文件一个字不改。
+    """
     out = []
     try:
         for name in os.listdir(dirpath or ""):
+            if _unfinished(name):
+                continue
             p = os.path.join(dirpath, name)
             if not os.path.isfile(p):
                 continue
