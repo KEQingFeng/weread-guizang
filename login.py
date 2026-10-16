@@ -76,6 +76,14 @@ def read_state(path=STATE_PATH):
         return None
 
 
+def _discard(tmp):
+    """收掉这一次写留下的临时件；收不掉（已被搬走 / 权限 / 盘只读）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def write_state(logged_in, url, note="", path=STATE_PATH):
     """写账本唯一入口：原子替换，中途崩了也不会留下半截文件把旧档毁掉。
 
@@ -83,6 +91,21 @@ def write_state(logged_in, url, note="", path=STATE_PATH):
     写新内容之前被收走（用户点了停止、退出应用），磁盘上就只剩一个空文件，
     界面从此显示「未检测」直到下次登录。改成先写 `.tmp` 再 `os.replace`，
     旧档在整个过程里始终是完整的；写失败时把 `.tmp` 收掉再抛，不留垃圾。
+
+    收残件那一句兜的是 `BaseException` 而不是 `Exception`：`KeyboardInterrupt` /
+    `SystemExit` 不继承 `Exception`，只兜 `Exception` 会在退出路径上留一个
+    `cache/login_state.json.tmp`（终端里手动跑 `login.py` 时 Ctrl-C 落在这一句
+    附近就是；`login.py` 自带 `__main__`，这条路真实存在）。与
+    `flomo_notes` / `mindmap` / `writer` / `ai_sum` 那几格同一条口径。
+
+    **临时件名仍是固定的 `path + ".tmp"`，这是有意保留的**：`tests/check_login.py`
+    把这一条名字形状钉成了源码断言（「走的是 .tmp + os.replace 那一套」），改名会
+    动到那份既有门禁。全仓固定名就只剩这一处；`cache/login_state.json` 的写手只有
+    `login.py` 自己（`:141` / `:183` / `:186` / `:189`），而它走 `start_task("login", …)`
+    那把全局单任务闸，应用流程里同一时刻只有一趟 —— 不同进程各锁各的那一档（终端里
+    手动跑一趟）才够得着固定名，本轮没有改它，改之前先照 `check_login.py` 那条断言
+    一起收。残件仍归「清除本地数据」那把刀（`cleanup._residue_re` 认
+    `<账本>.tmp` 与 `<账本>.<pid>.<八位随机>.tmp` 两种形状）。
     """
     payload = normalize_state({"logged_in": logged_in, "checked_at": time.time(),
                                "url": url, "note": note})
@@ -94,11 +117,8 @@ def write_state(logged_in, url, note="", path=STATE_PATH):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         os.replace(tmp, path)
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+    except BaseException:
+        _discard(tmp)
         raise
     return payload
 
