@@ -187,6 +187,78 @@ def url_allowed(u):
     return not url_block_reason(u)
 
 
+def _loopback_host(host):
+    """这个主机名是不是「本机自己」。与 `host_blocked` 吃同一套写法。
+
+    百分号编码、方括号包着的 IPv6、结尾的点、老式 IPv4（`2130706433` / `127.1`）与
+    IPv4 映射的 IPv6（`::ffff:127.0.0.1`）都认 —— 少认一个，离线夹具就会在
+    `host_lan_blocked` 那一步被当成内网地址挡掉；多认一个，等于给内网开一个口子。
+    所以这里不另立规矩：解析这一段逐句与 `host_blocked` 对齐，只把答案收窄到回环。
+    """
+    h = urllib.parse.unquote(str(host or "")).strip().lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    h = h.rstrip(".")
+    if not h:
+        return False
+    if h == "localhost" or h.endswith(".localhost"):
+        return True
+    h = h.split("%", 1)[0]          # IPv6 的 zone id（fe80::1%eth0）不算地址本体
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        ip = None
+    if ip is None:
+        legacy = _legacy_ipv4(h)
+        if legacy is None:
+            return False
+        try:
+            ip = ipaddress.ip_address(legacy)
+        except ValueError:
+            return False
+    mapped = ip.ipv4_mapped if ip.version == 6 else None
+    return bool((mapped if mapped is not None else ip).is_loopback)
+
+
+def host_lan_blocked(host):
+    """这个主机名是不是「本机以外」的内网 / 链路本地 / 元数据地址。
+
+    与 `host_blocked` 只差一处：**回环自己（127.0.0.0/8、::1、localhost）不算**。
+    剪藏 / 平台解析 / 内置浏览器那三条路，过的是 `host_blocked`（本机也拒）—— 地址
+    是用户当场粘进来的，没理由要他去敲自己那扇门。插图下载（`raw/*.json` 里那条 url）
+    与订阅取回（页面里 `<link alternate>` 那条地址）还多放一档回环：这两条路的离线
+    门禁夹具就是本机临时 http.server（`check_download_scheme.py` / `check_feed_scheme.py`），
+    用户也可能真在本机起了个图床或 RSS 桥，挡掉只会误伤。
+
+    但「替用户去敲局域网」在两处同样不算数：一篇文章里塞一条
+    `http://192.168.1.1/admin` 或 `http://169.254.169.254/latest/meta-data/`（云上那台
+    会把实例元数据取回来），后端此前照取不误 —— scheme 那道闸根本管不到 host。认内网
+    仍走 `host_blocked` 那把唯一的尺子，这里只多回答一句「它是不是回环」。
+    """
+    if _loopback_host(host):
+        return False
+    return host_blocked(host)
+
+
+def url_lan_block_reason(u):
+    """`url_block_reason` 的「内网那一档」：能访问回空串，拒绝回一句人话。
+
+    与 `url_block_reason` 同一条路，只把回环放行（见 `host_lan_blocked`）。scheme /
+    主机名 / 解不出来这三档口径一字不改，所以调用方拿到的仍是同一句人话。
+    """
+    parts = split_url(u)
+    if parts is None:
+        return "这个地址解不出来"
+    scheme, host = parts[0], parts[1]
+    if scheme not in ALLOWED_SCHEMES:
+        return "只认 http/https 链接（现在这个是 %s）" % (scheme or "空")
+    if not host:
+        return "这个链接没有主机名"
+    if host_lan_blocked(host):
+        return "这是内网地址，归藏不替你访问"
+    return ""
+
+
 class RedirectGuard(urllib.request.HTTPRedirectHandler):
     """跳转目标也要过同一道闸：外站 302 到 192.168.x.x 一样是在替人敲内网的门。
 

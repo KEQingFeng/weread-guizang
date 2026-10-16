@@ -1118,6 +1118,18 @@ run "插图文件名脏值（NUL / 控制符 / 半个代理码点只跳一条，
 # 对照防空转。网络层用假 urlopen 顶掉，端到端那条打本机临时端口 + file:// 指向临时目录里
 # 的假密钥文件，不联网、不碰真实书库。
 run "插图地址 scheme（file:// / data: 不许替用户取回本机文件）" "$PY" tests/check_download_scheme.py
+# 上一条量的只是「怎么取」（scheme），量不到「去哪儿取」：raw/*.json 里一条
+# `http://169.254.169.254/latest/meta-data/`，或订阅页面里 `<link alternate>` 指着
+# `http://192.168.1.1/admin`，后端此前照取不误 —— 文章作者借归藏这台机器的手去敲了
+# 局域网 / 云元数据那扇门（剪藏 / 平台解析 / 内置浏览器早就挡住了这一档）。这一条把
+# 那把共用的尺子接到插图与订阅这两条路上：`clip_article.host_lan_blocked` /
+# `url_lan_block_reason` 的档位、`fetchable_url` 对这类地址回 False、`download_one`
+# 一个请求都不发、`collect_tasks` 只跳这一条、`feed._check_url` 抛同口径人话、
+# `feed._http` 发请求之前就被挡住；并含「只看 scheme 的旧写法确实放行内网」与
+# 「共用的 host_blocked 早就拒」两条对照防空转。回环自己（127.0.0.1 / localhost / ::1）
+# 仍是放行的 —— 离线夹具与用户本机的图床 / RSS 桥都长这样。假 urlopen 顶掉网络层，
+# 配置落盘全在临时沙盒，不联网、不碰真实书库，故归静态段。
+run "插图 / 订阅的内网那一跳（本机以外的内网 / 元数据不再替用户去敲）" "$PY" tests/check_local_net_guard.py
 # 加书架（shelf_add.py）是少数几个真去改微信那边状态的动作，此前也没有测试。这一条
 # 不联网、不开浏览器，钉的是两件离线也验得实的事：书号尺子四个入口必须是同一把
 # （界面 / 本地服务 / MCP 都写 5–20 位，shelf_add.py 原来写 5–12，且 Python 的 \d 连

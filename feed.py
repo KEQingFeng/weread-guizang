@@ -526,6 +526,14 @@ def _check_url(url):
         raise ValueError("只认 http/https 链接（现在这个是 %s）" % (p.scheme or "空"))
     if not host:
         raise ValueError("这个链接没有主机名，打不开")
+    # scheme 与「有没有主机名」之外，还挡「本机以外的内网」：订阅页面上写一条
+    # <link rel=alternate href="http://169.254.169.254/latest/meta-data/">，
+    # 发现订阅这一步就替作者去敲了云元数据；192.168 / 10 / 172.16 那一档同理。
+    # 判据与剪藏共用一把（延迟 import，与 _http 同一条理由：别在顶层互相套住），
+    # 只多放行回环自己 —— 离线门禁的夹具与用户本机的 RSS 桥都是 127.0.0.1。
+    import clip_article
+    if clip_article.host_lan_blocked(host):
+        raise ValueError("这是内网地址，归藏不替你访问")
     return u
 
 

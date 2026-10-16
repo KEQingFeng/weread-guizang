@@ -95,15 +95,20 @@ def fetchable_url(url):
         images/，之后还会跟着书库同步出去；`data:` / `ftp:` / `gopher:` 同理，
         都不是「下了一张插图」；
       · 半截 IPv6（`http://[::1`）让 urlparse 自己抛 ValueError —— 一条脏记录
-        不该带走整批图，解不出来一律当不合法。
+        不该带走整批图，解不出来一律当不合法；
+      · `http://192.168.1.1/admin` 或 `http://169.254.169.254/latest/meta-data/`
+        —— 一篇文章里塞这么一条当插图地址，后端就替作者去敲了内网 / 云元数据的
+        门。scheme 闸管不到这一档，所以 host 也要过同一把尺子；只多放行回环
+        自己（离线门禁的夹具与用户本机起的图床都长这样，见
+        `clip_article.host_lan_blocked`）。
 
     scheme 名单不在这里另抄一份：与剪藏 / 平台解析 / 内置浏览器共用
-    `clip_article.ALLOWED_SCHEMES`，以后加规则只改一处。
+    `clip_article.ALLOWED_SCHEMES`，内网判据同理共用 `clip_article.url_lan_block_reason`，
+    以后加规则只改一处。
     """
     if not isinstance(url, str):
         return False
-    parts = clip_article.split_url(url)
-    return bool(parts) and parts[0] in clip_article.ALLOWED_SCHEMES
+    return not clip_article.url_lan_block_reason(url)
 
 
 def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
