@@ -951,6 +951,13 @@ run "阅读计划脏比例（NaN / Infinity 不当读到章尾，计划不凭空
 # 是读数不一致）。这一条同时钉住另一头：`"3.5"` / `"1e5"` 这类写法仍算认不出（口径
 # 不外扩，check_plan_input.py 正是拿 `"3.5"` 当坏输入的）。离线、不起服务，归静态段。
 run "阅读计划数字串（与数字孪生同值 / 超长按 hi 收口 / 口径不外扩）" "$PY" tests/check_plan_bigint.py
+# 上一条收的是账本里的读数（pages / high / days），这一条收的是**章的 chars**：
+# `total_pages` / `pages_at` 原先对它裸 `int()` 加一句宽 except，大整数本身收得下、
+# 宽 except 也不接，可下一步 `chars / float(PAGE_CHARS)` 当场 OverflowError（那个错
+# 不在 ValueError 里）。现在一章的字数走 `_chars_of` 收到 0..MAX_CHARS、页数额顶在
+# PAGE_MAX，推算终点那两句（suggest_target / _fill_pace）算不出来就回空串。
+# 离线、不起服务，归静态段。
+run "阅读计划章字数越界（超大 chars 不再把页数折算打抛 / 上限一处真相）" "$PY" tests/check_plan_page_overflow.py
 # 文案这一条守的是「界面上不再有 AI 味」：语气词、波浪号尾巴（「好的~」）、感叹号、emoji
 # 一律不许出现在散文里 —— 唯一放行的是剪藏正文的清洗正则（它得把别人的 emoji 滤掉）。
 # 顺带钉住「设置那一段的每条提示都写完整句子、以句号收」，以及个人主界面那颗「设置」还在。
