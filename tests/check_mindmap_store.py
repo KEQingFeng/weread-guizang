@@ -9,9 +9,16 @@
     JSON 收得下、却写不进 utf-8。标题或节点里带一个，整张图就存不下去 —— 用户画了半天的
     图，因为一个坏字符白存，还在书目录里留一个半截 .tmp。修法跟画板（check_board_store）
     同一口径：写之前摘掉落单的那半个，成对的表情符号一个字不动。
+  · **中止信号那条退出路径**：`KeyboardInterrupt` / `SystemExit` 不继承 `Exception`，原先
+    只兜 `Exception`，强杀 / 关窗那一下会在书目录里留一个随机名 .tmp 残件。
+  · **旧档已挪去 `.prev`、新稿顶不上**：`_write_json` 先 `os.replace(path, path + ".prev")`
+    再 `os.replace(tmp, path)`；第二步失败（磁盘满 / 只读 / 目标被钳住）时 `mindmap.json`
+    会整个消失，用户看到「这张图没了」，而它其实躺在 `.prev` 里。这三条与
+    `book_notes._write_json`（`#157`）同一把尺子，`mindmap._write_json` 收齐。
 
 沙盒是临时目录，不碰用户真实书库。
 """
+import errno
 import json
 import os
 import shutil
@@ -154,7 +161,58 @@ chk("存档：覆盖保存仍留一份 .prev", os.path.exists(os.path.join(d3, "
 chk("存档：.prev 不是 .json，不会被当成本图重复读", mm.load_map(d3)["title"] == "二",
     mm.load_map(d3)["title"])
 
-for tmpdir in (d, d2, d3, d4, t):
+# ── 6. 中止信号（BaseException）那条退出路径不留随机名残件 ────────────
+# KeyboardInterrupt / SystemExit 不继承 Exception，只兜 Exception 时它从改名这一步穿出去，
+# .tmp 就留在书目录里。这里把 os.replace 换成一个抛 KeyboardInterrupt 的桩，验两件事：
+# 异常照旧往上传（不许吞），盘上什么都不留。
+t2 = mk()
+real_replace = os.replace
+
+
+def _kb_replace(src, dst):
+    if str(src).endswith(".tmp"):
+        raise KeyboardInterrupt
+    return real_replace(src, dst)
+
+
+os.replace = _kb_replace
+try:
+    _kb_raised = False
+    try:
+        mm._write_json(os.path.join(t2, "mindmap.json"), "{}")
+    except KeyboardInterrupt:
+        _kb_raised = True
+finally:
+    os.replace = real_replace
+chk("_write_json：中止信号照旧往上传（不许被吞成「存好了」）", _kb_raised)
+chk("_write_json：中止信号也把随机名 .tmp 收干净",
+    [n for n in names(t2) if n.endswith(".tmp")] == [], names(t2))
+
+# ── 7. 旧档已挪去 .prev、新稿那句 os.replace 顶不上：把旧档搬回来 ─────
+# 这是 #157 在笔记那格补的半件，导图原先缺：先 os.replace(path, path + ".prev") 成功、
+# 再 os.replace(tmp, path) 失败时，mindmap.json 整个消失，用户看到的是一张空图。
+d5 = mk()
+mm.save_map(d5, {"title": "旧图", "nodes": [{"id": "a", "text": "x", "children": []}]})
+mp5 = mm.path_of(d5)
+
+
+def _full_disk(src, dst):
+    if str(src).endswith(".tmp") and dst == mp5:
+        raise OSError(errno.ENOSPC, "No space left on device")
+    return real_replace(src, dst)
+
+
+os.replace = _full_disk
+try:
+    r5 = mm.save_map(d5, {"title": "新图", "nodes": [{"id": "a", "text": "y", "children": []}]})
+finally:
+    os.replace = real_replace
+chk("落盘失败：回 ok=False，不假装存上了", r5.get("ok") is False, r5)
+chk("落盘失败：旧图还在原位，没有整张消失",
+    os.path.exists(mp5) and mm.load_map(d5)["title"] == "旧图", names(d5))
+chk("落盘失败：不留 .tmp 残件", [n for n in names(d5) if n.endswith(".tmp")] == [], names(d5))
+
+for tmpdir in (d, d2, d3, d4, d5, t, t2):
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 print()
