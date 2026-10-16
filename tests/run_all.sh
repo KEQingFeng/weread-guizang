@@ -310,6 +310,13 @@ run "安娜账本行脏数字（越界值不打废 /api/state，不认识的键�
 # 假页对象 + 临时沙盒，不联网、不开浏览器、不起服务，归 --fast 静态段。
 run "安娜口令条读口（半码点脏牌不带窗口 / 搜索地址不抛 / 干净词不改）" "$PY" tests/check_anna_cmd.py
 run "ffmpeg 按需下载（离线）" "$PY" tests/check_ffmpeg_tool.py
+# 装组件那份 30MB 级的 zip 下到一半被按停（Ctrl-C / 关窗口 / 应用退出）时，落盘口
+# `_download` 写的 `<目标>.part` 必须收掉。它原先是 `except Exception` 收残件，而中止
+# 信号不继承 Exception —— 半截件留在 `cache/tools/.<name>.zip.part`，`cleanup.py` 只按
+# 白名单账本名收、够不到它，于是 30MB 一直占着盘。这一条在 `_open` 上装行为级桩，把
+# 正常 / 普通异常 / Ctrl-C / SystemExit 四条路各钉一遍，并留一条「老写法确实留件」的对照。
+# 纯离线沙盒，不联网、不碰真实 cache/，故归 --fast 静态段。
+run "ffmpeg 下载中止残件（Ctrl-C 不留 .part）" "$PY" tests/check_ffmpeg_abort_part.py
 run "视频转笔记（下载 / 转写 / 总结 / 导图）" "$PY" tests/check_video_note.py
 # 导图的输入是「别人家的 JSON」：节点里本该是数组的 `children` 偶尔写成标量
 # （`"children": 1`）。`_normalize_nodes` / `_flatten_tree` 原来直接迭代它，int 上抛

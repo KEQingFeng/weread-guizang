@@ -250,6 +250,12 @@ def _download(url, dst, progress=None, stage=""):
 
     边读边回报进度：界面「装组件」是个 30MB 级的等待，没有动静会像卡死。
     Content-Length 拿不到就只报阶段、不报百分比。
+
+    收残件兜的是 `BaseException` 而不是 `Exception`：中止信号（Ctrl-C / 关窗口 /
+    应用退出时的 SystemExit）不继承 `Exception`，只兜 `Exception` 的那版在用户
+    下到一半按停时会把 `.<name>.zip.part` 留在 `cache/tools/` 里 —— 它是个隐藏文件、
+    又有 30MB 级的体积，而「清除本地数据」那把刀只按白名单账本名去收，够不到它，
+    于是这份半截件就一直占着盘。改名那一步走不到时删掉它没有任何副作用。
     """
     tmp = dst + ".part"
     try:
@@ -270,7 +276,7 @@ def _download(url, dst, progress=None, stage=""):
                         progress(stage, int(100 * got / total))
         os.replace(tmp, dst)
         return dst
-    except Exception:
+    except BaseException:
         try:
             os.remove(tmp)
         except OSError:
