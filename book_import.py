@@ -35,6 +35,7 @@ from xml.etree import ElementTree as ET
 
 import book_layout
 import md_fence
+import platform_compat as pc
 
 # 单份导入的上限。base64 会胖三分之一，前端也按这个数先拦一道。
 MAX_BYTES = 200 * 1024 * 1024
@@ -372,12 +373,17 @@ _IMG_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
 
 
 def _safe_name(name):
-    """扁平化落盘名：只留文件名，非法字符换成下划线。"""
+    """扁平化落盘名：只留文件名，非法字符换成下划线。
+
+    EPUB 里的资源名是压缩包自己带的，正常是 `images/cover.jpg`，但不保证不是
+    Windows 的设备名（`CON.jpg`）—— 那一档落盘要么失败要么写到设备上，所以交给
+    `platform_compat.win_safe_filename` 补个下划线，与导出命名同一把尺子。
+    """
     base = os.path.basename(name or "")
     base = re.sub(r"[^0-9A-Za-z._\-]", "_", base)
     if not base or base.startswith("."):
         base = "img_" + base.lstrip(".")
-    return base[:80] or "img"
+    return pc.win_safe_filename(base[:80]) or "img"
 
 
 def _unique_names(orig_names):

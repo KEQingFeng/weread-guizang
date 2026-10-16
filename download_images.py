@@ -163,6 +163,10 @@ def safe_target(img_dir, name):
     `file` 名义上是 export_precise 生成的 ch0001_img01.jpg，但 raw/*.json 整份
     都是从网页上扒下来的数据，不该假定它一定乖。带路径分隔符 / 绝对路径 /
     `..` / 控制字符 / 落单的代理码点一律不收，越出 images/ 的落点也不收。
+
+    Windows 的设备名（`CON.jpg` / `NUL`）也不收：设备名不看扩展名，落盘要么失败
+    要么写到设备上去。这里不能像导出命名那样补个下划线了事 —— 正文里的插图是**按
+    这个名字**引用的，改名就等于让那张图对不上号，所以与 `../` 同一档直接跳过。
     """
     if not isinstance(name, str) or not name.strip():
         return None
@@ -170,6 +174,8 @@ def safe_target(img_dir, name):
     if _BAD_NAME.search(name):
         return None
     if os.path.isabs(name) or "/" in name or "\\" in name or name in (".", ".."):
+        return None
+    if pc.is_win_device_name(name):
         return None
     target = os.path.normpath(os.path.join(img_dir, name))
     if os.path.normpath(os.path.dirname(target)) != os.path.normpath(img_dir):

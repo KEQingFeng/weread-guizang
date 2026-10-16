@@ -26,6 +26,44 @@ from urllib.request import getproxies
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 
+# Windows 的「设备名」不看扩展名：`CON.epub` / `NUL.jpg` 一样是设备，`open()` 要么
+# 直接失败、要么真写到设备上去；结尾的点与空格则会被系统悄悄抹掉，`稿子.` 与 `稿子`
+# 撞成同一个文件。归藏是三个平台同一份代码，名字得先在「最挑的那一档」上过一遍。
+_WIN_DEVICES = frozenset(
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+    + ["COM%d" % i for i in range(1, 10)]
+    + ["LPT%d" % i for i in range(1, 10)]
+    # 上标一二三也被系统当成数字：COM¹ 与 COM1 同义。
+    + ["COM" + s for s in "¹²³"]
+    + ["LPT" + s for s in "¹²³"]
+)
+
+
+def is_win_device_name(name):
+    """这串字（不含路径）是不是 Windows 的保留设备名 —— 设备名不看扩展名。"""
+    return str(name or "").split(".", 1)[0].upper() in _WIN_DEVICES
+
+
+def win_safe_filename(name):
+    """把「当文件名用」的一串字修成三平台都写得出来的形状；收干净了就返回空串。
+
+    只做两件 Windows 上会咬人的事，别的（非法字符、长度、路径分隔符）仍由各自的
+    调用方按自己的字符集管，免得把两层尺子搅在一起：
+
+    · 保留设备名不看扩展名，`CON.epub` 也还是设备。前面补一个下划线就落回普通
+      文件；洗过的再洗一遍不变（幂等）。
+    · 结尾的点与空格 Windows 会悄悄抹掉：`稿子.` 与 `稿子` 会落成同一个文件，
+      「重名自动加序号」那句承诺当场失效。全部收掉。
+
+    返回空串表示这串字已经被收没了，调用方按自己的缺省名兜底（`稿子` / `未命名`）。
+    """
+    text = str(name or "").rstrip(". ")
+    if not text:
+        return ""
+    if is_win_device_name(text):
+        text = "_" + text
+    return text
+
 
 def sanitize_browser_env(env=None):
     """把会让 Chromium 一启动就被收走的 macOS 标记抹掉，返回改好的那份环境。

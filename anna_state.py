@@ -393,11 +393,17 @@ def safe_name(filename):
 
     落单的半个代理码点先摘掉再量长度：`name.encode("utf-8")` 碰到它会抛
     UnicodeEncodeError，那一下是在「接住下载」的回调里，用户看到的是「点了没反应」。
+
+    远端给个 `CON.pdf` / `nul` 也不稀奇：Windows 的设备名不看扩展名，落盘那一下
+    要么失败、要么写到设备上去；结尾的点与空格又会被系统抹掉，把「重名加序号」的
+    承诺吃掉。这两档在量长度之前先收掉，补出来的下划线也算进上限。
     """
     name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
     name = re.sub(r"[\x00-\x1f\x7f]", "", name)
     name = SURROGATE.sub("", name)
     name = re.sub(r"[ /]+", "_", name)
+    if pc is not None:
+        name = pc.win_safe_filename(name)
     if len(name) > MAX_NAME_CHARS or len(name.encode("utf-8")) > MAX_NAME_BYTES:
         stem, dot, tail = name.rpartition(".")
         # 点号后面那一截长过 MAX_EXT_CHARS 就不是扩展名（是正文被点号切开的一截），
