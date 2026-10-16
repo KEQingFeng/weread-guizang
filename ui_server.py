@@ -496,6 +496,11 @@ def _write_json(path, obj, mode=None):
     时才按书库那把 `book_layout.drop_lone_surrogates` 摘掉落单的坏码点重编（成对的
     代理码点在 `json.load` 那一步已合成真字符，只有落单的才是垃圾）。任何写失败都把
     `.tmp` 收干净再抛，旧档始终是完整的 —— 与 mindmap / board 那两个写口的规矩一致。
+
+    `mode`（只有 config.json 用，0o600）不是改名之后再补一刀：临时件从创建起就按它建，
+    改名搬过去的 inode 权限已经收紧了 —— 半截临时件不对同机其他用户可读，也不怕在
+    replace 与 chmod 之间被杀而永久留在 0644。收残件兜的是 `BaseException`（Ctrl-C /
+    停止键的 KeyboardInterrupt / SystemExit 不继承 Exception）。
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
@@ -503,7 +508,17 @@ def _write_json(path, obj, mode=None):
     def _dump(payload):
         # 唯一的 json.dump 调用点：干净与「洗过一遍」两份负载都从这儿出去，
         # 免得在回退里再抄一份「open + dump」把老格式写出两种样子。
-        with open(tmp, "w", encoding="utf-8") as f:
+        #
+        # 临时件按目标权限创建，而不是先建成 umask 的 0644、改名之后再补一句 chmod：
+        # config.json 里存着 API Key，权限得跟内容一起在 rename 那一刻生效。老写法有
+        # 两段窗口 —— 半截临时件对同机其他用户可读，以及在 replace 与 chmod 之间被杀时
+        # 正式那份永久停在 0644。umask 只清模式位、不会把 0o600 放宽，建出来就是 0o600。
+        if mode is None:
+            f = open(tmp, "w", encoding="utf-8")
+        else:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+            f = os.fdopen(fd, "w", encoding="utf-8")
+        with f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
     try:
@@ -512,7 +527,10 @@ def _write_json(path, obj, mode=None):
         except UnicodeEncodeError:
             _dump(book_layout.drop_lone_surrogates(obj))
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
+        # 兜 BaseException 而不是 Exception：Ctrl-C / 停止键走的是 KeyboardInterrupt /
+        # SystemExit，它们不继承 Exception，只兜 Exception 会在退出路径上把临时件留下
+        # （与 writer._write_text_atomic / mindmap._write_json 同一把尺子）。
         try:
             os.remove(tmp)
         except OSError:
@@ -541,7 +559,8 @@ def _write_bytes(path, raw):
         用户看到的是永远打不开的破图，且再也不重取。
 
     临时名带 pid + 随机串互不打架，写完 os.replace 原子顶替；失败把临时件收干净
-    再抛，旧档始终是完整的那一份。
+    再抛，旧档始终是完整的那一份。收残件兜的是 `BaseException`：Ctrl-C / 停止键走的是
+    `KeyboardInterrupt` / `SystemExit`，只兜 `Exception` 会在退出路径上把它留下。
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
@@ -549,7 +568,7 @@ def _write_bytes(path, raw):
         with open(tmp, "wb") as f:
             f.write(raw)
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
         try:
             os.remove(tmp)
         except OSError:

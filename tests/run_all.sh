@@ -1261,6 +1261,15 @@ run "响应正文坏字符（半个代理码点不再把整屏甩成空响应）
 # book_layout.drop_lone_surrogates 摘掉落单坏码点重编；任何写失败先收 .tmp 再抛，旧档不动。
 # 纯函数 + save_cfg 全链 + 源码接线，全在临时沙盒，不联网、不起服务，归静态段。
 run "账本落盘坏字符（半个代理码点不再让保存等不到回包 / 不留 .tmp）" "$PY" tests/check_ledger_write.py
+# 上一条钉的是「写得出、不留垃圾」，这一条钉同一个写口收尾还差的两格：权限与中止信号。
+# `save_cfg` 传 `mode=0o600`（config.json 里存着 API Key），可临时件是按 umask 建的 0644，
+# 改名之后才补 chmod —— 半截临时件对同机其他用户可读，且恰在 replace 与 chmod 之间被杀时
+# 正式那份会永久停在 0644。收口是「临时件从创建起就按目标权限建」（os.open + mode），改名
+# 搬的是 inode，权限跟内容一起原子生效。另半段：两处写口原先只兜 `except Exception`，
+# Ctrl-C / 停止键的 KeyboardInterrupt / SystemExit 会在退出路径上留下随机名 `.tmp`，改成
+# 与 writer / book_notes / feed 同一把尺子兜 BaseException。含「老写法那一刻确实是 0644 /
+# 确实留残件」的对照，纯函数 + 系统临时目录沙盒，归静态段。
+run "账本写口权限与中止收口（API Key 那份改名即 0600 / 中止信号不留 .tmp）" "$PY" tests/check_ledger_perm.py
 # 字段级脏形状还剩最后一档：数字。`_body_str` / `_body_list` 之外的订阅整理参数一直是
 # 裸的 `int(body["index"])`。它们有 `feed_do` 的兜底 catch 接着，所以不是断连，而是
 # `str(e)` 把 `invalid literal for int() with base 10: 'abc'` 原样弹给用户 ——
