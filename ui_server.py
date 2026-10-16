@@ -3490,7 +3490,10 @@ def drop_stray_md(book_id, title=""):
         for nm in names:
             if not nm:
                 continue
-            base = re.sub(r'[<>:"/\\|?*]', "_", nm) + ".md"
+            # 与 `export_precise` 生成合并稿时同一把尺子（含按 UTF-8 字节截断与
+            # Windows 保留设备名）：两边各写一份正则的话，长书名 / 保留名那一族
+            # `<名>.md` 就会「写得出、清不掉」。
+            base = pc.safe_file_stem(nm, book_id) + ".md"
             p = os.path.join(place, base)
             # 候选 = `<名>.md` 与固定名 `<名>.md.tmp`，外加这一层目录里同形状的随机名
             # （`<名>.md.<pid>.<随机串>.tmp`，见 export_precise._tmp_name）。`listdir`

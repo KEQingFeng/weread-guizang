@@ -1905,7 +1905,11 @@ async def main(book_id):
                    minutes=round((time.time() - run_t0) / 60, 1))
     book_title = book_title or BOOK_INFO["title"] or meta.get("title") or book_id
     if book_title == "未知": book_title = book_id
-    safe = re.sub(r'[<>:"/\\|?*]', '_', book_title)
+    # 书名拼进文件名前走共用的那把尺子（platform_compat.safe_file_stem）：按 UTF-8
+    # 字节收长度 —— 中文长书名的字节数是字符数的三倍，旧写法原样照拼，整本书都取完了
+    # 才在最后一秒 ENAMETOOLONG；同时换掉非法 / 控制字符、避开 Windows 保留设备名。
+    # 与 `ui_server.drop_stray_md` 用同一把尺子，否则这份合并稿清不掉（见那里）。
+    safe = pc.safe_file_stem(book_title, book_id)
     merged = merge_chapters(md_dir, OUTPUT_DIR, safe, book_title, book_author)
     # 早先认不出书名时留下过「<书号>.md」这份合并文件。书名认出来之后它就是同一本书的
     # 另一份拷贝（两份内容一样、名字不一样，翻起来最容易搞混），所以顺手清掉旧的。
