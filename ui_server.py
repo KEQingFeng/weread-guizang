@@ -724,6 +724,26 @@ def notes_csv_name(title):
     return "flomo导入-%s.csv" % stem
 
 
+def notes_csv_export(folder, title, rows):
+    """把勾选的划线写成一份 CSV 落进 folder，返回落点路径。
+
+    名字仍由 `unique_dest` 给（重名加序号、绝不覆盖上一趟），但**写**这一步交给
+    `_write_bytes` —— 与封面 / 壁纸同一个二进制落盘口（先写同目录临时件再
+    `os.replace`），不是裸 `open(dest, "wb")`。直写栽在两处：
+
+      · 盘满 / 进程被杀发生在写完之前：`dest` 就是一份**半截清单**。它是新名字、
+        没有旧档可毁，所以症状不是「覆盖」而是「静默少几条」—— 用户拿这份 CSV 去
+        flomo 导入，缺的那些划线不会报错，只看得到条数少了；
+      · 同一本连点两次导出：两处各自 `unique_dest` 时都还没落盘，会挑中同一个名字，
+        于是两只手往同一个文件里织。原子改名之后读口永远只见完整的一份。
+
+    失败照旧由调用方那层 `except` 翻成人话（临时件在 `_write_bytes` 里收干净再抛）。
+    """
+    dest = unique_dest(folder, notes_csv_name(title))
+    _write_bytes(dest, flomo_notes.build_import_csv(rows))
+    return dest
+
+
 # ---------- 本机阅读时长 ----------
 #
 # 微信读书那边的时间只认在它 App 里读的；用户在「归藏」里翻本地书的那些时间它不知道。
@@ -6213,10 +6233,8 @@ class Handler(BaseHTTPRequestHandler):
             if not rows:
                 return self._json({"ok": False, "msg": "没有选中任何内容"})
             folder = export_target_dir()
-            dest = unique_dest(folder, notes_csv_name((body or {}).get("title")))
             try:
-                with open(dest, "wb") as f:
-                    f.write(flomo_notes.build_import_csv(rows))
+                dest = notes_csv_export(folder, (body or {}).get("title"), rows)
             except Exception as e:
                 return self._json({"ok": False, "msg": "写不出来：%s" % str(e)[:160]})
             # 日志只记条数与文件名，正文一个字不落 —— 划线是用户的私事。
