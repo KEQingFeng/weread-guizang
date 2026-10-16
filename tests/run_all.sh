@@ -783,6 +783,15 @@ run "维护（白名单清理 / 四条红线 / 试算不删）" "$PY" tests/chec
 # 数据目录里再 grep 不到那串 Key，外带「不认识的 .tmp / 同名目录 / 符号链接一概不碰」
 # 与一条「旧那份精确名清单确实收不到」的对照。全程临时沙盒，离线。
 run "清除本地数据（写到一半的 .tmp 残件一起走 / 不认识的 .tmp 不碰）" "$PY" tests/check_cleanup_tmp.py
+# 上一条管 `.tmp` 那一族（各模块「先写同目录临时件再 os.replace」）。可同步取回走的是
+# 另一把尺子：`sync._write_atomic` 先写的是 `<目标>.part`，而 `_collect` 把 cache 里的
+# readstat / library / notes_index 也列进了同步对 —— 同步中途被强杀，`cache/` 里就留一份
+# `library.json.part`（他整个书架）。`cleanup._residue_re` 原先只认 `.tmp`、`drop_stray_tmps`
+# 只扫书目录，两处都够不到它。这一条钉住 `.part` 并进同一把按尾巴收的尺子：尺子认它、
+# 试算列得出、真删得掉，外带「不认识的 .part / 同名目录 / 符号链接一概不碰」与一条
+# 「只认 `.tmp` 的旧尺子量不到它」的对照，再核一遍真实生产者写的确实是 `<目标>.part`。
+# 全程临时沙盒，离线。
+run "清除本地数据（同步取回的 .part 半截账一起走 / 不认识的 .part 不碰）" "$PY" tests/check_cleanup_part.py
 # 封面这一轮的规矩是「剪藏用文章首图、视频用视频封面」，而它最容易出的事故不是没图，
 # 是拿错图（页头 logo、站长头像当封面，满书架一张脸）和不该下的图去下（别人网页里写的
 # og:image 指到内网，等于替用户去敲内网的门）。网络那层用记账的假 urlopen 顶掉，
