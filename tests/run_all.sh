@@ -19,7 +19,31 @@ PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
 
-SANDBOX="${GUIZANG_SELFTEST_DIR:-${TMPDIR:-/tmp}/guizang-selftest}"
+# ── 沙盒目录：一次运行一份（tests/check_gate_sandbox.py 按这两行标记抽取）──
+# 原来写死 `${TMPDIR:-/tmp}/guizang-selftest`：两套门禁同时跑就写进同一份 cache/ 与
+# 书库，而每套件开头都会重铺一次书架、cache/anna.json 这类账本也是共享的那一份 ——
+# 2026-10-16 真栽过一次，另一套正在重铺时这一套读到「搜书一栏没开过窗口」，报出一串
+# 看着像产品 bug 的假红。默认改成 mktemp -d：各跑各的，谁也不踩谁。
+# 显式 export GUIZANG_SELFTEST_DIR 的仍用调用方给的那一份（并行验就是这么用的），
+# 那一份由调用方自己收 —— 这条沙盒刀不碰它。
+SANDBOX="${GUIZANG_SELFTEST_DIR:-}"
+SANDBOX_OWNED=0
+if [ -z "$SANDBOX" ]; then
+  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/guizang-selftest.XXXXXXXX")" || {
+    echo "建不出沙盒目录（TMPDIR=${TMPDIR:-/tmp}）" >&2
+    exit 1
+  }
+  SANDBOX_OWNED=1
+fi
+# 自动开的那一份用完就收：--fast 被反复调度时不在 /tmp 里攒一地书库。
+# 显式指定的那一份不动（调用方可能特意留着重跑 / 翻证据）。
+cleanup_sandbox() {
+  if [ "$SANDBOX_OWNED" = "1" ] && [ -n "$SANDBOX" ]; then
+    rm -rf "$SANDBOX"
+  fi
+}
+trap cleanup_sandbox EXIT
+# ── 沙盒目录结束 ──
 export GUIZANG_SELFTEST_DIR="$SANDBOX"
 export GUIZANG_DATA="$SANDBOX/cache"
 export GUIZANG_BOOKS="$SANDBOX/books"
@@ -106,6 +130,13 @@ run "文档链接与安装包（相对链接 / 点名的包 / 只留最新一份
 # 每个路径也得真在仓库里（打错字、删文件忘删登记行，尤其是 --fast 走不到的浏览器段）。
 # 解析「认引号」很要紧：run 的名字和 echo 的说明里成串地提到套件名，子串扫一遍等于没查。
 run "门禁接线（check_*.py 都得挂进 run_all.sh / 登记行都得有主）" "$PY" tests/check_gate_wiring.py
+# 上面那条管「套件有没有挂进门」，这一条管「门禁自己跑起来时，两套会不会写进同一份
+# 书库 / cache」。原先沙盒是个写死的 `/tmp/guizang-selftest`，同一台机器上两套一起跑
+# 就会互相重铺书架、读到别人的账本，报出一串看着像产品 bug 的假红（2026-10-16 真栽过）。
+# 这里把 run_all.sh 里那段沙盒选择逻辑**原文抽出来**真跑两遍：默认各拿一份、用完自收，
+# 显式 export 的那份原样用且不动它，并留一条「旧写法两次拿到同一个路径」的对照。
+# 纯文件走查 + 两次 bash 子进程，不联网、不起服务、不开浏览器，归 --fast。
+run "门禁沙盒（两套同时跑不共用一份书库 / 显式指定的不删）" "$PY" tests/check_gate_sandbox.py
 # 取书续传锚点是纯逻辑（目录 + 已落盘章节），不用起浏览器也验得了：
 # 它守的是「卡住之后再点取书必须能接着往前读」这条 —— 卡死一次就别再来第二次。
 run "取书续传锚点" "$PY" tests/check_resume.py
@@ -1314,7 +1345,9 @@ PORT=$("$PY" -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s
 LOG="$SANDBOX/server.log"
 "$PY" ui_server.py --port "$PORT" >"$LOG" 2>&1 &
 SRV=$!
-trap 'kill $SRV 2>/dev/null' EXIT
+# 这一句会顶掉上面那条沙盒清理的 EXIT trap，两件事得并在一处：
+# 先关一次性服务，再收沙盒（显式给的沙盒仍然不动）。
+trap 'kill $SRV 2>/dev/null; cleanup_sandbox' EXIT
 
 # 服务自己会往后找空闲端口，所以地址要从它自己打印的那行里取，别赌。
 ACTUAL=""
