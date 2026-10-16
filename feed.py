@@ -2180,9 +2180,21 @@ _OPML_ENTITY = re.compile(r"<!entity", re.I)
 # 不是我们给用户的那种人话，导入眼看着就「炸了」。
 MAX_OPML_DEPTH = 32
 
+# XML 1.0 的 Char 产生式只认这几段：`\t \n \r`、`[#x20-#xD7FF]`、`[#xE000-#xFFFD]`、
+# `[#x10000-#x10FFFF]`。落在它外面的是「写进 XML 就不合式」的字符：C0 里除制表 /
+# 换行 / 回车之外的（`\x00`-`\x08`、`\x0b`、`\x0c`、`\x0e`-`\x1f`）、落单的代理码点、
+# U+FFFE / U+FFFF。`html.escape` 只换 `& < > " '`，这一类一个都不管 —— 于是源标题里
+# 混进一个，导出的 `.opml` 谁都解不开（本模块自己 import 回来也是「解析不了」）。
+#
+# 标题 / 站点名 / 组名都是外部数据：JSON Feed 的字符串里 `"\u000b"` 是合法转义，
+# `feed.json` 又是用户能手改的文本，所以这不是理论值。口径与 `_drop_surrogates`
+# 一致：认不出的字符洗掉，不留一串会被解析器当场拒的字节。
+_XML_ILLEGAL = re.compile(
+    "[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
 
 def _esc(v):
-    return html.escape(str(v or ""), quote=True)
+    return html.escape(_XML_ILLEGAL.sub("", str(v or "")), quote=True)
 
 
 def export_opml(title="归藏订阅", include_empty=True):

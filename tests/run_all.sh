@@ -228,6 +228,13 @@ run "订阅正文清洗（实体 / 拆字协议 / 斜杠分隔 / 落单 script /
 # 这一条把「垫到窗口外仍要拒 / 夹在两段注释中间仍要拒 / 33 层越界给人话 / 上限内照常
 # 导入 / 正常 &amp; 不误伤」一起钉死，import_opml 走 dry_run，不联网。
 run "OPML 导入安全边（全文实体闸门 / 嵌套层数上限）" "$PY" tests/check_opml_safety.py
+# 上一条管「进门」那一半，这一条管「出去」那一半：`_esc` 原先只有 html.escape，
+# 而 XML 1.0 不允许的字符（C0 里除 \t \n \r 之外的、落单代理码点、U+FFFE / U+FFFF）
+# 它一个都不管 —— 标题 / 站点名 / 组名都来自外部（JSON Feed 的 "\u000b" 是合法转义，
+# feed.json 又能手改），混进一个导出的 `订阅.opml` 就是不合式 XML，别的阅读器与本模块
+# 自己 import 回来都当场「解析不了」，而界面那一下回的是「已导出」。这一条带一条
+# 「老写法导出的这份确实解不开」的对照，钉住导出解得开、导得回去、好字符一字不动，离线。
+run "OPML 导出合法性（脏标题不再导出不合式 XML / 导得回去）" "$PY" tests/check_opml_export_valid.py
 # feed.json 不只 feed.py 在写：用户会手改、旧版本写过别的形状、云同步也会落半截。
 # _load 原来只 setdefault 了三个键名，值坏掉就带出去 —— entries 写成列表 / 字符串时
 # `.values()` 直接抛 AttributeError（这条异常在 _load 外面，连空账都回不去，界面「订阅」
