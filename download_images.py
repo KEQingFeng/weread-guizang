@@ -187,7 +187,12 @@ def collect_tasks(raw_dir, img_dir):
     tasks, skipped, seen = [], 0, set()
     for jf in sorted(glob.glob(os.path.join(raw_dir, "*.json"))):
         try:
-            with open(jf, "r", encoding="utf-8") as fh:
+            # utf-8-sig：raw/*.json 是用户能手改、云同步也可能回写的档，记事本
+            # 「另存为 UTF-8」会在开头多塞三字节 BOM；裸 utf-8 解不动、被 `except`
+            # 当成坏记录整份跳过，那一页的插图一张都不重下，界面上只少几张图、
+            # 看不出为什么。与 `book_layout.read_meta` 那一族读口同一把尺子：
+            # 写口仍旧 utf-8，只有读口认 BOM。
+            with open(jf, "r", encoding="utf-8-sig") as fh:
                 doc = json.load(fh)
         except Exception:
             skipped += 1

@@ -125,6 +125,13 @@ run "取书目录账本脏形状（脏形状当没目录 / 好数据不改 / 对
 # 「写口不主动种 BOM」「裸 utf-8 确实解不动」的对照一起钉住。要 import 引擎
 # （顶层 import playwright），归静态段。
 run "取书账本读口认 BOM（目录 / 进度 / 钉不住 / raw + 界面清单 + 写口不种 BOM）" "$PY" tests/check_export_ledger_bom.py
+# 「读口认 BOM」这一族在取书 / 笔记 / 写作 / 视频 / 订阅各格收完之后，第十七轮结束时
+# 当场数出还剩两处：clip_article.save_clip 把刚建好的 meta.json 内联读回来补剪藏
+# 字段（裸 utf-8，带 BOM 时读成空账、再写回就把用户改过的字段整份冲掉），
+# download_images.collect_tasks 扫 raw/*.json 列插图任务（裸 utf-8，带 BOM 的页面
+# 被当成坏记录整页跳过，界面上只少几张图、看不出为什么）。这一条把「两处都走 BOM
+# 认得的读法」「带 BOM 与干净档逐字等价」与「裸 utf-8 确实解不动」的对照一起钉住。
+run "读口认 BOM 收尾（剪藏补 meta 走 read_meta / 插图清单读 raw 认 BOM）" "$PY" tests/check_read_bom_leftovers.py
 # 目录账本收完了，引擎**自己**的另外三个读口还留着同样的旧读法，而且踩得更靠前：
 #   _progress.json → write_progress 里 data.update 在 try 之外，`[]` / `"书名"` / 数字
 #                    一句 AttributeError 就在取书开头（running=True）或收尾带走整趟任务；

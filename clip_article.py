@@ -969,14 +969,14 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None
         author=(author or "").strip() or art["author"] or art["site"],
         cover_dir=cover_dir, book_id_prefix="clip", source="clip")
 
-    # meta 里补剪藏专属字段：来源链接要能一键回原文，source=clip 让书架分组显示
+    # meta 里补剪藏专属字段：来源链接要能一键回原文，source=clip 让书架分组显示。
+    # 读的是 `book_import` 刚写下的那一份，走 `book_layout.read_meta` 这唯一读口：
+    # 它认 BOM（记事本「另存为 UTF-8」多塞的三字节），也不再在这里抄第三份读法。
+    # 原先裸 utf-8 读、外面罩 `except Exception: meta = {}` —— 带 BOM 时整份解不动被
+    # 当空账，紧接着 `.update()` 再写回，等于**以空账为底重写**，用户改过的其它字段
+    # 整份丢掉。坏档 / 缺档仍旧回空 dict，下面的 `.update()` 与落盘一字不变。
     mp = os.path.join(info["dir"], "meta.json")
-    meta = {}
-    try:
-        with open(mp, encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        meta = {}
+    meta = book_layout.read_meta(info["dir"])
     meta.update({"source": "clip", "format": "clip", "url": art["url"],
                  "site": art["site"], "date": art["date"], "cover": art["cover"],
                  "words": art["words"],
