@@ -26,6 +26,16 @@ from datetime import date, datetime, timedelta
 
 # 一页 = 多少字符。取整千，好算也好解释（界面上也是这么写的）。
 PAGE_CHARS = 1000
+# 一本书的页数上限。账本里每个 pages / high 读数都按这一把尺子收口
+# （`_int(..., 1, PAGE_MAX)`）—— 原先这个数在六处各写一遍，而"章字数"那一档
+# 一个上界都没有，见 `_chars_of`。
+PAGE_MAX = 10000000
+# 单章字数上限 = 页数上限 × 每页字数。章的 chars 是从书目录读回来的数（手改、
+# 云同步写回、别的调用方自己拼 chapter dict 都可能给），一个 `1` 后面跟四百个 0
+# 是合法 JSON、读回来是 Python 大整数，而 `chars / float(PAGE_CHARS)` 对这种
+# "大到 float 装不下" 的整数当场 OverflowError —— 与 activity / login / mindmap
+# 那几处越界数字同一条口径：越界的按上限收口，正常字数一个字不改。
+MAX_CHARS = PAGE_MAX * PAGE_CHARS
 KINDS = ("daily", "weekly")
 _DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 MAX_HISTORY = 40
@@ -33,15 +43,24 @@ MAX_HISTORY = 40
 
 # ─────────────────────────── 页数与位置 ───────────────────────────
 
+def _chars_of(c):
+    """一章的字数收成 0..MAX_CHARS 的整数。
+
+    形状只认"对象 + 能认成非负整数的 chars"，与 `_int` 同一把尺子：一长串数字
+    （合法 JSON、读回来是 Python 大整数）、纯数字串、inf / NaN / 负数、半个对象
+    都在这里收口。原先 `total_pages` / `pages_at` 是裸 `int((c or {}).get("chars"))`
+    加一句宽 except —— 大整数本身收得下、宽 except 也不接，可下一步
+    `chars / float(PAGE_CHARS)` 就抛 OverflowError，而那不是 ValueError 能兜的。
+    """
+    v = c.get("chars") if isinstance(c, dict) else None
+    return _int(v, 0, MAX_CHARS)
+
+
 def total_pages(chapters):
-    """一本书的总页数：各章字符数之和折算，至少 1 页。"""
-    chars = 0
-    for c in chapters or []:
-        try:
-            chars += int((c or {}).get("chars") or 0)
-        except Exception:
-            pass
-    return max(1, int(math.ceil(chars / float(PAGE_CHARS))))
+    """一本书的总页数：各章字符数之和折算，至少 1 页、至多 PAGE_MAX 页。"""
+    chars = sum(_chars_of(c) for c in chapters or [])
+    pages = max(1, int(math.ceil(chars / float(PAGE_CHARS))))
+    return min(pages, PAGE_MAX)
 
 
 def pages_at(chapters, at, frac=0.0):
@@ -82,18 +101,10 @@ def pages_at(chapters, at, frac=0.0):
     # round(3.1)=3 页 < 4 页，于是「已读完」永远触发不了，底栏永远写着还剩 1 页。
     if at == len(chapters) - 1 and frac >= 1.0:
         return total_pages(chapters)
-    before = 0
-    for i in range(at):
-        try:
-            before += int((chapters[i] or {}).get("chars") or 0)
-        except Exception:
-            pass
-    try:
-        here = int((chapters[at] or {}).get("chars") or 0)
-    except Exception:
-        here = 0
+    before = sum(_chars_of(chapters[i]) for i in range(at))
+    here = _chars_of(chapters[at])
     pages = (before + frac * here) / float(PAGE_CHARS)
-    return max(1, int(round(pages)))
+    return min(max(1, int(round(pages))), PAGE_MAX)
 
 
 # ─────────────────────────── 账本规范化 ───────────────────────────
@@ -193,19 +204,19 @@ def _norm_plan(v):
             hist.append({
                 "started": str(h.get("started") or ""),
                 "done_at": _int(h.get("done_at"), 0),
-                "pages": max(1, _int(h.get("pages"), 1, 10000000)),
+                "pages": max(1, _int(h.get("pages"), 1, PAGE_MAX)),
                 "goal": _norm_goal(h.get("goal")),
                 "days": _int(h.get("days"), 0, 100000),
             })
     return {
         "title": str(v.get("title") or "")[:120],
-        "pages": max(1, _int(v.get("pages"), 1, 10000000)),
+        "pages": max(1, _int(v.get("pages"), 1, PAGE_MAX)),
         "goal": _norm_goal(v.get("goal")),
         "started": started,
         "target": str(v.get("target") or "") if _DAY_RE.match(str(v.get("target") or "")) else "",
         "at": _int(v.get("at"), 0, 1000000),
         "frac": _clamp01(v.get("frac")),
-        "high": _int(v.get("high"), 0, 10000000),
+        "high": _int(v.get("high"), 0, PAGE_MAX),
         "created_at": _int(v.get("created_at"), 0),
         "last_at": _int(v.get("last_at"), 0),
         "done_at": _int(v.get("done_at"), 0),
@@ -256,6 +267,20 @@ def _add_days(d, n):
     return d + timedelta(days=int(n))
 
 
+def _add_days_str(d, n):
+    """d 往后 n 天的日期串；超出日期能表示的范围（`date.max` 是 9999 年）就回空串。
+
+    推算出来的终点（`suggest_target` / `_fill_pace` 的 ETA）只是界面上一句参考。
+    `pages` 已被 `PAGE_MAX` 收口，但「只读了 1 页、还剩一千万页」这种账推出来仍是
+    几千万天，`date + timedelta` 当场 `OverflowError` —— 它不在 ValueError 里。
+    与 started / target 认不出同一格：算不出来就不写终点，不把整条读计划带崩。
+    """
+    try:
+        return _add_days(d, n).strftime("%Y-%m-%d")
+    except (OverflowError, ValueError):
+        return ""
+
+
 # ─────────────────────────── 定计划 / 改计划 ───────────────────────────
 
 def put_plan(store, bid, title, total, period, amount, now=None, target=""):
@@ -272,7 +297,7 @@ def put_plan(store, bid, title, total, period, amount, now=None, target=""):
     started = base["started"] if base else _day_from_epoch(now)
     p = {
         "title": str(title or (base or {}).get("title") or "")[:120],
-        "pages": max(1, _int(total, 1, 10000000)),
+        "pages": max(1, _int(total, 1, PAGE_MAX)),
         "goal": g,
         "started": started,
         "target": target if _DAY_RE.match(str(target or "")) else (
@@ -296,9 +321,9 @@ def suggest_target(started, total, goal):
     if not d:
         return ""
     amount = max(1, _int((goal or {}).get("pages"), 1))
-    periods = max(1, int(math.ceil(max(1, _int(total, 1)) / float(amount))))
+    periods = max(1, int(math.ceil(max(1, _int(total, 1, PAGE_MAX)) / float(amount))))
     days = periods if (goal or {}).get("period") == "daily" else periods * 7
-    return _add_days(d, days).strftime("%Y-%m-%d")
+    return _add_days_str(d, days)
 
 
 def record_pos(store, bid, chapters, at, frac=0.0, now=None):
@@ -364,7 +389,7 @@ def view(store, bid, total=None, now=None, today=None):
         return {"has": False}
     now = int(now if now is not None else time.time())
     today = today or _day_from_epoch(now)
-    pages = max(1, _int(total if total is not None else p.get("pages"), 1, 10000000))
+    pages = max(1, _int(total if total is not None else p.get("pages"), 1, PAGE_MAX))
     read = max(0, min(pages, int(p.get("high") or 0)))
     g = p.get("goal") or {"period": "daily", "pages": 1}
     td = _parse_day(today) or date.today()
@@ -416,7 +441,7 @@ def _fill_pace(out, p, td, read, pages):
     left = out["left"]
     target = _parse_day(p.get("target") or "")
     if out["pace"] and out["pace"] > 0 and left > 0:
-        out["eta"] = _add_days(td, int(math.ceil(left / out["pace"]))).strftime("%Y-%m-%d")
+        out["eta"] = _add_days_str(td, int(math.ceil(left / out["pace"])))
     else:
         out["eta"] = ""
     # 在不在轨上：有终点日就和终点日比，没有就只看「今天 / 本周达标没有」
