@@ -415,6 +415,24 @@ def snapshot(draft_dir, meta):
 
 
 def snapshot_now(draft_dir, text):
+    """把一份正文拍成快照（文件名按秒，同一秒里连点两次也分得开）。
+
+    快照也走 `_write_text_atomic` 这同一个口子，不再裸 `open(path, "w")`：
+
+      · **半截 .md 会被当成一份快照**。`versions()` 认的就是目录里以 `.md` 收尾的
+        文件，写一半被强杀（关窗口 / 断电 / Ctrl-C）留下的那半篇，照样出现在快照
+        列表里；用户点「回退到这一版」，拿回来的就是半篇稿 —— 而且 `restore()`
+        先给自己拍的那一份快照，落盘的也是这段半篇正文。
+      · **同一秒里两个写手抢同一个名字**。后端是 `ThreadingHTTPServer`，自动存盘
+        每 `REV_STEP_SNAP` 次拍一份（`snapshot()`）、用户手点「存一份快照」也走这里，
+        两条线可能落在同一秒：旧的「先看文件在不在、再打开写」之间有一个窗口，两边
+        都认下同一个 `…-123456.md`，各自按自己的偏移往下写，顶上去的两篇交织在一起。
+        现在写的是自己那份带 pid + 随机串的临时件，`os.replace` 一步顶替，最终落在
+        这个名字上的永远是**某一份完整正文**。
+
+    版本额度只按真快照（`.md`）算：写一半被强杀留下的临时件不该占掉一份真快照的
+    名额，更不该顶掉最老的那一份。
+    """
     vd = versions_dir(draft_dir)
     os.makedirs(vd, exist_ok=True)
     name = "%s.md" % time.strftime("%Y%m%d-%H%M%S")
@@ -423,9 +441,9 @@ def snapshot_now(draft_dir, text):
     while os.path.exists(path):           # 同一秒里连点两次保存也要分得开
         path = os.path.join(vd, "%s-%d.md" % (name[:-3], n))
         n += 1
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text or "")
-    for stale in sorted(os.listdir(vd))[:-KEEP_VERSIONS]:
+    _write_text_atomic(path, text or "")
+    keep = [x for x in sorted(os.listdir(vd)) if x.endswith(".md")]
+    for stale in keep[:-KEEP_VERSIONS]:
         try:
             os.remove(os.path.join(vd, stale))
         except OSError:
