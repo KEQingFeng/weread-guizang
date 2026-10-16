@@ -1498,10 +1498,15 @@ def file_stem(name):
 
     标题是用户自己起的，里面有 `/`、引号、表情都不奇怪；拼进路径前不洗一遍，
     轻则写不出文件，重则写出一个到别处去的相对路径。
+
+    洗掉非法字符还不够：标题正好叫 `CON` / `NUL` / `COM1` 时，Windows 不把它当
+    普通文件（设备名不看扩展名，`CON.png` 也还是设备），导出那一下当场失败；结尾
+    的点与空格也会被系统抹掉，把「重名加序号」的承诺吃掉。这两档交给
+    `platform_compat.win_safe_filename` 一并收掉。
     """
     s = re.sub(r"[^0-9A-Za-z._\-\u3400-\u9fff ]+", "_", str(name or "").strip())
     s = re.sub(r"^[.\s]+", "", s).replace("..", "_")
-    return s[:60] or "稿子"
+    return pc.win_safe_filename(s[:60]) or "稿子"
 
 
 def writer_export(kind, book_id, opts):

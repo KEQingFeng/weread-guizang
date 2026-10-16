@@ -1961,8 +1961,13 @@ def _read_meta(book_dir):
 # ───────────────────────── 转写：读 / 改 / 重建 / 导出 ─────────────────────────
 
 def _safe_file(title):
-    """书名 → 能安全落盘的文件名（跟 _save_book 裁标题的规矩一致）。"""
-    return re.sub(r'[\\/:*?"<>|]', "", str(title or "").strip())[:60] or "transcript"
+    """书名 → 能安全落盘的文件名（跟 _save_book 裁标题的规矩一致）。
+
+    去非法字符之外，Windows 的设备名（`CON` / `NUL`）与结尾的点/空格也一并收掉：
+    这一串跟着 `EXPORT_EXT` 拼成 `CON.txt` 那种落点，Windows 上不认。
+    """
+    stem = re.sub(r'[\\/:*?"<>|]', "", str(title or "").strip())[:60]
+    return pc.win_safe_filename(stem) or "transcript"
 
 
 def _txt_segments(path):

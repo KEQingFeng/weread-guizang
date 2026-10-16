@@ -290,6 +290,11 @@ run "安娜接住下载（同名不覆盖 / 路径护栏）" "$PY" tests/check_a
 # ENAMETOOLONG（用户看到的是「这份没接住」）。这一条把两条上限、真建一次文件、
 # 不切半个字、幂等、追加时间戳后仍在 255 内，全部离线钉住。
 run "安娜落盘文件名（按字节截断 / 真建得出来 / 幂等）" "$PY" tests/check_anna_name.py
+# 上面那条管「名字多长」，这一条管「名字在 Windows 上写不写得出来」：CON / NUL /
+# COM1 这些设备名不看扩展名（`CON.png` 也还是设备），结尾的点与空格又会被系统悄悄
+# 抹掉。macOS / Linux 上这一档没有症状，所以只能把名字形状钉住 —— 共用尺子
+# `platform_compat.win_safe_filename` 加上写作台 / 安娜 / EPUB / 转写 / 插图五条调用口。
+run "Windows 落盘名（设备名 / 结尾点空格 / 共用尺子 / 五条调用口）" "$PY" tests/check_win_names.py
 # 上面那条管「文件名怎么落」，这一条管「账本里的每一条怎么读回来」。normalize 立下的
 # 契约是「脏值退回默认、不抛」，可 books / pending 里的每条原先只认「是对象」就原样
 # 收下：行里的 bytes / at / chapters 被手改成越界数字（1e400 → inf）时，json.dumps
