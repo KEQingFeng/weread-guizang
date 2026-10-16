@@ -33,6 +33,7 @@ macOS 是 WKWebView），可外层直接给 iframe 一个外站地址照样是�
 
 import html as _html
 import json
+import math
 import re
 import urllib.error
 import urllib.parse
@@ -190,6 +191,10 @@ _YT_IMG_HOSTS = ("i.ytimg.com", "s.ytimg.com", "yt3.googleusercontent.com",
                  "yt3.ggpht.com")
 _YT_ID = re.compile(r"^[A-Za-z0-9_\-]{6,20}$")
 _YT_CARDS = 24
+# 一条视频的时长上限（秒）：一年。`lengthSeconds` 是外站 JSON 里的一个读数，可能被写成
+# `1e400`（解出来是 inf）或一长串数字（Python 大整数），也可能只是坏数据；比一年还长的
+# 「视频」不是视频，当认不出。留着它只会在卡片角上印出一串三百位的数字。
+_YT_LEN_MAX = 366 * 24 * 3600
 
 # 未登录时 youtube.com 的首页与几个 feed 页在 `ytInitialData` 里一张卡都不铺。2026-10-16
 # 实测：首页 950KB、`videoId` 出现 0 次，正文只有一句「搜索视频，开启 YouTube 之旅」；
@@ -276,11 +281,34 @@ def _runs(node):
                    if isinstance(r, dict))
 
 
+def _yt_num(v):
+    """外站 JSON 里的一个读数收成「非负整数」；认不出回 0。
+
+    为什么不能直接 `int(v)`：这一页的数是油管页面自带 JSON 里的，浏览器那边怎么写的
+    我们管不着。`json` 认 `Infinity` / `NaN` / `1e400`（后两个都是 inf / nan），也认
+    一长串数字（解出来是 Python 大整数）—— 而 `int(inf)` 与 `float(10**400)` 抛的是
+    `OverflowError`（它不在 `ValueError` 里）。原先 `_yt_img` 只兜
+    `except (TypeError, ValueError)`，于是一个 `"width": 1e400` 就把整屏静态目录
+    打成 500（`shape` 那条路上没有别的兜底）。口径与 login / readplan / mindmap 一致：
+    不有限当认不出，别的卡片照常铺。
+    """
+    if isinstance(v, bool):
+        return 0
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    if not math.isfinite(f):
+        return 0
+    return max(0, int(f))
+
+
 def _yt_img(sources):
     """从一组同源缩略图里挑最宽的那张。
 
     油管按 `sources` 从低清到高清排（168×94 在前、336×188 在后），照第一个取会拿到
-    糊的那张；只认自家图床的 https 地址，别的域名一律不往这一页里引。
+    糊的那张；只认自家图床的 https 地址，别的域名一律不往这一页里引。`width` 走
+    `_yt_num`：认不出的当 0，仍然会选中第一个合法图床的地址。
     """
     best, best_w = "", -1
     for s in sources or []:
@@ -293,10 +321,7 @@ def _yt_img(sources):
             continue
         if not u.startswith("https://") or host not in _YT_IMG_HOSTS:
             continue
-        try:
-            w = int(s.get("width") or 0)
-        except (TypeError, ValueError):
-            w = 0
+        w = _yt_num(s.get("width"))
         if w > best_w:
             best, best_w = u, w
     return _html.escape(best, quote=True) if best else ""
@@ -449,13 +474,23 @@ def _yt_page(cards, note):
 
 
 def _yt_len(sec):
-    """`lengthSeconds` 是秒数，翻成「1 小时 4 分」这种看得懂的话。"""
+    """`lengthSeconds` 是秒数，翻成「1 小时 4 分」这种看得懂的话。
+
+    这个数来自页面自带的那坨 JSON（外站说了算）：`Infinity` / `1e400`（`json` 都认，
+    读回来是 inf）与一长串数字（Python 大整数）到 `int()` / `float()` 那一步抛的是
+    `OverflowError`，不在原先那个 `except (TypeError, ValueError)` 里 —— 一个越界的
+    时长读数就能把整屏静态目录打成 500。与 `_yt_num` 同一把尺子：不有限、认不出、
+    比 `_YT_LEN_MAX` 还长的都当「不知道时长」，回空串，卡片照常铺。
+    """
+    if isinstance(sec, bool):
+        return ""
     try:
-        s = max(0, int(float(sec)))
-    except (TypeError, ValueError):
+        f = float(sec)
+    except (TypeError, ValueError, OverflowError):
         return ""
-    if not s:
+    if not math.isfinite(f) or f <= 0 or f > _YT_LEN_MAX:
         return ""
+    s = int(f)
     h, m, r = s // 3600, s % 3600 // 60, s % 60
     if h:
         return "%d:%02d:%02d" % (h, m, r)

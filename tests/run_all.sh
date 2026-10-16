@@ -986,6 +986,16 @@ run "内置浏览器加载提示（同一地址不残留 / 取回收 / 离开收
 # JSON、新旧两代 renderer 都收、缩略图只引本站图床、视频 id 形状不放行内注入、目录里
 # 那枚「转成笔记」接回 vidUseLink、以及只在 YouTube 上换这一页（哔哩哔哩照旧原样）。
 run "油管静态目录（自己读 ytInitialData / 两代 renderer / 转成笔记接回）" "$PY" tests/check_youtube.py
+# 上一条管的是「铺不铺得出」，这一条管「铺的时候那两个外站给的数怎么收」：时长读
+# `lengthSeconds`、缩略图读 `sources[].width`，两个都是外站 JSON 里的读数。`json` 认
+# `Infinity` / `1e400`（解出来是 inf）与一长串数字（Python 大整数），而 `int(inf)` /
+# `float(10**400)` 抛的是 `OverflowError`（不在 `ValueError` 里）。旧写法两处都只兜
+# `(TypeError, ValueError)`，于是一个脏读数就让 `yt_static` → `shape` 整条路抛出去，
+# 而 `/api/browse` 那条路由外面没有第二道 try —— 用户看到的是 iframe 一片空白，不是
+# 「这一页没取回来」那页人话。这一条纯逻辑离线钉住：`_yt_num` 的尺子、时长边界
+# （一年）、缩略图挑最宽、`shape` 端到端照铺，外加一条「裸 int(float(…)) 确实会抛」
+# 的对照，防这条门禁空转。
+run "油管静态目录脏读数（时长 / 缩略图宽越界不把整屏打崩）" "$PY" tests/check_youtube_num.py
 # 上面那两条管的是「取什么」，这一条管的是「取回来怎么解」。`charset=…` 是对方站点声明的，
 # 一个手滑的名字（实测有页面写 `charset=x-unknown`）或一个压根不是文本编码的名字会让
 # bytes.decode 抛 LookupError —— `errors="replace"` 管字节不管名字，于是剪藏冒出运行期错误、
