@@ -3421,19 +3421,31 @@ RESIDUE_FILES = ("_catalog.json", "_catalog.json.tmp",
 # 攒着就是吃盘洞（一本导图或 _ai 几 MB）。书目录里没有任何正经产物以 `.tmp` 结尾，
 # 所以清残稿时按这个尾巴统一收走。
 STRAY_TMP_SUFFIX = ".tmp"
+# 半截临时件不止 `.tmp` 一族：同步取回远端文件时先写 `<目标>.part` 再改名
+# （`sync._write_atomic`），插图下载也写 `<图>.part`（`download_images.download_one`）。
+# 正常路径由它们的 `finally` / `except BaseException` 收干净，可断电 / SIGKILL 那一档
+# 同样只有磁盘看得见：`.part` 半截件不进任何读口，此前也不在清理射程里。同步取回的那份
+# 可能落在书目录**根上**（`notes.json.part` 这类，不在 `RESIDUE_DIRS` 那三本子目录里），
+# 清残稿时不算上它就永远删不掉，只能等整本书被删。书目录里同样没有正经产物以 `.part`
+# 结尾，所以与 `.tmp` 一起按尾巴统一收走。
+STRAY_PART_SUFFIX = ".part"
 
 
 def drop_stray_tmps(d):
-    """收掉一本书目录里「写到一半被强杀」留下的临时件，返回个数。
+    """收掉一本书目录里「写到一半被强杀」留下的临时件（`.tmp` / `.part`），返回个数。
 
     只删普通文件：符号链接（哪怕指向别处）与同名目录都不碰 —— 前者不是这条路径的
     产物，后者可能装着用户自己的东西。`os.walk` 不跟符号链接目录，所以这趟扫描走不出
     这本书；某个子目录读不出来（被删 / 权限没了）当没有残件，清残稿本身照旧往下走。
+
+    两个尾巴是同一档：书目录里没有正经产物以它们结尾，而 `sync` 取回的文件与
+    `download_images` 下的插图都先落这两个后缀再改名。
     """
     gone = 0
     for root, _dirs, files in os.walk(d):
         for name in files:
-            if not name.endswith(STRAY_TMP_SUFFIX):
+            if not (name.endswith(STRAY_TMP_SUFFIX)
+                    or name.endswith(STRAY_PART_SUFFIX)):
                 continue
             p = os.path.join(root, name)
             if os.path.islink(p) or not os.path.isfile(p):
