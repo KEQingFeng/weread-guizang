@@ -384,6 +384,14 @@ def save_map(book_dir, doc) -> dict:
     return out
 
 
+def _discard(tmp):
+    """把写坏的临时件收掉；收不动（已被别人搬走 / 权限）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def _write_json(path, text):
     """先写 tmp 再 rename，覆盖前留一份 .prev：崩在写一半时盘上顶多留下 .tmp，
     用户的图不会变成半截 JSON（这个仓库的笔记那边也是这么做的）。
@@ -398,23 +406,40 @@ def _write_json(path, text):
     同时存时，固定名会让先收尾的那个把共用的临时件搬走、后一个 `os.replace` 当场
     FileNotFoundError。与
     `ui_server._write_json` / `board._write_json` 同一把尺子。
+
+    收口的两半跟 `book_notes._write_json`（`#157`）对齐 —— 这一格原先兜 `except Exception`、
+    且旧档挪走之后那一句 `os.replace` 失败就任它去：
+      · **中止信号**（`KeyboardInterrupt` / `SystemExit`）不继承 `Exception`，只兜 `Exception`
+        时它从写入 / 改名这一步穿出去，盘上会多一个随机名残件 —— 正常路径本就该自己收掉
+        （`#163` 的清残稿是按 `.tmp` 尾巴兜底那一档，不是正常路径的替代）；
+      · **旧档已挪去 `.prev`、新稿那句 `os.replace` 又失败**（磁盘满 / 只读、Windows 上
+        杀毒软件钳住目标、路径那一刻成了目录）时，`mindmap.json` 原先整个消失，界面看到
+        的是「这张图没了」—— 而它其实好好躺在 `.prev` 里。把旧档搬回来，失败照旧往上报，
+        不能因为一次落盘失败就让用户的图不见。
     """
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    prev = path + ".prev"
+    backed = False
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        if os.path.exists(path):
+            try:
+                os.replace(path, prev)            # 覆盖前留一份上一版
+                backed = True
+            except Exception:
+                backed = False
+        os.replace(tmp, path)
+    except BaseException:
+        # 走到这一步说明新稿没顶上去：临时件收掉；若旧档已经被挪去 .prev，
+        # 把它搬回来 —— 不能因为一次落盘失败就让 mindmap.json 整个不见了。
+        _discard(tmp)
+        if backed:
+            try:
+                os.replace(prev, path)
+            except Exception:
+                pass
         raise
-    if os.path.exists(path):
-        try:
-            os.replace(path, path + ".prev")
-        except OSError:
-            pass
-    os.replace(tmp, path)
 
 
 _ERR_REASON = {
