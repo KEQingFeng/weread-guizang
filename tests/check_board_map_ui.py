@@ -112,6 +112,13 @@ def main():
     have = set(re.findall(r'\bid="([\w-]+)"',
                           (pathlib.Path(__file__).resolve().parent.parent / "ui.html")
                           .read_text(encoding="utf8")))
+    # 1.2.2 起画板工具条是图标化重建的：撤销 / 重做 / 清空那几颗的 id 由 bdIconBtn()
+    # 在渲染时写出来，HTML 里搜不到。所以除了静态 id=，还要认「按 id 造按钮」这三种写法
+    # （否则开跑前这条探针会拿旧 HTML 当尺子，把本轮的真机红说成套件写错）。
+    page_src = (pathlib.Path(__file__).resolve().parent.parent / "ui.html").read_text(encoding="utf8")
+    have |= set(re.findall(r"bdIconBtn\(\s*['\"]([\w-]+)['\"]", page_src))
+    have |= set(re.findall(r'\bid\s*=\s*"([\w-]+)"', page_src))
+    have |= set(re.findall(r"\bid\s*=\s*'([\w-]+)'", page_src))
     used = (set(re.findall(r"getElementById\('([\w-]+)'\)", src))
             | set(re.findall(r"querySelector\('#([\w-]+)'\)", src))
             | set(re.findall(r"#bd[A-Za-z]+", src)) | set(re.findall(r"#mm[A-Za-z]+", src)))
@@ -724,7 +731,9 @@ def main():
 
         # 换黑纸：默认墨色自己换成浅色（不然画完一片黑）
         page.click('#bdTools button[data-p="dark"]')
-        page.wait_for_timeout(250)
+        # 这句「当着人说」会被 1.5 秒后那次自动保存的「画板已存好」盖掉 —— 固定等 250ms
+        # 是在跟那个定时器赛跑。改成按那句话本身出现为止（它一秒半内就到）。
+        wait("() => /看不见/.test(document.getElementById('bdInfo').innerText)", timeout=4000)
         dark = state("""() => ({paper: document.getElementById('bdPaper').dataset.paper,
             color: BD.color, bg: BD.fc.backgroundColor,
             info: document.getElementById('bdInfo').innerText})""")
@@ -923,10 +932,86 @@ def main():
         resize = state("""() => ({w: Math.round(BD.fc.getWidth()),
             objs: BD.fc.getObjects().length,
             left: BD.fc.getObjects()[0] ? BD.fc.getObjects()[0].left : -1,
-            paper: Math.round(document.getElementById('bdPaper').clientWidth)})""")
-        chk("画板：窗口变小画布跟着变，但画上的东西位置不动",
-            resize["w"] < cw and resize["objs"] == 1 and abs(resize["left"] - keep[0]) < 0.6,
+            paper: Math.round(document.getElementById('bdPaper').clientWidth),
+            vt: BD.fc.viewportTransform.map(x => Math.round(x)),
+            vx: Math.round(BD.vx), vy: Math.round(BD.vy)})""")
+        chk("画板：窗口变小纸的尺寸不变（1.2.2 起不是视口大小了），画上的东西也不动",
+            # 1.2.2 之前量的是「窗口变小画布跟着变」。那条路是根因：setDimensions 会把
+            # 画的东西按比例挤（用户报的「内容扁塌」）。现在纸的逻辑尺寸写死，
+            # 看哪儿靠 viewportTransform 平移 —— 所以尺子反过来量：尺寸不变 + 对象不动。
+            resize["w"] == cw and resize["objs"] == 1 and abs(resize["left"] - keep[0]) < 0.6,
             (cw, keep, resize))
+        chk("画板：平移只动视口，不动纸上的坐标（挪完对象还在原处）",
+            abs(resize["left"] - keep[0]) < 0.6
+            and resize["vt"] != [1, 0, 0, 1, 0, 0] or resize["vx"] == 0,
+            resize)
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.wait_for_timeout(700)
+        bd_settled()
+
+        # 无限画布的三种挪法 + 「挪的是视口不是纸」
+        page.evaluate("() => { BD.vx = 0; BD.vy = 0; bdClamp(); }")
+        page.wait_for_timeout(200)
+        # ① 滚轮
+        page.mouse.move(760, 460)
+        page.mouse.wheel(0, 300)
+        page.wait_for_timeout(300)
+        wheel = state("""() => ({vx: Math.round(BD.vx), vy: Math.round(BD.vy),
+            left: BD.fc.getObjects()[0] ? BD.fc.getObjects()[0].left : -1})""")
+        chk("画板：滚轮能把画布挪走（触控板双指报的就是 wheel）",
+            wheel["vy"] < 0, wheel)
+        chk("画板：滚轮挪的是视口，纸上的东西一个坐标都没动",
+            abs(wheel["left"] - keep[0]) < 0.6, (keep, wheel))
+        # ② 左键拖动（先切到「选」工具，拖空白处才挪画布）
+        page.click('#bdTools button[data-t="select"]')
+        page.wait_for_timeout(200)
+        v0 = state("() => [Math.round(BD.vx), Math.round(BD.vy)]")
+        q4 = state("""() => { const q = document.querySelector('.bdcut').getBoundingClientRect();
+            return [Math.round(q.x + q.width - 60), Math.round(q.y + q.height - 60)]; }""")
+        page.mouse.move(q4[0], q4[1])
+        page.mouse.down()
+        page.mouse.move(q4[0] - 160, q4[1] - 110, steps=8)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        v1 = state("() => [Math.round(BD.vx), Math.round(BD.vy)]")
+        chk("画板：选工具下按住拖动也能挪画布（左右拖动是主力手势）",
+            v0 != v1, (v0, v1))
+        # 平移过头会被夹住（不然整张纸推出视野，人只看见一片灰）
+        state_clamped = state("""() => {
+          BD.vx = -99999; BD.vy = -99999; bdClamp();
+          const cut = document.querySelector('.bdcut');
+          return {vx: Math.round(BD.vx), vy: Math.round(BD.vy),
+                  w: cut.clientWidth, h: cut.clientHeight,
+                  pw: BD.fc.getWidth(), ph: BD.fc.getHeight()};
+        }""")
+        chk("画板：平移过头会被夹住（纸不会被整张推出视野）",
+            state_clamped["vx"] >= state_clamped["w"] - state_clamped["pw"] - 1
+            and state_clamped["vy"] >= state_clamped["h"] - state_clamped["ph"] - 1,
+            state_clamped)
+        # ③ 画笔手里的拖动仍然是画，不是挪（裁决点不许抢）
+        page.click('#bdTools button[data-t="pen"]')
+        page.wait_for_timeout(200)
+        objs_before_pan = state("() => BD.fc.getObjects().length")
+        q5 = state("""() => { const q = document.querySelector('.bdcut').getBoundingClientRect();
+            return [Math.round(q.x + q.width - 80), Math.round(q.y + q.height - 80)]; }""")
+        page.mouse.move(q5[0], q5[1])
+        page.mouse.down()
+        page.mouse.move(q5[0] - 90, q5[1] - 60, steps=6)
+        page.mouse.up()
+        page.wait_for_timeout(400)
+        chk("画板：画笔手里的拖动是画不是挪（平移不抢画笔的活）",
+            state("() => BD.fc.getObjects().length") == objs_before_pan + 1,
+            (objs_before_pan, state("() => BD.fc.getObjects().length")))
+
+        # 视口不许进存档：存的是「这块板」，不是「我此刻盯着哪儿」
+        # id 要当场取：上面「窗口变小」那段又点过一次「新建一块」，套件里那个旧 bid
+        # 早先被「连图一起删」清掉了 —— 拿它读盘只会读到一个不存在的文件。
+        bd_settled()
+        disk2 = json.loads(
+            (BOARD_DIR / (state("() => BD.id") + ".json")).read_text(encoding="utf8"))
+        chk("画板：挪了半天，落盘的画布里没有视口那一把（重开不会被扔回刚才那个角落）",
+            (disk2.get("canvas") or {}).get("viewportTransform") in (None, [1, 0, 0, 1, 0, 0]),
+            (disk2.get("canvas") or {}).get("viewportTransform"))
         page.set_viewport_size({"width": 1440, "height": 900})
         page.wait_for_timeout(700)
         bd_settled()

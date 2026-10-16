@@ -390,7 +390,10 @@ with sync_playwright() as pw:
         chk(f"订阅（{tag}）：该占几行的就占几行，没被挤成竖排", not r["out"], r["out"])
 
     # 三栏刚铺出来：左栏的栏名与节标题只许一行
-    vert_check("左栏", {'.fehd .t': 1, '.fegrp > .t': 1, '.fetail span': 1, '.frow .nm': 1})
+    # （栏名那一格从 .fehd .t 换成 .fehd .ftx —— 1.2.2 起栏头分左右两区，
+    #   .fetit 是整块区（带上下 padding、高 48），.ftx 才是「标题这几个字」那一层。
+    #   量外层会把 padding 一起算进去：48 / 21.75 ≈ 2，凭空判成竖排。）
+    vert_check("左栏", {'.fehd .ftx': 1, '.fegrp > .t': 1, '.fetail span': 1, '.frow .nm': 1})
 
     # ── 打开一条读，Esc 收回 ──
     page.locator("#fList .frow").first.click()
