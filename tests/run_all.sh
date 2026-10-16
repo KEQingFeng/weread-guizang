@@ -357,6 +357,13 @@ run "视频转写落单代理码点（脏段落存得下 / 脏账本读得开 / 
 # 这条钉住「一次一个名字 + 带进程号、失败收干净、并写不抛、缓存不回旧字」，另留
 # 「固定名确实扑空」的对照防空转。纯函数 + 线程 + 临时沙盒，不联网、不起服务，归静态段。
 run "视频转写落盘（临时件不共用 / 并写不扑空 / 失败不留 .tmp）" "$PY" tests/check_video_atomic.py
+# 上一条兜的是 Exception 那条退出路径（写失败收残件）；中止信号（KeyboardInterrupt /
+# SystemExit）不继承 Exception，Ctrl-C / 关窗那一下会从写入或改名这一步穿出去，书目录里
+# 多一个随机名 .tmp。book_notes（#157）与 mindmap（#169）早就是 BaseException + _discard，
+# 视频这两个口是那一族最后两个只兜 Exception 的。这一条钉住：中止信号照旧往上传、两个口
+# 的残件都收干净、旧档逐字节不动，另留「老写法确实把 .tmp 留下」的对照防空转。
+# 纯函数 + 临时沙盒，不联网、不起服务，归静态段。
+run "视频转写中止信号（Ctrl-C / 关窗不留随机名 .tmp，两个写口都兜 BaseException）" "$PY" tests/check_video_catch.py
 # 视频转笔记最后一步要问外站的 LLM（/chat/completions）。对方回的正文形状没人保证，
 # 而 `_llm_content` 与 SSE 兜底那两段都是裸的 `.get` 链 —— `{"choices": ["oops"]}`、
 # `{"choices": [{"message": "hi"}]}`、SSE 里 `data: []` / `data: 0` 这些「是合法 JSON、

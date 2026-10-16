@@ -1510,6 +1510,14 @@ def _drop_surrogates(v):
     return v
 
 
+def _discard(tmp):
+    """把写坏的临时件收掉；收不动（已被别人搬走 / 权限）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def _write_json(path, obj):
     # 先把它从下面的解析缓存踢掉：文件换了，缓存里那份就是上一版转写，
     # 留着的话「保存完再读还是旧字」会变成一条查不出来的鬼影。
@@ -1525,15 +1533,15 @@ def _write_json(path, obj):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_drop_surrogates(obj), f, ensure_ascii=False, indent=2)
-    except Exception:
-        # 写这一步失败时把临时件收干净再抛（内容里还有落单码点这类），
-        # 别在书目录里留一个只有磁盘看得见的垃圾。
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        os.replace(tmp, path)
+    except BaseException:
+        # 写 / 改名这一步失败（内容里还有落单码点这类）时把临时件收干净再抛，
+        # 别在书目录里留一个只有磁盘看得见的垃圾。夹的是 BaseException 而不是
+        # Exception：中止信号（KeyboardInterrupt / SystemExit）不继承 Exception，
+        # 只兜 Exception 会在 Ctrl-C / 关窗那一下从写入或改名这一步穿出去，
+        # 盘上多一个随机名 .tmp（与 book_notes / writer 那两个写口同一把尺子）。
+        _discard(tmp)
         raise
-    os.replace(tmp, path)
 
 
 def _read_json(path):
@@ -1590,13 +1598,12 @@ def _write_text(path, text):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(_drop_surrogates(text))
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        os.replace(tmp, path)
+    except BaseException:
+        # 与上面那个 JSON 口同一把尺子：写 / 改名失败（含 Ctrl-C、SystemExit
+        # 这类中止信号）先把随机名临时件收掉再抛，别留在书目录里占盘。
+        _discard(tmp)
         raise
-    os.replace(tmp, path)
 
 
 def _save_notes(book_dir, note_markdown, title, summary, meta):
