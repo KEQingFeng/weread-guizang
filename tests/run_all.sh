@@ -794,6 +794,14 @@ run "封面规则（首图挑选 / 内网拦截 / 落盘与补取）" "$PY" test
 # ensure_cover 更是直写目标文件。60 个 /api/cover 并发 + 后台 warm_covers 补同一批书，
 # 正是这个后端最容易撞上的场景。全程临时沙盒，不联网（urlopen 用假的那只顶掉）。
 run "封面原子落盘（并发不扑空 / 不留 .tmp / 失败不毁旧档）" "$PY" tests/check_cover_atomic.py
+# 上一条收的是**字节**那一档（封面），JSON 那一档有 `_write_json` 早就守着；文本这一档
+# 一直没有第三把尺子：写作那格的导出（`writer_export` 的 `kind == "md"`）还是直接
+# `open(dest, "w")` —— `"w"` 一进去就把上一趟导出截成 0 字节，而导出的是整篇稿子，
+# 被停止键 / 关窗口 / 断电掐在写完之前，留下的是「看着像完整的、其实断在句中」的 .md。
+# 这一条把 `_write_text` 补上并钉住三件事：原子顶替、并发不扑空、失败 / 中止都不留 .tmp；
+# 顺带把 `_write_json` / `_write_bytes` 的清理分支从 `except Exception` 收到
+# `except BaseException`（中止信号不继承 Exception，样板见《开发规范》落盘那一节）。
+run "写作导出文本原子落盘（_write_text / 兜 BaseException / 不留 .tmp）" "$PY" tests/check_write_text_atomic.py
 # 上一条管「这张封面该不该取、取回来怎么落盘」；这一条管「什么时候去取」。瀑布书架每批
 # 60 本而一屏只放得下十几本，而封面图原来是在游离节点上就赋好 src 的 —— 浏览器一拿到地址
 # 立刻就发请求，`loading="lazy"` 判的是「元素在文档里的位置」，游离元素没有位置，于是进书架

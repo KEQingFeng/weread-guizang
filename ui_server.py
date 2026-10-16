@@ -494,7 +494,8 @@ def _write_json(path, obj, mode=None):
 
     收口与响应那一侧的 `_encode_body` 同一把尺子：干净的路照旧 dump 一次；真编不动
     时才按书库那把 `book_layout.drop_lone_surrogates` 摘掉落单的坏码点重编（成对的
-    代理码点在 `json.load` 那一步已合成真字符，只有落单的才是垃圾）。任何写失败都把
+    代理码点在 `json.load` 那一步已合成真字符，只有落单的才是垃圾）。任何写失败（含
+    Ctrl-C 这类不继承 `Exception` 的中止信号）都把
     `.tmp` 收干净再抛，旧档始终是完整的 —— 与 mindmap / board 那两个写口的规矩一致。
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -512,7 +513,7 @@ def _write_json(path, obj, mode=None):
         except UnicodeEncodeError:
             _dump(book_layout.drop_lone_surrogates(obj))
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
         try:
             os.remove(tmp)
         except OSError:
@@ -540,8 +541,8 @@ def _write_bytes(path, raw):
         `getsize > 800` 认「有封面」，于是一张截断的图会被当成真封面一直用下去，
         用户看到的是永远打不开的破图，且再也不重取。
 
-    临时名带 pid + 随机串互不打架，写完 os.replace 原子顶替；失败把临时件收干净
-    再抛，旧档始终是完整的那一份。
+    临时名带 pid + 随机串互不打架，写完 os.replace 原子顶替；失败 / 中止（Ctrl-C 这类
+    不继承 `Exception` 的信号）都把临时件收干净再抛，旧档始终是完整的那一份。
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
@@ -549,7 +550,36 @@ def _write_bytes(path, raw):
         with open(tmp, "wb") as f:
             f.write(raw)
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _write_text(path, text):
+    """文本落盘的唯一出口（写作导出那份 `<标题>.md`）：先写临时件再原子顶替。
+
+    与上面两把是同一个形状、同一条护栏，只是负载是文本。写作那一格的导出
+    （`writer_export` 的 `kind == "md"`）原先直接 `open(dest, "w")` —— `"w"` 一进去就把
+    上一趟导出的那份截成 0 字节，导出的是整篇稿子，被停止键 / 关窗口 / 断电掐在写完
+    之前，导出文件夹里留下的就是一份「看着像完整的、其实断在句中」的 .md，旁边没有
+    任何标记说这一趟没导完。走「同目录临时件 + os.replace」之后，旧的那份在整个过程
+    里始终完整（要么旧稿完整、要么新稿完整），没走到改名就先把残件收掉再抛。
+
+    兜的是 `BaseException` 而不是 `Exception`：中止信号（`KeyboardInterrupt` /
+    `SystemExit`）不继承 `Exception`，只兜 `Exception` 会在 Ctrl-C 那条退出路径上把
+    半截件留在导出目录里 —— 这一族的尺子见《开发规范》，样板是 `book_notes.py:117`
+    那两把（`_tmp_name` + `_discard`，失败把残件收干净再抛）。
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text or "")
+        os.replace(tmp, path)
+    except BaseException:
         try:
             os.remove(tmp)
         except OSError:
@@ -1554,9 +1584,10 @@ def writer_export(kind, book_id, opts):
     elif kind == "md":
         # 也在导出文件夹里落一份，四颗按钮的文件才在同一个地方 ——
         # 单独走浏览器下载的话，「打开所在文件夹」翻不到它。
+        # 走 _write_text：整篇稿子可能很长，直写被掐断会留一份「看着像完整的」
+        # 半截导出，而它旁边没有任何标记说这一趟没导完。
         dest = os.path.join(DOWNLOAD_DIR, "%s.md" % stem)
-        with open(dest, "w", encoding="utf-8") as f:
-            f.write(src.get("text") or "")
+        _write_text(dest, src.get("text") or "")
     else:
         raise RuntimeError("没有这一种导出格式")
     return dest, note
