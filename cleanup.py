@@ -7,8 +7,8 @@
                 自己下的那份 ffmpeg、取书用的 Chromium。
   清除数据   —— 它自己攒下来的东西：登录态、书架清单、设置、阅读时长、
                 笔记索引、订阅条目、剪藏、封面、下载中间件、临时音频，
-                以及各本账写到一半留下的 `.tmp` 临时件（半截 `config.json`
-                里就带着接口 Key）。
+                以及各本账写到一半留下的 `.tmp` / `.part` 临时件（半截
+                `config.json` 里就带着接口 Key）。
 
 软件本体（那个 .app）不归这里管 —— 用户自己拖进废纸篓。**书也一概不动**：
 书在「文档/归藏」里，是用户的东西，不是这软件的缓存。
@@ -65,15 +65,24 @@ ROOT_FILES = (
 
 
 def _residue_re(name):
-    """账本 name 写到一半留下的临时件名：固定 `<name>.tmp` 或 `<name>.<pid>.<随机>.tmp`。
+    """账本 name 写到一半留下的临时件名：固定 `<name>.tmp` / `<name>.part` 或
+    `<name>.<pid>.<随机>.tmp`。
 
-    前者是 login 那一处至今还在写的固定名（`feed` / `platform_compat` 在第十七轮之前也还是这一
-    档，改名之前留下的残件同样长得这样），后者是
-    `ui_server._write_json` / `anna_state` / `book_notes` 这一族现版的尺子
-    （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。名字从
-    账本名派生、前后都锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
+    `.tmp` 那两档是「先写同目录临时件再 `os.replace`」这一族的尺子：固定名是 login
+    那一处至今还在写的（`feed` / `platform_compat` 在第十七轮之前也还是这一档，改名
+    之前留下的残件同样长得这样），带 pid + 随机串的是
+    `ui_server._write_json` / `anna_state` / `book_notes` 这一族现版的写法
+    （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。
+
+    `.part` 是**云同步取回**那一格的同一条尺子（`sync._write_atomic`：
+    `tmp = path + ".part"`，见 `PART_SUFFIXES`）。`_collect` 把 `cache/readstat.json` /
+    `library.json` / `notes_index.json` 也列进同步对，取回途中被强杀（断电、活动监视器
+    里杀进程）就会在 `cache/` 留下 `<账本>.part`。正常路径那一步 `except BaseException`
+    收得掉，只有「只有磁盘看得见」的这一档收不到；而书目录那一头早就是 `.tmp` / `.part`
+    同一把尺子（`ui_server.STRAY_PART_SUFFIX`），这里并齐。名字从账本名派生、前后都
+    锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
     """
-    return re.compile(r"^%s(?:\.tmp|\.\d+\.[0-9a-f]{8}\.tmp)$" % re.escape(name))
+    return re.compile(r"^%s(?:\.tmp|\.part|\.\d+\.[0-9a-f]{8}\.tmp)$" % re.escape(name))
 
 
 def _residue_in(directory, name):
