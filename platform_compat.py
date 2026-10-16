@@ -566,8 +566,21 @@ def is_our_backend(pid, script="ui_server.py"):
 
 
 def stop_backend(pid, wait=6.0):
-    """请那个旧后端退出：先 SIGTERM 让它自己收尾，等不到再硬杀。回是否真退了。"""
+    """请那个旧后端退出：先 SIGTERM 让它自己收尾，等不到再硬杀。回是否真退了。
+
+    发信号之前先**再看一眼它还是不是归藏的后端**。从 `take_over_port` 判出 pid 到
+    这一句真正动手，中间隔着一次 HTTP 问答、一次 `lsof`，以及下面这段最长 `wait` 秒
+    的等待 —— 那条进程完全可能已经自己退了，而 PID 被系统回收给了一个毫不相干的程序
+    （PID 回绕）。旧写法只信一开始那个判据：这一下就是拿 SIGTERM / SIGKILL 去打一个
+    陌生进程，硬杀那一手还带着它的整个进程组。与 `port_listener_pid` 的
+    「宁可不动，也不猜着杀」同一条规矩：认不出就不动手。
+    """
     if not pid:
+        return False
+    try:
+        if not is_our_backend(int(pid)):
+            return False
+    except Exception:
         return False
     try:
         os.kill(int(pid), signal.SIGTERM)
@@ -580,21 +593,54 @@ def stop_backend(pid, wait=6.0):
         except OSError:
             return True                 # 没了，好好走的
         time.sleep(0.2)
+    # 硬杀之前再确认一次：等的那几百毫秒里它也可能已经退了、PID 被分走。
+    try:
+        if not is_our_backend(int(pid)):
+            return False
+    except Exception:
+        return False
     hard_kill_pid(int(pid))
     return not _pid_alive(int(pid))
 
 
 def hard_kill_pid(pid):
-    """连子孙一起收 —— 只杀 python 不够，它开的浏览器还握着 profile 锁。"""
+    """连子孙一起收 —— 只杀 python 不够，它开的浏览器还握着 profile 锁。
+
+    这是全仓唯一会「杀别人」的函数，所以四条护栏写在最前面（宁可不动，也不猜着杀）：
+
+      · 只放行真正的整数 pid：`int(3.5)` 会**截断成 3**，把信号发给另一个进程；
+        `True`（布尔的 1）与 `"123"` 同理 —— 一个不是 pid 的值不该被「解释」成 pid。
+      · `pid <= 0` 一律不动：`os.getpgid(0)` 拿到的是**本进程自己的进程组**，
+        `killpg` 下去等于让归藏当场把自己连同整个 job 一起打死；负数更糟，
+        `os.kill(-1, SIGKILL)` 会发给用户能发的每一个进程。
+      · 目标就是本进程时不动（PID 回绕到自己的极端情形）。
+      · 目标与自己在同一进程组时只杀它一个，不做 `killpg` —— 否则那句
+        「连子孙一起收」会顺手把归藏自己也收走。真正该连子孙一起收的场景是
+        任务子进程（`spawn_kwargs` 给它们 `start_new_session` 另起了一组），
+        不受影响。
+    """
+    if isinstance(pid, bool) or not isinstance(pid, (int, float)):
+        return
+    try:
+        p = int(pid)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if p != pid:                   # 小数 / NaN / inf：截出来的不是它自己
+        return
+    if p <= 0 or p == os.getpid():
+        return
     try:
         if IS_WIN:
-            subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+            subprocess.run(["taskkill", "/PID", str(p), "/T", "/F"],
                            capture_output=True, timeout=20)
-        else:
-            os.killpg(os.getpgid(int(pid)), signal.SIGKILL)
+            return
+        if os.getpgid(p) == os.getpgid(os.getpid()):
+            os.kill(p, signal.SIGKILL)
+            return
+        os.killpg(os.getpgid(p), signal.SIGKILL)
     except Exception:
         try:
-            os.kill(int(pid), signal.SIGKILL)
+            os.kill(p, signal.SIGKILL)
         except Exception:
             pass
 
