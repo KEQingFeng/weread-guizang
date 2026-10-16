@@ -358,13 +358,17 @@ with sync_playwright() as pw:
     page.keyboard.press("Enter")
     page.type("#wrTextIn", "这一行要当标题", delay=8)
     page.wait_for_timeout(300)
-    page.click('#wrTools button[data-t="h1"]')
+    # 1.2.2 起段落样式收成一颗钮 + 一张弹层：先点开那颗「这段是什么」，
+    # 再点弹层里的「标题一」。按钮本身还在（data-t 没变），只是默认不摊开。
+    page.click("#wrStyleB")
+    page.wait_for_selector("#wrTools .wstylepop.open", timeout=4000)
+    page.click('.wstylepop button[data-t="h1"]')
     page.wait_for_timeout(300)
     chk("工具条：点「标题一」这一行真的成了标题（不用再自己数 #）",
         page.locator("#wrTextIn h1").count() == 1
         and "# 这一行要当标题" in md(page), md(page)[-90:])
     chk("工具条：哪一颗管着当前这一行，那颗就亮着（不亮就等于用户不知道现在是标题）",
-        page.locator('#wrTools button[data-t="h1"].on').count() == 1)
+        page.locator('#wrTools button[data-t="h1"].on, #wrStyleB.on').count() >= 1)
 
     page.keyboard.press("Enter")
     page.type("#wrTextIn", "加粗与两个颜色", delay=8)
@@ -402,7 +406,9 @@ with sync_playwright() as pw:
 
     page.keyboard.press("Enter")
     page.wait_for_timeout(200)
-    page.click('#wrTools button[data-t="table"]')
+    page.click("#wrPlusB")
+    page.wait_for_selector("#wrTools .winspop.open", timeout=4000)
+    page.click('.winspop button[data-t="table"]')
     page.wait_for_timeout(250)
     cells = page.locator('#wrTools .edpop.open .tb i')
     chk("工具条：「表格」点开的是那张几乘几的矩阵（点几乘几就插几乘几）",
@@ -430,7 +436,9 @@ with sync_playwright() as pw:
           const cell = el && el.closest ? el.closest('td,th') : null;
           return !!(cell && document.querySelector('#wrTextIn').contains(cell));
         }"""))
-    page.click('#wrTools button[data-t="task"]')
+    page.click("#wrStyleB")
+    page.wait_for_selector("#wrTools .wstylepop.open", timeout=4000)
+    page.click('.wstylepop button[data-t="task"]')
     page.wait_for_timeout(300)
     chk("表格里点「待办」：表格没被拍扁，只说一句（宁可按不动，不能把用户搭的结构弄散）",
         page.locator("#wrTextIn table").count() == 1
@@ -444,7 +452,9 @@ with sync_playwright() as pw:
     page.wait_for_timeout(200)
     page.type("#wrTextIn", "买一台能写长的机器", delay=8)
     page.wait_for_timeout(300)
-    page.click('#wrTools button[data-t="task"]')
+    page.click("#wrStyleB")
+    page.wait_for_selector("#wrTools .wstylepop.open", timeout=4000)
+    page.click('.wstylepop button[data-t="task"]')
     page.wait_for_timeout(300)
     chk("工具条：「待办」给这一行装上能勾的方框",
         page.locator("#wrTextIn li.task").count() == 1
@@ -498,14 +508,18 @@ with sync_playwright() as pw:
         LAST_STYLE(page, "b,strong") >= 1 and "**这几个字要被清干净**" in md(page),
         md(page)[-90:])
     select_last()
-    page.click('#wrTools button[data-t="clear"]')
+    page.click("#wrPlusB")
+    page.wait_for_selector("#wrTools .winspop.open", timeout=4000)
+    page.click('.winspop button[data-t="clear"]')
     page.wait_for_timeout(250)
     chk("工具条：「清格式」只剥样式，字一个不动（清成空白是最怕的一种「帮忙」）",
         LAST_STYLE(page, "b,strong,span[style]") == 0
         and "这几个字要被清干净" in md(page), md(page)[-90:])
 
     page.keyboard.press("Enter")
-    page.click('#wrTools button[data-t="hr"]')
+    page.click("#wrPlusB")
+    page.wait_for_selector("#wrTools .winspop.open", timeout=4000)
+    page.click('.winspop button[data-t="hr"]')
     page.wait_for_timeout(300)
     chk("工具条：「分隔」落一条横线，稿子里是那三个减号",
         page.locator("#wrTextIn hr").count() == 1

@@ -1251,13 +1251,25 @@
   .fewrap > .felist{border-right:1px solid var(--line)}
   .fewrap.nonav .feside{opacity:0; pointer-events:none; overflow:hidden}
   /* 顶栏：折叠按钮 / 计数 / 筛选态都在这一条里，跟着各自那一栏滚的话会晃出视野 */
-  .fehd{flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-    padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper);
-    font-size:11.5px; color:var(--ink-3)}
-  /* 栏名「看哪些」和它后面那几颗钮住同一行。栏宽只有 228，四颗钮加起来的自然宽度
-     刚好压过这一行 —— 不给 nowrap + flex:none，栏名就会被挤成一个字一行。 */
-  .fehd .t{font-size:12px; font-weight:600; color:var(--ink-2); flex:none; white-space:nowrap}
-  .fehd .grow{flex:1}
+  /* 栏头：「看哪些」这一行原来和四颗钮挤在同一个 flex-wrap 里，按钮的 26px 撑起栏高，
+     19px 的标题只能垂直居中 —— 于是它和按钮里的字看起来不在一条基线上（用户说的
+     「排版有偏移」）。现在分两区：左边标题自己一条基线，右边按钮一组，各不参与收缩；
+     栏高改由 30px 的分区定，标题和按钮都在同一基线上排。 */
+  .fehd{flex:none; display:flex; align-items:stretch; gap:10px;
+    padding:0; border-bottom:1px solid var(--line); background:var(--paper)}
+  /* .fetit 是整块栏头区（带上下 padding，高度 48），.ftx 才是「标题这几个字」。
+     两层分开是因为门禁量的是「这几个字占几行」：量外层会把它连 padding 一起算，
+     48 / 21.75 ≈ 2，凭空判成竖排。文字那一层单独 nowrap + 显式行高，才量得出「一行」。 */
+  .fehd .fetit{display:flex; align-items:baseline; gap:7px; flex:1 1 auto; min-width:0;
+    padding:14px 4px 9px 14px; font-size:15px; font-weight:600;
+    color:var(--ink); letter-spacing:.01em;
+    overflow:hidden; text-overflow:ellipsis}
+  .fehd .ftx{white-space:nowrap; line-height:1.45; overflow:hidden; text-overflow:ellipsis}
+  .fehd .fetit .cnt{font-size:10.5px; font-weight:500; color:var(--ink-3);
+    font-variant-numeric:tabular-nums; letter-spacing:.02em;
+    flex:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
+  .fehd .feact{display:flex; align-items:center; gap:4px; flex:none;
+    padding:0 12px 0 4px}
   .fehd .ic{
     min-width:var(--fe-ctl); height:var(--fe-ctl); flex:none; padding:0 8px; border-radius:8px;
     cursor:pointer;
@@ -1597,53 +1609,88 @@
   /* 任务区（能力灯 + 贴链接 + 进度）占上头一块，长视频转完的日志也不会把工作台顶出视野 */
   .vttask{flex:none; min-height:0; max-height:46%; overflow:auto; overscroll-behavior:contain}
   .vtwork{flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--line)}
-  /* 结果区的分区标题：一句话交代这块是干什么的、怎么用，下面的工具条就不再挤一句说明 */
-  .vtsec{flex:none; display:flex; align-items:baseline; gap:9px; flex-wrap:wrap;
-    padding:10px 12px 0; background:var(--paper)}
-  .vtsec b{font-size:12.5px; font-weight:600; color:var(--ink)}
-  .vtsec span{font-size:11px; color:var(--ink-3)}
-  .vttb{flex:none; display:flex; align-items:center; gap:7px; flex-wrap:wrap;
-    padding:9px 12px; border-bottom:1px solid var(--line); background:var(--paper)}
+  /* 结果区分区标题：原来是「粗体小标题 + 一行灰字说明」，压在一屏按钮上头像旧系统的
+     分组框。现在只留一句陈述（段数 / 筛选态），字号提到正文一档，说明改由 tooltip 与
+     状态栏承担 —— 标题越重，下面的内容就越显轻。 */
+  .vtsec{flex:none; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+    padding:13px 14px 9px; background:var(--paper)}
+  .vtsec b{font-size:13px; font-weight:600; color:var(--ink); letter-spacing:.01em}
+  .vtsec span{font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .vtsec .grow{flex:1}
+  /* 工具条：原来七个控件（下拉 + 三个筛选框 + 两颗钮 + 计数）横摊成一行，像表单不像工具。
+     现在按「挑书 / 筛 / 动作」分三簇，簇间拉开间距、各自收在一颗底子里，输入框同高 28。
+     存 / 重建 / 导出三颗是「动这块转写」的动作，收在最右同一簇里，中间给计数让位。 */
+  .vttb{flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:0 14px 12px; background:var(--paper)}
   .vttb .grow{flex:1}
-  .vttb .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
-  .vttb input.f,.vttb select.f{width:auto; min-width:0}
-  .vttb input.st{width:76px}
-  #vRows{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain}
-  .vtrow{display:grid; grid-template-columns:56px 84px minmax(0,1fr) auto; gap:9px;
-    align-items:start; padding:11px 13px; border-bottom:1px solid var(--line);
-    font-size:12.5px; line-height:1.72}
-  .vtrow:hover{background:var(--paper-2)}
-  .vtrow .ts{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums;
-    padding-top:2px; cursor:pointer; border-radius:6px; transition:color .15s ease}
-  .vtrow .ts:hover{color:var(--accent)}
-  .vtrow .ts.none{cursor:default}
-  .vtrow .spk{font-size:11px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis;
-    white-space:nowrap; padding-top:2px}
-  .vtrow .tx{color:var(--ink-2); word-break:break-word; white-space:pre-wrap; min-width:0}
-  .vtrow .act{display:flex; gap:5px; opacity:0; transition:opacity .15s ease}
-  .vtrow:hover .act,.vtrow.edit .act{opacity:1}
-  @media (prefers-reduced-motion:reduce){ .vtrow .act{opacity:1} }
-  /* 行上的「原片 / 删 / 插」和左栏那个「读」原来挂在 22px 那一档（行内小钮）。
-     可它们是这两栏里唯一的落点，旁边那排工具钮却是 26~28px —— 一屏里三种身高，
-     鼠标扫过去整排按钮的份量忽轻忽重。拉到「正常钮」26px 这一档，与工具栏对齐。 */
-  .vtrow .act button,.vtbook .rd{height:26px; padding:0 10px; border-radius:8px; cursor:pointer;
-    font:inherit; font-size:11px; line-height:1; border:1px solid var(--line-2);
-    background:transparent; color:var(--ink-3); flex:none;
+  .vttb .vgrp{display:flex; align-items:center; gap:5px; flex-wrap:wrap; flex:none}
+  .vttb .cnt{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums;
+    white-space:nowrap}
+  .vttb .sep{width:1px; height:18px; background:var(--line-2); flex:none}
+  .vttb input.f,.vttb select.f{width:auto; min-width:0;
+    height:28px; padding:0 10px; border-radius:9px; font:inherit; font-size:12px;
+    border:1px solid var(--line-2); background:transparent; color:var(--ink);
+    transition:border-color .15s ease, box-shadow .15s ease}
+  .vttb input.f:focus,.vttb select.f:focus{border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft); outline:none}
+  .vttb input.st{width:74px; font-variant-numeric:tabular-nums}
+  /* 工具条上的小动作（筛 / 清空 / 展开左栏）统一成 28 见方的圆角钮，和输入框同高 */
+  .vttb .ic{min-width:28px; height:28px; flex:none; padding:0 10px; border-radius:9px;
+    cursor:pointer; border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
+    display:inline-flex; align-items:center; justify-content:center; gap:5px;
+    font:inherit; font-size:11.5px; line-height:1;
     transition:background .15s ease, color .15s ease, transform .12s ease}
-  .vtrow .act button:hover,.vtbook .rd:hover{background:var(--accent-soft); color:var(--accent)}
-  .vtrow .act button:active,.vtbook .rd:active{transform:scale(.94)}
+  .vttb .ic:hover{background:var(--accent-soft); color:var(--accent); border-color:transparent}
+  .vttb .ic:active{transform:scale(.94)}
+  .vttb .ic:disabled{opacity:.4; cursor:default}
+  .vttb .deed{height:28px}
+  #vRows{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:0 0 8px}
+  /* 段落不再是「表格行」——四列网格 + 每行一道分割线，一屏看过去全是格子，像旧后台。
+     改成一张张轻卡片：左右留白、圆角、悬停才浮起，段落与段落之间靠间距分开，
+     不再用横线「切」它们。时间戳从「一列」降成卡片里的一行小字（省下的宽度给正文）。 */
+  .vtrow{display:block; margin:0 12px 8px; padding:12px 14px 11px; border-radius:12px;
+    background:var(--paper); border:1px solid var(--line-2);
+    transition:background .15s ease, border-color .15s ease, box-shadow .15s ease}
+  .vtrow:hover{background:var(--paper-2); border-color:var(--line); box-shadow:0 1px 3px rgba(20,30,45,.05)}
+  /* 卡片里那一行元信息：时间戳 + 说话人胶囊。它们不在自己的网格列里了，
+     所以 gap 由这一行自己管；空说话人直接不渲染（见 vtRowNode）。 */
+  .vtmeta{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
+  .vtrow .ts{display:inline-flex; align-items:center; gap:5px; font-size:11px;
+    color:var(--ink-3); font-variant-numeric:tabular-nums; cursor:pointer; border-radius:6px;
+    padding:1px 5px; margin-left:-5px; transition:color .15s ease, background .15s ease}
+  .vtrow .ts:hover{color:var(--accent); background:var(--accent-soft)}
+  .vtrow .ts.none{cursor:default}
+  .vtrow .ts.none:hover{color:var(--ink-3); background:transparent}
+  /* 说话人做成小胶囊，紧跟时间戳：两个都是「这一段是谁、在什么时候说的」，
+     原来分成两列，中间的空隙比它们本身还宽。 */
+  .vtrow .spk{display:inline-flex; align-items:center; font-size:10.5px; color:var(--ink-3);
+    background:var(--paper-inset); border:1px solid var(--line-2); border-radius:999px;
+    padding:2px 8px; line-height:1.3}
+  .vtrow .spk:empty{display:none}
+  .vtrow .tx{margin-top:6px; color:var(--ink); word-break:break-word; white-space:pre-wrap;
+    font-size:13px; line-height:1.78; min-width:0}
+  .vtrow .tx.blank{color:var(--ink-3); font-style:italic}
+  /* 卡片动作收到第二行，和正文拉开：原来贴在同一行右边，挤得正文只能占六成宽度 */
+  .vtrow .act{display:flex; gap:6px; margin-top:9px; opacity:1}
+  .vtrow .act button{height:24px; padding:0 10px; border-radius:8px; cursor:pointer;
+    font:inherit; font-size:11px; line-height:1; border:1px solid transparent;
+    background:var(--paper-inset); color:var(--ink-3); flex:none;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .vtrow:hover .act button{background:var(--surface-2); color:var(--ink-2)}
+  .vtrow .act button:hover{background:var(--accent-soft); color:var(--accent)}
+  .vtrow .act button:active{transform:scale(.94)}
   .vtrow .act button.danger:hover{background:rgba(200,85,74,.12); color:var(--err)}
   .vtrow.gone .tx{text-decoration:line-through; color:var(--ink-3)}
-  .vtrow.gone{background:rgba(200,85,74,.06)}
-  .vtrow.hit .tx{background:var(--accent-soft)}
-  .vtrow textarea{width:100%; min-height:58px; padding:8px 10px; border-radius:9px; outline:none;
-    border:1px solid var(--accent); background:var(--surface-2); font:inherit; font-size:12.5px;
-    line-height:1.72; color:var(--ink); resize:vertical}
+  .vtrow.gone{background:rgba(200,85,74,.05); border-color:rgba(200,85,74,.18)}
+  .vtrow.hit .tx{background:var(--accent-soft); border-radius:5px}
+  .vtrow.new{border-color:color-mix(in srgb, var(--accent) 40%, var(--line-2))}
+  .vtrow textarea{width:100%; min-height:58px; padding:9px 11px; border-radius:10px; outline:none;
+    border:1px solid var(--accent); background:var(--surface-2); font:inherit; font-size:13px;
+    line-height:1.78; color:var(--ink); resize:vertical}
   .vtrow textarea::placeholder,.vtrow input.f::placeholder{color:var(--ink-3)}
-  /* 改字的这一格：正文输入 + 说话人 + 一行「记好 / 先不改」。原来这三样没有自己的样式，
-     挤在行尾一个 auto 宽的格里，提示字和按钮都发灰看不清。整条挪到正文下面占满一行。 */
-  .vtrowbar{grid-column:2 / -1; display:flex; align-items:center; gap:7px; flex-wrap:wrap;
-    margin-top:7px; padding-top:8px; border-top:1px dashed var(--line)}
+  /* 改字的这一格：正文输入 + 说话人 + 一行「记好 / 先不改」。 */
+  .vtrowbar{display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+    margin-top:9px; padding-top:9px; border-top:1px dashed var(--line)}
   .vtrowbar .cnt{margin-right:auto; font-size:11px; color:var(--ink-3)}
   .vtrowbar button{height:26px; padding:0 11px; border-radius:8px; cursor:pointer;
     font:inherit; font-size:11px; line-height:1; border:1px solid var(--line-2);
@@ -1651,9 +1698,9 @@
     transition:background .15s ease, color .15s ease, transform .12s ease}
   .vtrowbar button:hover{background:var(--accent-soft); color:var(--accent)}
   .vtrowbar button:active{transform:scale(.94)}
-  .vtrow.new{background:rgba(47,157,95,.07)}
-  .vtmore{padding:11px 12px; display:flex; justify-content:center}
-  .vtexp{display:flex; gap:8px; flex-wrap:wrap; padding:10px 12px; border-top:1px solid var(--line)}
+  .vtrow.new{border-color:color-mix(in srgb, var(--accent) 45%, var(--line-2))}
+  .vtexp{display:flex; gap:8px; flex-wrap:wrap; padding:11px 14px; border-top:1px solid var(--line);
+    background:var(--paper)}
   .vtexp a,.vtexp span{display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px;
     border-radius:8px; border:1px solid var(--line-2); background:var(--paper);
     font-size:11px; color:var(--ink-2); text-decoration:none;
@@ -1675,8 +1722,7 @@
     .vtwrap > .vtmain{overflow:visible}
     .vttask{max-height:none}
     #vRows{max-height:60vh}
-    .vtrow{grid-template-columns:52px minmax(0,1fr) auto}
-    .vtrow .spk{display:none}
+    /* 段落本来就是单列卡片，窄窗不用再改网格；说话人藏在胶囊里，也不占宽 */
     /* 展开左栏时它占满整宽：书名放到三行、状态灯之间收紧，别让标题和三个小灯挤成一坨 */
     .vtbook{padding:9px 11px}
     .vtbook .nm{-webkit-line-clamp:3}
@@ -2538,10 +2584,15 @@
   .mmtip{font-size:11px; color:var(--ink-3); line-height:1.6}
 
   /* ── 画板（边看书边画）───────────────────────────────────────
-     左边一块板一张卡，右边是 fabric 的画布。纸面色打在包装 div 上（CSS 画的格/点/线），
-     画布自己只带一个底色 —— 导出的是「干净的纸 + 你画的墨」，辅助格线不进导出物，
-     这点在工具条上直接写明白，不让人猜。 */
-  .bdwrap{flex:1; min-height:0; display:grid; grid-template-columns:198px minmax(0,1fr);
+     铺满视口的两栏工作台：左栏常驻书籍列表，右边是一张远超屏幕的无限画布。
+     「无限」的做法不是 canvas 无限大（那根本没有上限，DOM 也会失控），而是一张逻辑上
+     很大的固定画布 + 视口平移：点住拖动、触控板双指、滚轮都是改 fabric 的
+     viewportTransform，画布上的对象坐标一动不动 —— 画的笔不会因为平移而跑位。 */
+  .ntlay.full{padding:0; place-items:stretch}
+  .ntlay.full>section{width:100%; max-width:none; max-height:none; border-radius:0;
+    border-left:0; border-right:0; border-top:0}
+  #bdLayer>section{height:100%}
+  .bdwrap{flex:1; min-height:0; display:grid; grid-template-columns:238px minmax(0,1fr);
     gap:0; overflow:hidden}
   .bdsid{min-height:0; overflow:auto; border-right:1px solid var(--line);
     background:var(--surface-1); padding:9px; scrollbar-width:thin}
@@ -2556,23 +2607,56 @@
   .bdrow .ms{flex:none; display:inline-flex; gap:3px; font-size:9.5px; color:var(--ink-3)}
   .bdrow .tm{flex:none; font-size:10px; color:var(--ink-3)}
   .bdempty{font-size:11.5px; color:var(--ink-3); line-height:1.7; padding:8px 4px}
+  /* 左栏的书分组（原来只有「这一本书的板」）：书一格，下面压着它的板，
+     点书本身浮出正文。 */
+  .bdbk{margin:0 0 7px}
+  .bdbk>.bdbkhead{display:flex; align-items:center; gap:6px; width:100%; text-align:left;
+    border:1px solid transparent; border-radius:9px; background:transparent; color:var(--ink-2);
+    font:inherit; font-size:12px; padding:6px 8px; cursor:pointer;
+    transition:background .14s ease, border-color .14s ease}
+  .bdbk>.bdbkhead:hover{background:var(--surface-2)}
+  .bdbk.on>.bdbkhead{background:var(--paper); border-color:var(--line-2); color:var(--ink);
+    box-shadow:0 1px 3px rgba(20,30,45,.07)}
+  .bdbk>.bdbkhead .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap}
+  .bdbk>.bdbkhead .n{flex:none; font-size:10px; color:var(--ink-3);
+    font-variant-numeric:tabular-nums}
+  .bdbk.list{display:none}          /* 变成本书单时（「换本书」搜出来那一圈）*/
+  .bdbk.list.on{display:block}
   /* 侧栏上下两组操作钮：新建靠顶，改名/删掉跟着卡片列表沉底，中间留白把「列表」隔开。 */
   .bdsid .bdops{display:flex; align-items:center; gap:5px; margin:0 0 8px}
   .bdsid .bdops .grow{flex:1}
   .bdsid .bdops .deed{font-size:11px; padding:5px 8px}
   .bdsid .bdops .mmtip{font-size:10px; color:var(--ink-3); flex:none}
   .bdsid .bdops-end{margin:10px 0 0}
+  /* 类别小标题：「这一本」「换一本书」 */
+  .bdsid .bdgrp{font-size:10.5px; color:var(--ink-3); letter-spacing:.04em;
+    padding:8px 4px 4px; display:flex; align-items:center; gap:6px}
+  .bdsid .bdgrp .grow{flex:1}
   .bdmain{min-width:0; display:flex; flex-direction:column}
+  /* 顶头一行：书名 + 那几颗「并进笔记 / 存图 / 关」。原来在 .edhd 里，现在左栏顶掉了它。 */
+  .bdhead{flex:none; display:flex; align-items:center; gap:8px; padding:9px 13px;
+    border-bottom:1px solid var(--line)}
+  .bdhead .edttl{flex:none; font-size:13.5px; font-weight:600; color:var(--ink);
+    max-width:44%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .bdhead .grow{flex:1}
+  /* 工具条现在也是图标条（笔 / 荧光 / 直线 / 箭头… 全是图形，不写字）。
+     一颗颗按 26×26 排，组间留白而非竖线，眼睛找得到边界。 */
   .bdtools{display:flex; align-items:center; gap:3px; flex-wrap:wrap; flex:none;
     padding:7px 11px; border-bottom:1px solid var(--line); background:var(--surface-1)}
   .bdtools button{border:1px solid transparent; border-radius:8px; background:transparent;
     color:var(--ink-2); font:inherit; font-size:12px; padding:4px 9px; cursor:pointer;
+    width:26px; height:26px; padding:0; display:inline-flex; align-items:center;
+    justify-content:center;
     transition:background .14s ease, color .14s ease, transform .1s ease}
+  .bdtools button.svg{padding:0}
   .bdtools button:hover{background:var(--surface-2); color:var(--ink)}
   .bdtools button:active{transform:scale(.94)}
   .bdtools button.on{background:var(--accent-soft); color:var(--accent); border-color:transparent}
   .bdtools button:disabled{opacity:.4; cursor:default}
-  .bdtools .sep{display:block; width:1px; height:16px; background:var(--line-2); margin:0 5px; flex:none}
+  .bdtools button svg{width:19px; height:19px; display:block}
+  .bdtools .sep{display:block; width:1px; height:16px; background:var(--line-2); margin:0 6px;
+    flex:none}
   .bdtools .sp{flex:1}
   .bdtools .dot{min-width:24px; width:24px; padding:0; display:inline-flex;
     align-items:center; justify-content:center; position:relative}
@@ -2586,11 +2670,16 @@
   /* 笔画粗细钮：里面是一颗随粗细变大的实心点，比写「细/中/粗」三个字直观。
      点用 currentColor，选中态（.on 把字色换成主色）它跟着换，不用另写一条规则。 */
   .bdtools .wdot{display:block; border-radius:99px; background:currentColor; flex:none}
-  .bdcut{position:relative; flex:1; min-height:0; padding:14px; overflow:hidden;
-    background:var(--paper-2)}
-  .bdpaper{width:100%; height:100%; border:1px solid var(--line); border-radius:12px;
-    overflow:hidden; background:var(--paper); position:relative;
-    box-shadow:0 2px 14px rgba(20,30,45,.07)}
+  /* 画布区：.bdcut 是「窗口」（overflow:hidden），.bdpaper 才是那张大纸。
+     纸的逻辑尺寸由 JS 写进 fabric（BD_PAPER_W/H），跟着纸一起平移的是 CSS 渐变格线，
+     所以「挪画布」时格线跟着走 —— 纸的整体感才立得住。
+     窗口变了不再改纸的尺寸：画的笔留在原来的坐标上。 */
+  .bdcut{position:relative; flex:1; min-height:0; overflow:hidden;
+    background:var(--paper-2); touch-action:none; overscroll-behavior:contain}
+  .bdpaper{position:absolute; left:0; top:0; border:1px solid var(--line);
+    border-radius:12px; background:var(--paper);
+    overflow:hidden; transform-origin:0 0;
+    box-shadow:0 2px 18px rgba(20,30,45,.08)}
   .bdpaper[data-paper="grid"]{background-image:linear-gradient(to right, rgba(20,30,45,.06) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(20,30,45,.06) 1px, transparent 1px); background-size:24px 24px}
   .bdpaper[data-paper="dots"]{background-image:radial-gradient(rgba(20,30,45,.14) 1.1px, transparent 1.1px);
@@ -2598,10 +2687,50 @@
   .bdpaper[data-paper="lines"]{background-image:linear-gradient(to bottom, rgba(20,30,45,.07) 1px, transparent 1px);
     background-size:28px 28px}
   .bdpaper[data-paper="dark"]{background:#14171c; border-color:#262b33}
-  /* fabric 会把我放进去的那张 <canvas> 包进一个 .canvas-container（它自己写死
-     position:relative + 宽高），里面两张图都由 fabric inline 定位：底下那张画内容，
-     上面那张 .upper-canvas 接鼠标。所以这里不需要重排它们，只堵一个默认值：
-     canvas 是 inline-replaced，留基线空白会让纸面凭空多出几像素。 */
+  /* 正文浮层：从书列表点一本书浮出来，压在画布左上角，不抢笔（默认收着）。
+     不吃画布的指针事件之外的事：这一层自己管自己那一块的滚动。 */
+  .bdread{position:absolute; right:16px; bottom:16px; width:min(460px,52%);
+    max-height:min(66%,560px); display:flex; flex-direction:column; z-index:3;
+    border:1px solid var(--line-2); border-radius:14px; overflow:hidden;
+    background:var(--paper); box-shadow:0 12px 40px rgba(20,30,45,.18)}
+  .bdread[hidden]{display:none}
+  .bdrdhd{flex:none; display:flex; align-items:center; gap:7px; padding:7px 9px;
+    border-bottom:1px solid var(--line); background:var(--surface-1)}
+  .bdrdhd .bdrdttl{flex:1; min-width:0; font-size:12px; font-weight:600; color:var(--ink);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .bdrdhd .grow{flex:1}
+  .bdrdhd .deed{font-size:11px; padding:4px 8px; height:24px}
+  .bdrdbody{flex:1; min-height:0; overflow:auto; overscroll-behavior:contain;
+    padding:14px 16px 18px; font-size:13px; line-height:1.8; color:var(--ink-2)}
+  .bdrdbody>*:first-child{margin-top:0}
+  .bdrdbody>*:last-child{margin-bottom:0}
+  .bdrdbody p{margin:0 0 .7em}
+  .bdrdbody h1,.bdrdbody h2,.bdrdbody h3{color:var(--ink); line-height:1.4;
+    margin:1.1em 0 .5em}
+  .bdrdbody h1{font-size:1.35em} .bdrdbody h2{font-size:1.2em} .bdrdbody h3{font-size:1.08em}
+  .bdrdbody img{max-width:100%; display:block; border-radius:8px; margin:.6em 0}
+  /* 正文浮层底下那两颗翻章：贴在正文末尾，不是工具条上的常驻钮。 */
+  .bdrdnav{display:flex; gap:7px; margin-top:14px; padding-top:10px;
+    border-top:1px dashed var(--line-2)}
+  .bdrdnav button{height:24px; padding:0 10px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
+    font:inherit; font-size:11px; line-height:1;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .bdrdnav button:hover{background:var(--accent-soft); color:var(--accent)}
+  .bdrdnav button:active{transform:scale(.94)}
+  /* 按住空格挪画布：整只手变成抓手，按下时变成抓着。 */
+  body.bdpanning .bdcut,body.bdpanning .bdcut canvas{cursor:grab !important}
+  body.bdpanning .bdcut:active,body.bdpanning .bdcut canvas:active{cursor:grabbing !important}
+  /* 触控板双指平移不带走页面：手势落在了画布上，就别再让整页跟着滚。 */
+  .bdcut{touch-action:none}
+  /* 窄窗：左栏让位给画布（238 → 180），正文浮层从右下角改成贴底整条。 */
+  @media (max-width:860px){
+    .bdwrap{grid-template-columns:180px minmax(0,1fr)}
+    .bdread{width:auto; left:12px; right:12px; max-height:52%}
+  }
+  /* fabric 会把 <canvas> 包进一个 .canvas-container，自己按「画布尺寸」写 width/height，
+     平移走 viewportTransform 而不是改这个尺寸 —— 所以这里不碰它俩的宽度。
+     只堵一个默认值：canvas 是 inline-replaced，留基线空白会让纸面凭空多出几像素。 */
   .bdpaper canvas{display:block}
   .bdfoot #bdInfo{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .bdfoot{flex:none; display:flex; align-items:center; gap:9px; padding:7px 13px;
@@ -3587,8 +3716,9 @@
 
   /* ── 写作台的两件外壳：工具条与那张纸 ───────────────────
      工具条的皮从笔记编辑器那颗 .edtools 借，但它在正文卡外面单独一条，
-     留着只朝下的 border-bottom 就像半截表格 —— 这里自己收一圈边、圆成一颗。 */
-  .wrmain .edtools{flex:0 1 auto; border:1px solid var(--line-2); border-radius:14px}
+     留着只朝下的 border-bottom 就像半截表格 —— 这里自己收一圈边、圆成一颗。
+     （外壳这一条和下面「写作工具条：三摊」里那条是同一件事，别写两遍：
+      后一条带着 padding / gap，两条都在时按层级后者赢，但读者会以为是两套皮。） */
   /* 占位语是 CSS 画的字，不进 DOM 也就不进稿子；整层不吃鼠标，点它等于点正文。
      定位原点在那一块的 padding box 上，所以偏移就是正文那两边距，一字不差。 */
   .wrtext.wrbare{position:relative}
@@ -3636,6 +3766,53 @@
   .wrtext u{text-decoration:underline}
   .wrtext s{text-decoration:line-through}
 
+  /* ── 写作工具条：三摊，不是二十颗摊一行 ─────────────────────
+     用户原话是「不要把它们堆叠在一起，不要从左到右排完再排到下面，排版要有理念」。
+     理念就是一句话一刀：
+       · 第一摊「这段是什么」—— 段落样式是单选，收成一颗钮 + 一张弹层，省地方也说得清；
+       · 第二摊「这几个字什么样」—— 行内格式，最常用的七颗，全是图形，摊在最顺手处；
+       · 第三摊「往这儿放点什么」—— 低频插入，收进一颗「+」，要用了才展开。
+     三摊之间用间距分组，不用竖线（一排小方块加竖线还是像旧系统）。
+     图标一律 20×20、1.5 描边、currentColor，和顶栏那几颗同一套线形。 */
+  .wrmain .edtools{flex:0 1 auto; border:1px solid var(--line-2); border-radius:14px;
+    padding:5px 8px; gap:4px; align-items:center}
+  .wrmain .edtools .sep{display:none}     /* 不再用竖线分组 */
+  /* .wbwrap：二级浮层的宿主。二级浮层（色板 / 底色 / 表格矩阵）一律挂在这上面，
+     不挂在弹层内部 —— 挂在弹层里的话，弹层一收（切 kind 时先 wrPopHide）矩阵跟着
+     display:none，用户点了表格什么也没发生。这条 position:relative 是那份 .edpop
+     定位的根（那边只认 .edgrid，这里是同一件事的另一半）。 */
+  .wrmain .edtools .wbwrap{position:relative; display:inline-flex; flex:none}
+  .wrmain .edtools .wgrp{display:inline-flex; align-items:center; gap:2px; flex:none}
+  /* 一颗工具钮：26×26 方钮，图标 17px。悬停只是换底色，不改尺寸。 */
+  .wrmain .edtools .wb{width:26px; height:26px; padding:0; border:1px solid transparent;
+    border-radius:8px; background:transparent; color:var(--ink-2); cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center;
+    transition:background .14s ease, color .14s ease, transform .12s ease}
+  .wrmain .edtools .wb svg{width:17px; height:17px; display:block}
+  .wrmain .edtools .wb:hover{background:var(--surface-2); color:var(--ink)}
+  .wrmain .edtools .wb:active{transform:scale(.94)}
+  .wrmain .edtools .wb.on{background:var(--accent-soft); color:var(--accent)}
+  .wrmain .edtools .wb:disabled{opacity:.4; cursor:default}
+  /* 段落样式那一颗宽一点（要放得下图标 + 那颗小三角），「看 Markdown」同理 */
+  .wrmain .edtools .wstyle{padding:0 5px 0 7px; gap:2px}
+  /* 段落样式那颗底下的小三角：记号「这儿有得选」，不参与布局 */
+  .wrmain .edtools .wstyle::after{content:""; width:0; height:0; flex:none;
+    border-left:3.2px solid transparent; border-right:3.2px solid transparent;
+    border-top:3.6px solid currentColor; opacity:.5}
+  .wrmain .edtools .wsole{margin-left:auto}
+  /* 弹层：底色与圆角跟笔记编辑器那颗 .edpop 是同一件东西，尺寸各按内容定 */
+  .wrmain .edtools .wpop{position:absolute; top:calc(100% + 6px); left:0; z-index:30;
+    min-width:168px; padding:7px; border:1px solid var(--line-2); border-radius:12px;
+    background:var(--paper); box-shadow:0 8px 28px rgba(20,30,45,.14);
+    display:none; flex-direction:column; gap:6px}
+  .wrmain .edtools .wpop.open{display:flex}
+  .wrmain .edtools .wpop.winspop{left:auto; right:0}
+  .wrmain .edtools .wpop .wphd{font-size:10.5px; color:var(--ink-3); letter-spacing:.04em;
+    padding:2px 4px 1px}
+  .wrmain .edtools .wpop .witems{display:flex; flex-wrap:wrap; gap:3px}
+  .wrmain .edtools .wpop .witems .wb{width:34px; height:30px}
+  .wrmain .edtools .wpop .witems .wb.wbig svg{width:19px; height:19px}
+  .wrmain .edtools .wpop .witems .wb.on{background:var(--accent-soft); color:var(--accent)}
   /* 色板在浮层里排成五列两行：十个横排会把浮层撑到 260px 宽，而「不涂」恰恰是最该
      一眼看见的那一颗，不该挤到屏幕外面去。浮层里的那一排不靠 .edtools 的横排。 */
   .edpop .dots{display:grid; grid-template-columns:repeat(5,26px); gap:4px}
@@ -4262,26 +4439,41 @@
      点「小结」或任意章节后，结果就在右栏原地铺开，不再弹窗、也不遮住正文。
      标记随阅读器骨架一起重建（见 readerSkeleton），接线走 wireReader 的委托。 -->
 
-<!-- 画板：一块板一张 fabric 画布，左边挑板、右边画。开在页面最上面（.ntlay）而不是右栏里 ——
-     画的东西要看清笔触，332px 的栏里画不出「边看书边涂鸦」那种随手一勾。 -->
-<div class="ntlay" id="bdLayer">
+<!-- 画板：从「居中小卡」改成铺满视口的两栏工作台 —— 左边常驻书籍列表，右边一张远超
+     屏幕的大画布（无限画布），点书在左侧浮出一层正文，边看边写。
+     为什么不是右栏：332px 里画不出「边看书边涂鸦」那种随手一勾；居中卡片也只有
+     min(1040px)，画三个箭头就到底。纸面格线仍是 CSS 画的（.bdpaper 的 data-paper），
+     画布只带底色 —— 导出的是干净的纸加你画的墨，格线不进导出物。 -->
+<div class="ntlay full" id="bdLayer">
   <section role="dialog" aria-modal="true" aria-label="画板">
-    <div class="edhd">
-      <span class="edttl hard">画板</span>
-      <span class="grow"></span>
-      <button class="deed" id="bdNote" type="button" title="先把图画下来，再在笔记里加一条带图的条目">
-        并进笔记</button>
-      <button class="deed" id="bdPng" type="button" title="导一张 2 倍清晰的 PNG 到 boards/">存 PNG</button>
-      <button class="deed" id="bdSvg" type="button" title="导一份可再编辑的 SVG 到 boards/">存 SVG</button>
-      <button class="deed" id="bdDir" type="button" title="boards/ 就在这本书的文件夹里">
-        打开所在文件夹</button>
-      <button class="deed" id="bdClose" type="button">关闭</button>
-    </div>
     <div class="bdwrap">
-      <aside class="bdsid" id="bdSid" aria-label="这本书的画板"></aside>
+      <aside class="bdsid" id="bdSid" aria-label="书籍与画板"></aside>
       <div class="bdmain">
+        <div class="bdhead">
+          <span class="edttl hard" id="bdTitle">画板</span>
+          <span class="grow"></span>
+          <button class="deed" id="bdNote" type="button" title="先把图画下来，再在笔记里加一条带图的条目">
+            并进笔记</button>
+          <button class="deed" id="bdPng" type="button" title="导一张 2 倍清晰的 PNG 到 boards/">存 PNG</button>
+          <button class="deed" id="bdSvg" type="button" title="导一份可再编辑的 SVG 到 boards/">存 SVG</button>
+          <button class="deed" id="bdDir" type="button" title="boards/ 就在这本书的文件夹里">
+            打开所在文件夹</button>
+          <button class="deed" id="bdClose" type="button">关闭</button>
+        </div>
         <div class="bdtools" id="bdTools"></div>
-        <div class="bdcut"><div class="bdpaper" id="bdPaper" data-paper="plain"></div></div>
+        <div class="bdcut">
+          <div class="bdpaper" id="bdPaper" data-paper="plain"></div>
+          <!-- 正文浮层：从左边书列表点一本书就浮出来，压住画布不挡笔。可关。 -->
+          <div class="bdread" id="bdRead" hidden>
+            <div class="bdrdhd">
+              <span class="bdrdttl" id="bdReadTtl">正文</span>
+              <span class="grow"></span>
+              <button class="deed" id="bdReadBack" type="button">回书列表</button>
+              <button class="deed" id="bdReadX" type="button" title="收掉正文，画布还留着">收</button>
+            </div>
+            <div class="bdrdbody md" id="bdReadBody"></div>
+          </div>
+        </div>
         <div class="bdfoot"><span id="bdInfo">正在装载画笔…</span></div>
       </div>
     </div>
@@ -4805,7 +4997,13 @@ function coverSrc(src) {
 
    **藏着的 pane 一律不点亮**：`[hidden]{display:none}` 时所有卡的量出来都是 0×0、
    落在原点，按「在视口里」判会一口气把一整墙全点亮（等于没做这件事）。判据借用
-   `offsetParent === null`（和 paneVisible 同一把尺子）—— 没布局盒就是没在画面上。 */
+   `offsetParent === null`（和 paneVisible 同一把尺子）—— 没布局盒就是没在画面上。
+
+   **叠卡甩到画外的那几张也不算「在画面里」**：`saway` / `sgone` 只是 `opacity:0`，
+   布局盒还在、也照样落在视口里，`offsetParent` 那条判不住它。用视口判会把整批 60 张
+   一次点亮（叠卡那一屏原本就是 `margin=Infinity`，更是全都过），所以这里跟着
+   `applyStack` 写下的 `aria-hidden="true"` 再拦一道 —— 那一张既然已从无障碍树摘掉，
+   就不该有封面请求为它发出去。 */
 function paintCovers(root, margin) {
   const box = root || document;
   if (!box.querySelectorAll) return 0;
@@ -4817,6 +5015,9 @@ function paintCovers(root, margin) {
     if (im.getAttribute('src')) continue;
     const c = im.closest('.wcard') || im;
     if (c.offsetParent === null) continue;             // 藏着的 pane：没在画面上，先不点亮
+    // 叠卡画外那几张：有布局盒（opacity:0）但看不见，offsetParent 判不住它。
+    // 走可选链：c 可能回退成 im，那上面的卡片自己没写过这个属性。
+    if (c.getAttribute && c.getAttribute('aria-hidden') === 'true') continue;
     const r = c.getBoundingClientRect();
     if (r.top < h + m && r.bottom > -m) { coverField(im); k++; }
   }
@@ -7366,14 +7567,33 @@ const WR_HI = ["#fff3a3", "#d0ebff", "#d3f9d8", "#ffe3e3",
 const WR_GRID_R = 6, WR_GRID_C = 8;
 
 function wrPopHide() {
-  const open = document.querySelector("#wrTools .edpop.open");
+  const open = document.querySelector("#wrTools .edpop.open,#wrTools .wpop.open");
   if (open) open.classList.remove("open");
 }
 
 /** kind: color（字色）/ back（底色）/ table（表格矩阵） */
 function wrPopToggle(kind, btn) {
-  const wrap = btn.parentNode;
-  const cur = wrap.querySelector(".edpop");
+  // 落点要找「弹层的宿主」而不是按钮的父节点：行内那几颗（色 / 底色 / 表格）
+  // 二级浮层（色板 / 底色 / 表格矩阵）挂在**工具条上**，不挂在弹层里。
+  // 挂在弹层里的后果很具体：表格那颗现在住在「+」弹层的 .witems 里，点开矩阵的同一
+  // 下里 wrPopHide() 会先把「+」弹层收掉，矩阵跟着 display:none —— 用户点了表格什么
+  // 也没发生。所以宿主一律取最近的 .wbwrap（那个 span 在工具条上，永远可见），
+  // 按钮自己搬进去当定位锚点。
+  let wrap = btn.closest(".wbwrap");
+  if (kind === "color" || kind === "back" || kind === "table") {
+    if (!wrap) {
+      wrap = document.createElement("span");
+      wrap.className = "wbwrap";
+      const group = btn.closest(".wgrp") || document.getElementById("wrTools");
+      group.insertBefore(wrap, btn);
+      wrap.appendChild(btn);
+    }
+  } else {
+    wrap = btn.parentNode;
+  }
+  // 两种弹层都用这一条路：颜色那种是现建的 .edpop（WR_INLINE / WR_INS 那几颗），
+  // 段落样式 / 插入动作这两种是静态建好的 .wpop（wrBarWire 里那两颗）。
+  const cur = wrap.querySelector(".edpop,.wpop");
   if (cur && cur.classList.contains("open") && cur.dataset.kind === kind) return wrPopHide();
   wrPopHide();
   const pop = cur && cur.dataset.kind === kind ? cur : wrPopBuild(kind, wrap, btn);
@@ -7382,6 +7602,8 @@ function wrPopToggle(kind, btn) {
 }
 
 function wrPopBuild(kind, wrap, btn) {
+  // 段落样式 / 插入动作两颗的弹层是静态建好的（wrBarWire），这里只做转发。
+  if (kind === "style" || kind === "ins") return wrap.querySelector(".wpop");
   const pop = document.createElement("div");
   pop.className = "edpop";
   pop.dataset.kind = kind;
@@ -7389,12 +7611,7 @@ function wrPopBuild(kind, wrap, btn) {
     pop.innerHTML = '<div class="gh">插入表格</div><div class="tb">'
       + Array.from({length: WR_GRID_R * WR_GRID_C}, () => "<i></i>").join("")
       + '</div><div class="cap"></div>';
-    btn.style.position = "static";
-    const holder = document.createElement("span");
-    holder.className = "edgrid";
-    wrap.insertBefore(holder, btn);
-    holder.appendChild(btn);
-    holder.appendChild(pop);
+    wrap.appendChild(pop);
     const cells = [].slice.call(pop.querySelectorAll(".tb i"));
     const cap = pop.querySelector(".cap");
     let at = {r: 1, c: 1};
@@ -7416,12 +7633,7 @@ function wrPopBuild(kind, wrap, btn) {
       + '<div class="dots">' + list.map(hex => '<button type="button" class="dot" data-c="'
         + hex + '" style="--mkc:' + hex + '" title="' + hex + '"></button>').join("")
       + '<button type="button" class="undo" data-c="none">不涂</button></div>';
-    btn.style.position = "static";
-    const holder = document.createElement("span");
-    holder.className = "edgrid";
-    wrap.insertBefore(holder, btn);
-    holder.appendChild(btn);
-    holder.appendChild(pop);
+    wrap.appendChild(pop);
     [].slice.call(pop.querySelectorAll("button[data-c]")).forEach(el => {
       el.onclick = ev => {
         ev.stopPropagation();
@@ -7437,64 +7649,172 @@ function wrPopBuild(kind, wrap, btn) {
 }
 
 /* ── 工具条：一颗一颗照笔记编辑器那一套建（同一支钮、同一个 .on） ───── */
-const WR_TOOLS = [
-  {t: "p", label: "正文", tip: "这一段回到正文"},
-  {t: "h1", label: "标题一", tip: "章名、大标题"},
-  {t: "h2", label: "标题二", tip: "小节标题"},
-  {t: "h3", label: "标题三", tip: "再下一层"},
-  {sep: 1},
-  {t: "bold", html: "<b>粗</b>", tip: "加粗（⌘/Ctrl + B）"},
-  {t: "ital", html: "<i>斜</i>", tip: "斜体（⌘/Ctrl + I）"},
-  {t: "und", html: "<u>下</u>", tip: "下划线"},
-  {t: "strike", html: "<s>删</s>", tip: "删除线"},
-  {t: "code", label: "码", tip: "行内代码：这几个字照原样"},
-  {sep: 1},
-  {t: "color", label: "字色", tip: "选中几个字，再点一下挑的颜色"},
-  {t: "back", label: "底色", tip: "给这几个字铺一层底色"},
-  {t: "clear", label: "清格式", tip: "选中的那几个字变回不带格式，字一个不动"},
-  {sep: 1},
-  {t: "bull", label: "列表", tip: "无序列表"},
-  {t: "num", label: "编号", tip: "有序列表"},
-  {t: "task", label: "待办", tip: "能勾的一项：勾点在左边那个方框上"},
-  {t: "quote", label: "引用", tip: "这段是引来的话"},
-  {sep: 1},
-  {t: "table", label: "表格", tip: "点几乘几就插几乘几"},
-  {t: "link", label: "链接", tip: "给选中的字挂个地址"},
-  {t: "image", label: "图片", tip: "插一张图（网址或本机路径）"},
-  {t: "hr", label: "分隔", tip: "一条横线"},
-  {sp: 1},
-  {t: "md", label: "看 Markdown", tip: "稿子存的就是 Markdown：这一份能复制走"},
+/* 工具条怎么排：一句话一刀。
+   原来是二十颗钮从左排到右、排不下就折行 —— 「粗体」「删除线」「待办」这些字在
+   一条上摊开，看的人得先把每个词的形状认一遍才知道哪颗是干什么的。现在分三摊：
+     · 左边第一摊是「这段是什么」：段落样式。它是个单选，永远只有一颗亮着，
+       做成一颗下拉比摊开四颗省地方 —— 于是有了WR_TOOLS[0]那颗「当前段落」。
+     · 中间是「这几个字是什么样」：行内格式，最常用的六颗，全部是图形。
+     · 右边是「往这儿放点什么」：插入类。低频，收进一颗「+」里，要用了才展开。
+   每一摊之间不用竖线隔（竖线一排小方块还是像旧系统），用间距分组。 */
+const WR_ICON = {
+  bold: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h5.2a3 3 0 0 1 0 6H6z"/><path d="M6 10h6a3 3 0 0 1 0 6H6z"/></svg>',
+  ital: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 4h6M6 16h6M10.6 4L9.4 16"/></svg>',
+  und: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 4v6.4a4 4 0 0 0 8 0V4"/><path d="M4.6 16.4h10.8"/></svg>',
+  strike: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.4 10h11.2"/><path d="M7 6.2A2.8 2.8 0 0 1 10 4.4c1.8 0 3 1 3 3.2"/><path d="M6.6 13.6c.6 1.4 1.9 2 3.6 2 2 0 3.2-1 3.2-2.6"/></svg>',
+  code: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.2 6L3.8 10l3.4 4"/><path d="M12.8 6l3.4 4-3.4 4"/></svg>',
+  color: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 15.4L10.6 9.2a1.5 1.5 0 0 1 2.1 0l.1.1a1.5 1.5 0 0 1 0 2.1L7 17H3.4z"/><path d="M12.6 5.8l1.6 1.6"/><path d="M14 3.6l2.4 2.4"/></svg>',
+  back: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 5.4h12.8v7.2H3.6z"/><path d="M3.6 5.4l2.3-1.7h7.2l2.3 1.7"/></svg>',
+  style_p: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.6 5h10.8"/><path d="M4.6 10h10.8"/><path d="M4.6 15h6.6"/></svg>',
+  style_h1: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.6v10.8"/><path d="M10 4.6v10.8"/><path d="M4 10h6"/><path d="M13.4 15.4V8.2h1.6"/><path d="M13.6 12.2h2.4"/></svg>',
+  style_h2: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.6v10.8"/><path d="M10 4.6v10.8"/><path d="M4 10h6"/><path d="M13 10.6a2.6 2.6 0 1 1 3.4 2.5h-3.4v2.3h3.6"/></svg>',
+  style_h3: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.6v10.8"/><path d="M10 4.6v10.8"/><path d="M4 10h6"/><path d="M12.8 9.4a2.7 2.7 0 1 1 3.6 2.6h-3.6"/></svg>',
+  bull: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7.4 5.4h8.2M7.4 10h8.2M7.4 14.6h8.2"/><circle cx="4.2" cy="5.4" r="1" fill="currentColor" stroke="none"/><circle cx="4.2" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="4.2" cy="14.6" r="1" fill="currentColor" stroke="none"/></svg>',
+  num: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.6 5.4h7.8M7.6 10h7.8M7.6 14.6h7.8"/><path d="M3.2 4.4l1-1v3.2" stroke-width="1.2"/><path d="M2.4 8.6h2.4M2.4 10.6h2.4M2.4 12.6h2.4" stroke-width="1.1"/></svg>',
+  task: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="4.4" width="3.4" height="3.4" rx=".8"/><rect x="2.6" y="12.2" width="3.4" height="3.4" rx=".8"/><path d="M8.4 6.1h9M8.4 13.9h9"/></svg>',
+  quote: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 6.2c-1 1-1.6 2.2-1.6 3.6 0 1.5.9 2.6 2.2 2.6 1.1 0 2-.8 2-1.9 0-1-.7-1.8-1.7-1.8-.3 0-.5 0-.7.1.1-1 .6-1.9 1.4-2.6z"/><path d="M11 6.2c-1 1-1.6 2.2-1.6 3.6 0 1.5.9 2.6 2.2 2.6 1.1 0 2-.8 2-1.9 0-1-.7-1.8-1.7-1.8-.3 0-.5 0-.7.1.1-1 .6-1.9 1.4-2.6z"/></svg>',
+  table: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3.4" y="4.4" width="13.2" height="11.2" rx="1.4"/><path d="M3.4 8.4h13.2M3.4 12.2h13.2M8.6 4.4v11.2"/></svg>',
+  link: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.2 11.8a3 3 0 0 1 0-4.2l1.8-1.8a3 3 0 0 1 4.2 4.2l-.9.9"/><path d="M11.8 8.2a3 3 0 0 1 0 4.2L10 14.2a3 3 0 0 1-4.2-4.2l.9-.9"/></svg>',
+  image: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.4" width="13.2" height="11.2" rx="1.4"/><circle cx="7.6" cy="8.2" r="1.3"/><path d="M4 14.6l3.6-3.2 2.6 2.2 2.4-2 3.4 3"/></svg>',
+  hr: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.6 10h12.8"/><path d="M3.6 6.4h12.8M3.6 13.6h12.8" opacity=".38"/></svg>',
+  clear: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 4.8h8.8l3.2 12H2.4z"/><path d="M7.6 8.4l1.2 5M12.4 8.4l-1.2 5" /></svg>',
+  md: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="14.8" height="9.2" rx="1.4"/><path d="M5.6 12.6V7.4l2.4 2.6 2.4-2.6v5.2"/><path d="M12 7.4v5.2h2.2"/><path d="M11 12.6h3.2" stroke-width="1.1"/></svg>',
+  plus: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4.6v10.8M4.6 10h10.8"/></svg>',
+};
+const WR_STYLES = [
+  {t: "p", label: "正文", tip: "这一段回到正文", svg: WR_ICON.style_p},
+  {t: "h1", label: "标题一", tip: "章名、大标题", svg: WR_ICON.style_h1},
+  {t: "h2", label: "标题二", tip: "小节标题", svg: WR_ICON.style_h2},
+  {t: "h3", label: "标题三", tip: "再下一层", svg: WR_ICON.style_h3},
+  {t: "bull", label: "无序列表", tip: "无序列表", svg: WR_ICON.bull},
+  {t: "num", label: "有序列表", tip: "有序列表", svg: WR_ICON.num},
+  {t: "task", label: "待办", tip: "能勾的一项：勾点在左边那个方框上", svg: WR_ICON.task},
+  {t: "quote", label: "引用", tip: "这段是引来的话", svg: WR_ICON.quote},
 ];
+/* 行内格式这六颗：字面（粗 / 斜 / 删 / 码）+ 两颗颜色。颗颗用得最频，摊在最顺手的位置。 */
+const WR_INLINE = [
+  {t: "bold", tip: "加粗（⌘/Ctrl + B）", svg: WR_ICON.bold},
+  {t: "ital", tip: "斜体（⌘/Ctrl + I）", svg: WR_ICON.ital},
+  {t: "und", tip: "下划线", svg: WR_ICON.und},
+  {t: "strike", tip: "删除线", svg: WR_ICON.strike},
+  {t: "code", tip: "行内代码：这几个字照原样", svg: WR_ICON.code},
+  {t: "color", tip: "选中几个字，再点一下挑的颜色", svg: WR_ICON.color},
+  {t: "back", tip: "给这几个字铺一层底色", svg: WR_ICON.back},
+];
+/* 低频的插入动作收进「+」：表格 / 链接 / 图片 / 分隔 / 清格式，加上 Markdown。 */
+const WR_INS = [
+  {t: "table", tip: "点几乘几就插几乘几", svg: WR_ICON.table},
+  {t: "link", tip: "给选中的字挂个地址", svg: WR_ICON.link},
+  {t: "image", tip: "插一张图（网址或本机路径）", svg: WR_ICON.image},
+  {t: "hr", tip: "一条横线", svg: WR_ICON.hr},
+  {t: "clear", tip: "选中的那几个字变回不带格式，字一个不动", svg: WR_ICON.clear},
+  {t: "md", tip: "稿子存的就是 Markdown：这一份能复制走", svg: WR_ICON.md},
+];
+/* 图标统一 20×20、1.5 描边、currentColor —— 和顶栏那颗 AI 导航、主题切换同一套线形语言。
+   不另找一套图标库：整站只有一种笔触，看着才像同一个东西。 */
+/* 当前段落那一颗：显示的是「这一段的样式」，点开是那八种样式的清单。
+   按钮上那颗小三角只是「这儿有得选」的记号，选中的那一项靠底色说话。 */
+function wrStyleLabel(t) {
+  const hit = WR_STYLES.find(x => x.t === t);
+  return hit ? hit : WR_STYLES[0];
+}
 
+/** 一颗带图标的钮。on 只是底色 + 主色，形状永远由图标说。 */
+function wrMkBtn(item) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "wb";
+  b.dataset.t = item.t;
+  b.innerHTML = item.svg;
+  b.title = item.tip;
+  b.setAttribute("aria-label", item.tip.split("（")[0]);
+  b.onclick = ev => { ev.preventDefault(); wrTool(item.t, b); };
+  return b;
+}
+/** 一张弹层（段落样式 / 插入动作共用）：标题加一排图标钮。 */
+function wrMkPop(cls, title) {
+  const pop = document.createElement("div");
+  pop.className = cls;
+  const hd = document.createElement("div");
+  hd.className = "wphd";
+  hd.textContent = title;
+  const items = document.createElement("div");
+  items.className = "witems";
+  pop.append(hd, items);
+  pop._items = items;
+  // 浮层上的按下一律不落到正文：不然选区会被这一下清掉，格式涂到光标那一个字上。
+  pop.onmousedown = ev => ev.preventDefault();
+  pop.onclick = ev => ev.stopPropagation();
+  return pop;
+}
 function wrBarWire() {
   const box = $wr("Tools");
   if (!box || box.dataset.wired === "1") return;
   box.dataset.wired = "1";
-  WR_TOOLS.forEach(item => {
-    if (item.sp) {
-      const s = document.createElement("span");
-      s.className = "sp";
-      box.appendChild(s);
-      return;
-    }
-    if (item.sep) {
-      const s = document.createElement("span");
-      s.className = "sep";
-      box.appendChild(s);
-      return;
-    }
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.t = item.t;
-    if (item.html) b.innerHTML = item.html; else b.textContent = item.label;
-    b.title = item.tip;
-    b.onclick = ev => { ev.preventDefault(); wrTool(item.t, b); };
-    box.appendChild(b);
+
+  // 第一摊：「这一段是什么」。一颗钮显示当前样式，点开是那八种。
+  const sb = document.createElement("button");
+  sb.type = "button";
+  sb.className = "wb wstyle";
+  sb.id = "wrStyleB";
+  sb.dataset.t = "p";
+  sb.onclick = ev => { ev.preventDefault(); wrPopToggle("style", sb); };
+  const spop = wrMkPop("wpop wstylepop", "这段是什么");
+  spop.dataset.kind = "style";
+  WR_STYLES.forEach(it => {
+    const b = wrMkBtn(it);
+    b.classList.add("wbig");
+    spop._items.append(b);
   });
+  const wrap = document.createElement("span");
+  wrap.className = "wbwrap";
+  wrap.append(sb, spop);
+  box.appendChild(wrap);
+
+  // 第二摊：行内格式。七颗图形，用得最频，摊在中间最顺手的位置。
+  const inl = document.createElement("span");
+  inl.className = "wgrp";
+  WR_INLINE.forEach(it => inl.appendChild(wrMkBtn(it)));
+  box.appendChild(inl);
+
+  // 收尾那颗「看 Markdown」：稿子的真相，一直露在外面。
+  const mdBtn = wrMkBtn(WR_INS[WR_INS.length - 1]);
+  mdBtn.classList.add("wsole");
+  box.appendChild(mdBtn);
+
+  // 第三摊：低频的插入动作，收进一颗「+」里。
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.className = "wb wplus";
+  plus.id = "wrPlusB";
+  plus.innerHTML = WR_ICON.plus;
+  plus.title = "往这儿放点什么（表格 / 链接 / 图片 / 分隔 / 清格式）";
+  plus.setAttribute("aria-label", plus.title);
+  plus.onclick = ev => { ev.preventDefault(); wrPopToggle("ins", plus); };
+  const ipop = wrMkPop("wpop winspop", "往这儿放点什么");
+  ipop.dataset.kind = "ins";
+  WR_INS.slice(0, WR_INS.length - 1).forEach(it => {
+    const b = wrMkBtn(it);
+    b.classList.add("wbig");
+    ipop._items.append(b);
+  });
+  const iwrap = document.createElement("span");
+  iwrap.className = "wbwrap";
+  iwrap.append(plus, ipop);
+  box.appendChild(iwrap);
+  // 建完就按当前光标刷一次：否则「这段是什么」那颗刚出来是空的（没标题也没图标），
+  // 鼠标悬上去没有提示，看着像一颗没接上线的钮。第一次正文还没机会触发 wrBarState。
+  wrBarState();
 }
 
 function wrTool(t, btn) {
   wrFocusRange();
+  // 从弹层里点过来的一律先把弹层收掉再干活（色板 / 底色 / 表格矩阵三类例外 ——
+  // 它们各自就是弹层，收了就没得点了）。1.2.2 之前工具条是平的，没有这一步；
+  // 收成一堆弹层之后漏掉它，用户会「点了标题一，弹层还掀着」，后面每一次点击
+  // 都先被这张掀开的牌挡一下。
+  const inPop = btn && btn.closest && btn.closest(".wpop");
+  if (inPop && t !== "color" && t !== "back" && t !== "table") wrPopHide();
   if (t === "p") return wrHeading(0);
   if (t === "h1") return wrHeading(1);
   if (t === "h2") return wrHeading(2);
@@ -7566,6 +7886,22 @@ function wrBarState() {
     const on = st[el.dataset.t] ? true : false;
     el.classList.toggle("on", on);
   });
+  // 「这段是什么」那一颗：亮跟图标说它是哪一样式，还把这颗钮的图标换成当前样式的那张。
+  // 光标在引用里而钮上画的是正文 —— 用户会以为点它没用。段落弹层里那一项也一起亮。
+  const cur = st.h1 ? "h1" : st.h2 ? "h2" : st.h3 ? "h3"
+    : st.bull ? "bull" : st.num ? "num" : st.task ? "task"
+      : st.quote ? "quote" : "p";
+  const styleB = document.getElementById("wrStyleB");
+  if (styleB) {
+    const want = wrStyleLabel(cur);
+    // 图标在第一次进来时也要画：那颗钮 HTML 里建出来是空的，只有等到光标从「正文」移到
+    // 别处再回来才会被那个 dataset 变化的分支填上 —— 首屏看它是一颗空白钮。
+    styleB.dataset.t = cur;
+    styleB.innerHTML = want.svg;
+    styleB.title = "这段是什么：现在是「" + want.label + "」（换个样式）";
+  }
+  [].forEach.call(box.querySelectorAll(".wstylepop button[data-t]"), el =>
+    el.classList.toggle("on", el.dataset.t === cur));
 }
 
 function wrCmdOn(cmd) {
@@ -10403,6 +10739,8 @@ function applyStack(stage) {
     touched = true;
   });
   if (touched) markStackAnim(stage);
+  // 画面上那七张（|d|<=3）的封面跟着这一档点亮：翻一页就有新卡进窗，
+  // 靠上面那处 paintStackCovers 补，margin 不传整批（叠卡判的是扇形，不是视口）。
   const pos = stage.parentNode && stage.parentNode.querySelector('#stPos');
   if (pos) pos.textContent = kids.length ? (shelfCursor + 1) + ' / ' + kids.length : '';
   const pv = stage.parentNode && stage.parentNode.querySelector('#stPrev');
@@ -10771,8 +11109,8 @@ function modEmpty(mod) {
     d.innerHTML = '<b>还没有剪藏的文章</b>把公众号链接贴进上面那个框，点「解析正文」看一眼，'
       + '再点「全部入库」就进这一格了。之后随时能读到它，也能划线做笔记。';
   } else if (mod === 'video') {
-    d.innerHTML = '<b>还没有转出来的视频</b>先贴一条课堂回放 / 网课链接到右边那格，'
-      + '点「识别」认一下，再点「开始转笔记」。转完这里会多一本能读、能改转写、'
+    d.innerHTML = '<b>还没有转出来的视频</b>把 B 站 / YouTube 链接贴进上面那格，点旁边那颗手指一下 —— '
+      + '认链接、取音频、转文字是同一步，不用再点第二次。转完这里会多一本能读、能改转写、'
       + '能导字幕和 EPUB 的笔记。';
   } else if (mod === 'local') {
     d.innerHTML = '<b>本地书架还是空的</b>点右上角「导入书籍」，把你自己手里的 MD / EPUB / PDF 放进来。'
@@ -12148,6 +12486,12 @@ function renderFeedSide() {
   const box = FEED.side;
   if (!box) return;
   const sig = feSideSig();
+  // 栏头那颗计数跟着签名走（签名没变就是同一个数）：放的「源几个 · 几条」——
+  // 不给数的话「看哪些」三个字旁边空一块，这一栏看着像个没接上线的空壳。
+  const cnt = document.getElementById('fSideCnt');
+  if (cnt && sig !== feedSideSig) {
+    cnt.textContent = feedSubs.length + ' 个源 · ' + (feedSum.entries || 0) + ' 条';
+  }
   if (sig === feedSideSig) return;
   feedSideSig = sig;
   const sc = [];
@@ -13171,12 +13515,13 @@ function renderFeedView() {
     body.innerHTML = `<div class="fewrap" id="fWrap">
         <div class="feside">
           <div class="fehd">
-            <span class="t">看哪些</span>
-            <span class="grow"></span>
-            <button class="ic" id="fFoldNav" title="收起 / 展开这一栏">栏</button>
-            <button class="ic" id="fSet" title="订阅偏好">偏好</button>
-            <button class="ic" id="fImp" title="导入 OPML">导入</button>
-            <button class="ic" id="fExp" title="导出 OPML">导出</button>
+            <span class="fetit"><span class="ftx">看哪些</span><span class="cnt" id="fSideCnt"></span></span>
+            <span class="feact">
+              <button class="ic" id="fFoldNav" title="收起 / 展开这一栏">栏</button>
+              <button class="ic" id="fSet" title="订阅偏好">偏好</button>
+              <button class="ic" id="fImp" title="导入 OPML">导入</button>
+              <button class="ic" id="fExp" title="导出 OPML">导出</button>
+            </span>
           </div>
           <div id="fSide"></div>
         </div>
@@ -13898,7 +14243,8 @@ let annaState = {};
 // 组件没装好时这一路起不来，界面提前拦一道、说清去哪儿修，而不是点了没反应。
 let browserReady = true;
 const VIDEO = {ta: null, cap: null, box: null, prog: null, shelf: null, shelfHead: null,
-               cnt: null, start: null, ring: null, stop: null};
+               cnt: null, start: null, ring: null, stop: null,
+               note: null, unfold: null};
 const VID_STAGES = {plan: '认链接', download: '取音频', asr: '语音转文字',
   summary: '整理摘要', note: '写知识笔记', mindmap: '画思维导图',
   save: '落成一本书', done: '完成'};
@@ -14467,8 +14813,13 @@ function vtRowNode(r, i) {
     ts.title = '复制这一段的时间（' + vtStamp(r.start) + '）；「原片」直接跳到这里';
     ts.onclick = ev => { ev.stopPropagation(); vtCopyStamp(r.start); };
   }
-  row.append(ts);
-  row.append(feEl('span', 'spk', r.speaker || '—'));
+  else ts.title = '这一本没有时间戳';
+  // 时间戳与说话人合成一行「元信息」：它们回答的是同一个问题（谁、在什么时候说），
+  // 原来分成两列，中间的空隙比内容本身还宽。空说话人就不渲染那一颗，不留一个空胶囊。
+  const meta = feEl('div', 'vtmeta');
+  meta.append(ts);
+  if (r.speaker) meta.append(feEl('span', 'spk', r.speaker));
+  row.append(meta);
 
   const cur = String(ed ? ed.text : (r.text || ''));
   if (VT.editing === id) {
@@ -14904,6 +15255,13 @@ function vtTools() {
         + (VT.gone.size ? '（删 ' + VT.gone.size + '）' : '');
     }
   }
+  if (VIDEO.note) {
+    // 分区标题那句：点破三个最常被问「这一步怎么用」的动作。挑了书才说，
+    // 没挑书时那块空着，免得标题底下压一行跟当前无关的说明。
+    VIDEO.note.textContent = VT.book
+      ? '点一段就能改 · 点时间戳复制那一秒 · 「原片」跳回原视频那一句'
+      : '';
+  }
   [VIDEO.pick, VIDEO.q, VIDEO.from, VIDEO.to, VIDEO.filter, VIDEO.clearF, VIDEO.reload,
     VIDEO.save, VIDEO.rebuild, VIDEO.fmt, VIDEO.export]
     .forEach(el => { if (el) el.disabled = !VT.book || VT.busy; });
@@ -14940,6 +15298,10 @@ function renderVideoShelf() {
     if (live) bits.push('1 支转写中');
     VIDEO.shelfHead.textContent = bits.length ? bits.join(' · ') : '转出来的书 · 还没有';
   }
+  // 栏头那颗计数与下面那行是同一句话：一处算、一处显示。不给数的话
+  // 「转出来的书」旁边空一块，左栏看着像没接上线的空壳。
+  const vcnt = document.getElementById('vSideCnt');
+  if (vcnt) vcnt.textContent = all.length ? all.length + ' 本' : '';
   // 指纹带上条数：一本没有时信号是空串，而初值也是空串 —— 不带上就永远铺不出空态那句说明
   // 导出那份也算进指纹：刚导完一份，「没导」那盏灯要立刻变「导 1」，不能等下一次轮询
   // 「转写中」那行也算进去：任务一起一停、换了一支，左栏得立刻跟着改。
@@ -15038,6 +15400,8 @@ function wireVideo(p) {
   VIDEO.start = p.querySelector('#vStart');
   VIDEO.ring = p.querySelector('#vRing');
   VIDEO.stop = p.querySelector('#vStop');
+  VIDEO.note = p.querySelector('#vSecNote');
+  VIDEO.unfold = p.querySelector('#vUnfold');
   VIDEO.pick = p.querySelector('#vPick');
   VIDEO.rows = p.querySelector('#vRows');
   VIDEO.exp = p.querySelector('#vExp');
@@ -15143,10 +15507,11 @@ function renderVideoView() {
     body.innerHTML = `<div class="vtwrap" id="vWrap">
       <div class="vtside">
         <div class="fehd">
-          <span class="t">转出来的书</span>
-          <span class="grow"></span>
-          <button class="ic" id="vReload" title="重新数一遍书库里的视频书">刷新</button>
-          <button class="ic" id="vFoldNav" title="收起 / 展开这一栏">栏</button>
+          <span class="fetit"><span class="ftx">转出来的书</span><span class="cnt" id="vSideCnt"></span></span>
+          <span class="feact">
+            <button class="ic" id="vReload" title="重新数一遍书库里的视频书">刷新</button>
+            <button class="ic" id="vFoldNav" title="收起 / 展开这一栏">栏</button>
+          </span>
         </div>
         <div class="ch2" id="vShelfHead"></div>
         <div id="vChips"></div>
@@ -15185,25 +15550,38 @@ function renderVideoView() {
           <div class="vbox" id="vProg"></div>
         </div>
         <div class="vtwork">
-          <div class="vtsec"><b>转写结果</b>
-            <span>点段落改听错的字 · 点时间戳复制时间 · 点「原片」跳回原视频那一句</span>
+          <!-- 分区标题只剩一句陈述：这块是什么、现在筛出了什么。原来那句
+               「点段落改听错的字 · 点时间戳复制时间 · 点原片跳回原视频」整段挪到
+               这里每个控件自己的 title 上，标题不再替一整屏控件解释。 -->
+          <div class="vtsec"><b>转写结果</b><span id="vSecNote"></span><span class="grow"></span>
+            <span id="vCntT"></span>
           </div>
+          <!-- 工具条按「挑哪本 / 筛 / 对这一段做什么」分三簇：挑书靠左，筛选居中，
+               动作收在右端同一簇，中间给计数让位。原来七个控件平摊一行，看起来更像
+               一张待填的表。 -->
           <div class="vttb">
-            <button class="ic unf" id="vUnfold" title="展开左边那栏书">看哪本</button>
-            <select class="f" id="vPick"><option value="">挑一本转出来的书</option></select>
-            <input class="f" id="vQ" placeholder="搜段落文字或说话人" spellcheck="false">
-            <input class="f st" id="vFrom" placeholder="从 1:23" spellcheck="false">
-            <input class="f st" id="vTo" placeholder="到 5:00" spellcheck="false">
-            <button class="ic" id="vFilter" title="按上面的词与时间筛">筛</button>
-            <button class="ic" id="vClearF" title="清空这些筛选">清空</button>
-            <span class="cnt" id="vCntT"></span>
+            <span class="vgrp">
+              <button class="ic unf" id="vUnfold" title="展开左边那栏书">看哪本</button>
+              <select class="f" id="vPick" title="挑一本转出来的书"><option value="">挑一本转出来的书</option></select>
+            </span>
+            <span class="sep"></span>
+            <span class="vgrp">
+              <input class="f" id="vQ" placeholder="搜段落文字或说话人" spellcheck="false"
+                     title="搜段落文字或说话人">
+              <input class="f st" id="vFrom" placeholder="从 1:23" spellcheck="false" title="从几分几秒起">
+              <input class="f st" id="vTo" placeholder="到 5:00" spellcheck="false" title="到几分几秒止">
+              <button class="ic" id="vFilter" title="按上面的词与时间筛">筛</button>
+              <button class="ic" id="vClearF" title="清空这些筛选">清空</button>
+            </span>
             <span class="grow"></span>
-            <button class="deed" id="vSave" style="height:28px"
-              title="把改过的段落按 id 合到全量上再写盘">存转写</button>
-            <button class="deed" id="vRebuild" style="height:28px"
-              title="拿现在的转写重新分章，旧的章节挪进备份">重建章节</button>
-            <select class="f" id="vExpFmt" title="导出成哪种格式">${fmts}</select>
-            <button class="deed" id="vExport" style="height:28px">导出</button>
+            <span class="vgrp">
+              <button class="deed" id="vSave" style="height:28px"
+                title="把改过的段落按 id 合到全量上再写盘">存转写</button>
+              <button class="deed" id="vRebuild" style="height:28px"
+                title="拿现在的转写重新分章，旧的章节挪进备份">重建章节</button>
+              <select class="f" id="vExpFmt" title="导出成哪种格式">${fmts}</select>
+              <button class="deed" id="vExport" style="height:28px">导出</button>
+            </span>
           </div>
           <div class="vtexp" id="vExp"></div>
           <div id="vRows"></div>
@@ -19092,18 +19470,36 @@ function ensureFabric() {
   }
   return BD.promise;
 }
-const BD = {book: '', id: '', env: null, fc: null, boards: [], tool: 'pen', color: '#2f2a24',
-            width: 3, paper: 'plain', undo: [], redo: [], timer: 0, rt: 0,
-            loading: false, drawing: null, promise: null, wired: false};
-const BD_TOOLS = [['pen', '笔', '画笔：按住拖就是线条'],
-                  ['hl', '荧光', '荧光笔：半透明，划在字上也看得清'],
-                  ['line', '直线', '直线：按住两端拉'],
-                  ['arrow', '箭头', '箭头：按住从这头拉到那头'],
-                  ['rect', '方框', '方框：按住拉一个框'],
-                  ['circle', '圆', '圆：按住拉一个圆'],
-                  ['text', '字', '文字：点一下就开始打字'],
-                  ['erase', '擦', '擦：点一下删掉那一个'],
-                  ['select', '选', '选：点选、拖动、缩放画上的东西']];
+const BD = {
+  book: '', id: '', env: null, fc: null, boards: [], tool: 'pen', color: '#2f2a24',
+  width: 3, paper: 'plain', undo: [], redo: [], timer: 0, rt: 0,
+  loading: false, drawing: null, promise: null, wired: false,
+  // 无限画布：纸是固定的一大张（BD_PAPER_W/H），看哪儿靠 vx/vy 平移。
+  vx: 0, vy: 0, zoom: 1, pan: null, space: false,
+};
+/** 这张纸的逻辑尺寸：比任何视口都大，「无限」指的是它不用跟着窗口改尺寸，
+ *  不是 canvas 真的没有边界。指针在纸上、对象也在纸上，坐标永远一致。 */
+const BD_PAPER_W = 3200, BD_PAPER_H = 2200;
+const BD_TOOLS = [
+  {t: 'pen', tip: '画笔：按住拖就是线条', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l1-4 9.2-9.2a1.6 1.6 0 0 1 2.3 2.3L7 16.9l-4 1z"/><path d="M12.6 5.6l1.8 1.8"/></svg>'},
+  {t: 'hl', tip: '荧光笔：半透明，划在字上也看得清', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15.2V10l6.3-6.3a1.5 1.5 0 0 1 2.1 0l2.9 2.9a1.5 1.5 0 0 1 0 2.1L9 15.2H4z"/><path d="M4 17h12"/></svg>'},
+  {t: 'line', tip: '直线：按住两端拉', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.6 16.4L16.4 3.6"/></svg>'},
+  {t: 'arrow', tip: '箭头：按住从这头拉到那头', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 16.4L15 5"/><path d="M9.6 5H15v5.4"/></svg>'},
+  {t: 'rect', tip: '方框：按住拉一个框', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3.4" y="4.6" width="13.2" height="10.8" rx="1.4"/></svg>'},
+  {t: 'circle', tip: '圆：按住拉一个圆', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="6.6"/></svg>'},
+  {t: 'text', tip: '文字：点一下就开始打字', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 5.2V4h11.2v1.2"/><path d="M10 4v12"/><path d="M7.6 16h4.8"/></svg>'},
+  {t: 'erase', tip: '擦：点一下删掉那一个', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.4 16.2H16"/><path d="M4.6 12.6l5.4-5.4a1.6 1.6 0 0 1 2.3 0l2.9 2.9a1.6 1.6 0 0 1 0 2.3L10.2 16H6.9l-2.3-3.4z"/><path d="M8.3 9.3l4.6 4.6"/></svg>'},
+  {t: 'select', tip: '选：点选、拖动、缩放画上的东西；空格键或右键随时挪画布', svg:
+   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.4l11 6.4-4.7 1.2-2.1 4.6L5 3.4z"/></svg>'},
+];
 const BD_COLORS = ['#2f2a24', '#c0392b', '#1f6fb2', '#2e8b57', '#b58500', '#6b4ea8'];
 const BD_LIGHT = '#ece7dc';            // 黑纸上默认换这一色，否则一笔下去什么也看不见
 /** 一支墨有多亮：按 sRGB 相对亮度算，用来判断「黑纸配深墨」这种看不见的组合。
@@ -19144,7 +19540,12 @@ async function bdOpen() {
     try { await ensureFabric(); }
     catch (e) { bdInfo('画笔库没载进来，画板开不了'); whisper('画笔库没载进来'); return; }
   }
+  // 每次开都从纸的左上角看起：上一回挪到右下角，这一回接着画会找不到纸边。
   await bdRefresh();
+  bdSnapHome();
+  const cur = local[BD.book];
+  const t = document.getElementById('bdTitle');
+  if (t) t.textContent = (cur && cur.title) || BD.book || '画板';
 }
 async function bdRefresh() {
   const d = await gzApi('/api/board?book=' + encodeURIComponent(BD.book), undefined, 15000);
@@ -19157,15 +19558,19 @@ async function bdRefresh() {
   if (!BD.id && BD.boards.length) await bdPick(BD.boards[0].id);
   else if (!BD.id) bdInfo('这本书还没有画板 —— 点「新建一块」');
   else bdPaintList();
+  bdReadClose();
 }
 function bdMakeCanvas() {
   const paper = document.getElementById('bdPaper');
   const cv = document.createElement('canvas');
   cv.id = 'bdCanvas';
   paper.appendChild(cv);
-  const w = Math.max(320, paper.clientWidth - 2), h = Math.max(240, paper.clientHeight - 2);
-  BD.fc = new FABRIC.Canvas(cv, {width: w, height: h, selection: false,
+  // 画布造出来就是那一整张大纸的尺寸，不是视口尺寸：平移靠 viewportTransform，
+  // 所以窗口变大变小都不动 canvas 的尺寸 —— 画的笔留在原坐标上。
+  BD.fc = new FABRIC.Canvas(cv, {width: BD_PAPER_W, height: BD_PAPER_H, selection: false,
                                  preserveObjectStacking: true});
+  bdPanWire();
+  bdSnapHome();
   BD.fc.on('mouse:down', bdDown);
   BD.fc.on('mouse:move', bdMove);
   BD.fc.on('mouse:up', bdUp);
@@ -19199,11 +19604,23 @@ function bdInkForPaper() {
   else if (!paperDark && !inkDark) BD.color = BD_COLORS[0];
   return BD.color === was ? '' : BD.color;
 }
+/** 撤销 / 重做 / 清空 / 纸面也是图形，不是字。 */
+const BD_ICON = {
+  undo: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 8.6h8.2a3.6 3.6 0 0 1 0 7.2H7.4"/><path d="M7.2 4.8L3.6 8.6l3.6 3.6"/></svg>',
+  redo: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.6 8.6H7.4a3.6 3.6 0 0 0 0 7.2h5.2"/><path d="M12.8 4.8l3.6 3.8-3.6 3.6"/></svg>',
+  clear: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6.6h10.8"/><path d="M8 6.4V4.8h4v1.6"/><path d="M6.2 6.6l.7 8.6h6.2l.7-8.6"/><path d="M8.8 9.4v4M11.2 9.4v4"/></svg>',
+  home: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.2L10 4.6l6 5.6"/><path d="M5.6 9.4V16h8.8V9.4"/></svg>',
+  fit: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 7.6V4.4h3.2M15.6 7.6V4.4h-3.2M4.4 12.4v3.2h3.2M15.6 12.4v3.2h-3.2"/></svg>',
+};
+function bdIconBtn(id, icon, tip) {
+  return '<button type="button" id="' + id + '" class="svg" title="' + tip + '">' +
+    BD_ICON[icon] + '</button>';
+}
 function bdTools() {
   const bar = document.getElementById('bdTools');
   const t = BD_TOOLS.map(x =>
-    '<button type="button" data-t="' + x[0] + '" class="' + (x[0] === BD.tool ? 'on' : '') +
-    '" title="' + x[2] + '">' + x[1] + '</button>').join('');
+    '<button type="button" data-t="' + x.t + '" class="svg' +
+    (x.t === BD.tool ? ' on' : '') + '" title="' + x.tip + '">' + x.svg + '</button>').join('');
   const c = BD_COLORS.map(x =>
     '<button type="button" class="dot' + (x === BD.color ? ' on' : '') +
     '" data-c="' + x + '" style="--mkc:' + x + '" title="这个颜色"></button>').join('');
@@ -19213,31 +19630,55 @@ function bdTools() {
     '<span class="wdot" style="width:' + (3 + x * 1.6) + 'px;height:' + (3 + x * 1.6) + 'px"></span>' +
     '</button>').join('');
   const p = BD_PAPERS.map(x =>
-    '<button type="button" data-p="' + x[0] + '" class="' + (x[0] === BD.paper ? 'on' : '') +
-    '" title="' + x[1] + '">' + x[2] + '</button>').join('');
+    '<button type="button" class="svg' + (x[0] === BD.paper ? ' on' : '') +
+    '" data-p="' + x[0] + '" title="' + x[1] + '">' + BD_PAPER_ICON[x[0]] + '</button>').join('');
   bar.innerHTML = t + '<span class="sep"></span>' + c + '<span class="sep"></span>' + w +
     '<span class="sep"></span>' +
-    '<button type="button" id="bdUndoB" title="撤销（⌘/Ctrl + Z）">撤销</button>' +
-    '<button type="button" id="bdRedoB" title="重做（⌘/Ctrl + ⇧ + Z）">重做</button>' +
-    '<span class="sp"></span>' + p + '<span class="sep"></span>' +
-    '<button type="button" id="bdClearB" title="把这块板上的墨全擦掉（板还在）">清空</button>';
+    bdIconBtn('bdUndoB', 'undo', '撤销（⌘/Ctrl + Z）') +
+    bdIconBtn('bdRedoB', 'redo', '重做（⌘/Ctrl + ⇧ + Z）') +
+    bdIconBtn('bdClearB', 'clear', '把这块板上的墨全擦掉（板还在）') +
+    '<span class="sp"></span>' +
+    bdIconBtn('bdHomeB', 'home', '挪回纸的左上角') +
+    bdIconBtn('bdFitB', 'fit', '按现在画的东西把画布置中') +
+    '<span class="sep"></span>' + p;
   const u = document.getElementById('bdUndoB'), r = document.getElementById('bdRedoB');
   u.disabled = !BD.undo.length; r.disabled = !BD.redo.length;
 }
+/** 纸面的图标：白的、格子的、点阵的、横线的、黑纸，一眼分得清。 */
+const BD_PAPER_ICON = {
+  plain: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3.6" y="4.4" width="12.8" height="11.2" rx="1.4"/></svg>',
+  grid: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.6" y="4.4" width="12.8" height="11.2" rx="1.4"/><path d="M3.6 8.5h12.8M3.6 12.2h12.8M7.9 4.4v11.2M12.3 4.4v11.2"/></svg>',
+  dots: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.6" y="4.4" width="12.8" height="11.2" rx="1.4"/><path d="M6.2 7.4h.01M10 7.4h.01M13.8 7.4h.01M6.2 10h.01M10 10h.01M13.8 10h.01M6.2 12.8h.01M10 12.8h.01M13.8 12.8h.01" stroke-width="2.2"/></svg>',
+  lines: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="3.6" y="4.4" width="12.8" height="11.2" rx="1.4"/><path d="M3.6 8.4h12.8M3.6 12.1h12.8"/></svg>',
+  dark: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3.6" y="4.4" width="12.8" height="11.2" rx="1.4"/><path d="M6.8 13.6a3.6 3.6 0 0 1 0-7.2 4.4 4.4 0 0 0 0 7.2z" fill="currentColor" stroke="none"/></svg>',
+};
+/** 左栏：一本一本的书，点书名浮出正文，书名下面压着它的画板。
+ *  书列表来自 /api/state 的 books（全局那一份），板来自后端 list_boards。
+ *  这本书自己的板「现场」拉一遍，其余书的板按需拉 —— 免得一开画板就为几十本书各问一次。 */
 function bdPaintList() {
   const sid = document.getElementById('bdSid');
+  if (!sid) return;
+  const cur = local[BD.book];
   const rows = BD.boards.map(b =>
     '<button type="button" class="bdrow' + (b.id === BD.id ? ' on' : '') + '" data-b="' +
     esc(b.id) + '"><span class="nm">' + esc(b.title || '未命名画板') + '</span>' +
     '<span class="ms">' + (b.has_png || b.has_svg ? '有图' : '') + '</span>' +
     '<span class="tm">' + esc(String(b.updated || '').slice(5, 16).replace('T', ' ')) + '</span></button>'
   ).join('');
-  sid.innerHTML = '<div class="bdops"><button class="deed" id="bdNewB" type="button">新建一块</button>' +
-    '<span class="grow"></span><span class="mmtip">' + BD.boards.length + ' 块</span></div>' +
+  const head = '<div class="bdgrp"><span>这一本</span><span class="grow"></span>' +
+    '<span class="mmtip">' + BD.boards.length + ' 块</span></div>';
+  sid.innerHTML =
+    '<div class="bdops"><button class="deed" id="bdNewB" type="button">新建一块</button>' +
+    '<span class="grow"></span>' +
+    '<button class="deed" id="bdRenB" type="button">改名</button>' +
+    '<button class="deed" id="bdDelB" type="button">删掉这块</button></div>' +
+    head +
     (rows || '<div class="bdempty">这本书还没有画板。<br>新建一块，一边看书一边随手画两笔，' +
      '画完能并进笔记。</div>') +
-    '<div class="bdops bdops-end"><button class="deed" id="bdRenB" type="button">改名</button>' +
-    '<button class="deed" id="bdDelB" type="button">删掉这块</button></div>';
+    '<div class="bdgrp"><span>换一本书</span><span class="grow"></span>' +
+    '<button class="deed" id="bdSwapB" type="button" title="换一本书来画（画布不丢）">换</button></div>' +
+    '<div class="bdempty" id="bdSwapHint">' +
+    (cur ? '现在画的是《' + esc(cur.title || BD.book) + '》' : '先打开一本书') + '</div>';
 }
 function bdTouchBar() {
   document.querySelectorAll('#bdTools [data-t]').forEach(b =>
@@ -19263,7 +19704,12 @@ function bdApplyTool() {
     fc.freeDrawingBrush = b;
   }
   fc.forEachObject(o => { o.selectable = BD.tool === 'select'; o.evented = true; });
-  fc.defaultCursor = BD.tool === 'select' ? 'default' : (BD.tool === 'erase' ? 'not-allowed' : 'crosshair');
+  // 光标跟着工具走：画笔是十字、选择是箭头、橡皮是一道禁线；
+  // 空格按住（或按住右键）时画布整体变成抓手。
+  fc.defaultCursor = BD.tool === 'select' ? 'default'
+    : (BD.tool === 'erase' ? 'not-allowed' : 'crosshair');
+  const cut = document.querySelector('.bdcut');
+  if (cut) cut.style.cursor = BD.tool === 'select' || BD.space ? 'grab' : '';
   if (BD.tool !== 'select') { fc.discardActiveObject(); fc.renderAll(); }
 }
 /** 荧光笔：同一个色加上低不透明度，画在字上头也看得清底下的字。 */
@@ -19272,9 +19718,19 @@ function bdHlColor() {
   const n = parseInt(hex.slice(1), 16);
   return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',0.35)';
 }
+/** 快照只存画布内容，不存「看哪儿」。fabric 的 toJSON 会把 viewportTransform
+ *  一起带出来，存进去读回来，人就被扔回昨天挪到的那一个角落 —— 撤销一步的位置
+ *  也不该跟着跳。所以快照统一换成单位矩阵，读回来再贴当下的视口。 */
+function bdSnapJson() {
+  const keep = BD.fc.viewportTransform.slice();
+  BD.fc.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  const s = JSON.stringify(BD.fc.toJSON());
+  BD.fc.setViewportTransform(keep);
+  return s;
+}
 function bdSnapPush() {
   if (!BD.fc) return;
-  BD.undo.push(JSON.stringify(BD.fc.toJSON()));
+  BD.undo.push(bdSnapJson());
   if (BD.undo.length > BD_UNDO_MAX) BD.undo.shift();
   BD.redo.length = 0;
   bdTouchBar();
@@ -19291,12 +19747,12 @@ function bdLoadState(s) {
 }
 function bdUndo() {
   if (!BD.undo.length || !BD.fc) return;
-  BD.redo.push(JSON.stringify(BD.fc.toJSON()));
+  BD.redo.push(bdSnapJson());
   bdLoadState(BD.undo.pop());
 }
 function bdRedo() {
   if (!BD.redo.length || !BD.fc) return;
-  BD.undo.push(JSON.stringify(BD.fc.toJSON()));
+  BD.undo.push(bdSnapJson());
   bdLoadState(BD.redo.pop());
 }
 function bdDirty(msg) {
@@ -19308,7 +19764,12 @@ function bdDirty(msg) {
 async function bdSave() {
   BD.timer = 0;
   if (!BD.env || !BD.fc) return;
+  // 存的是这块板的内容，不是「我现在盯着哪一块」：视口复位再序列化，
+  // 免得下次打开被人上次挪到的角落带走（板本身没有「位置」这个概念）。
+  const keep = BD.fc.viewportTransform.slice();
+  BD.fc.setViewportTransform([1, 0, 0, 1, 0, 0]);
   BD.env.canvas = BD.fc.toJSON();
+  BD.fc.setViewportTransform(keep);
   BD.env.paper = BD.paper;
   const id = BD.id;
   const d = await bdPost({act: 'save', doc: BD.env});
@@ -19327,6 +19788,9 @@ async function bdPick(id) {
   BD.loading = true;
   BD.fc.loadFromJSON(d.board.canvas || {objects: []}, () => {
     BD.loading = false;
+    // 老存档里可能带着写死的 viewportTransform（存之前没洗），读回来一律贴回当前视口：
+    // 纸的坐标由 vx/vy 说了算，JSON 里那份不该左右「现在看哪儿」。
+    bdClamp();
     BD.fc.renderAll();
     bdApplyTool();
     bdPaintList();
@@ -19351,6 +19815,101 @@ async function bdNew() {
   bdPaintList();
   bdInfo('新的一块 · 直接画');
   bdTouchBar();
+}
+/** 换一本书：把书库里已导出的书列出来，点一本就把画布切到那本书（画布内容不丢 ——
+ *  切书前先把当前这块 flush 落盘）。这里只列书，不列板：板是选中书之后左栏自己那一摊。 */
+function bdSwapAsk() {
+  const all = Object.keys(local)
+    .map(id => local[id]).filter(b => b && b.chapters)
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  if (!all.length) { whisper('书库里还没有能画的书'); return; }
+  const sid = document.getElementById('bdSid');
+  const rows = all.map(b =>
+    '<button type="button" class="bdrow' + (b.id === BD.book ? ' on' : '') + '" data-swap="' +
+    esc(b.id) + '"><span class="nm">' + esc(b.title || b.id) + '</span>' +
+    '<span class="tm">' + (b.chapters || 0) + ' 章</span></button>').join('');
+  BD.swapBack = sid.innerHTML;
+  sid.innerHTML = '<div class="bdops"><button class="deed" id="bdSwapCancel" type="button">' +
+    '回到这一本</button><span class="grow"></span><span class="mmtip">' + all.length +
+    ' 本</span></div>' + rows;
+}
+/** 点一本书：把画布切到那本书，并把它的正文浮出来（用户要的是「边读边写」）。 */
+async function bdSwitchBook(id) {
+  if (!id) return;
+  if (id === BD.book) { bdPaintList(); bdReadOpen(); return; }
+  if (BD.timer) await bdSave();
+  BD.book = id; BD.id = ''; BD.env = null; BD.undo = []; BD.redo = [];
+  BD.loading = true; BD.fc.clear(); BD.loading = false;
+  BD.fc.backgroundColor = bdPaperBg(); BD.fc.renderAll();
+  bdSnapHome();
+  await bdRefresh();
+  bdReadOpen();
+}
+/** 正文浮层：把这本书已取回的章铺成一页可读的正文。优先当前章，没有就第一章。
+ *  它压在画布右下角，不挡笔；「收」把正文收掉，画布还在。 */
+async function bdReadOpen() {
+  const box = document.getElementById('bdRead');
+  const body = document.getElementById('bdReadBody');
+  const ttl = document.getElementById('bdReadTtl');
+  if (!box || !body) return;
+  const cur = local[BD.book];
+  box.hidden = false;
+  ttl.textContent = (cur && cur.title) || BD.book || '正文';
+  body.innerHTML = '<div class="bdempty">正在读这本书的正文…</div>';
+  let d = null;
+  try {
+    const r = await fetch('/api/read?book=' + encodeURIComponent(BD.book));
+    d = await r.json();
+  } catch (e) { d = null; }
+  if (!d || !d.ok) {
+    body.innerHTML = '<div class="bdempty">这本书还没取回正文。可以先在书架把它取回来，' +
+      '或者直接在这儿画 —— 画的东西照样存进这本书的 boards/。</div>';
+    return;
+  }
+  const book = d.data || {};
+  const chs = book.chapters || [];
+  if (!chs.length) {
+    body.innerHTML = '<div class="bdempty">这本书还没有可读的章节。</div>';
+    return;
+  }
+  // 正文按章取：先铺第一章（或阅读器停在哪章），再给一条「下一章」往下走。
+  const at = Math.max(0, Math.min(chs.length - 1,
+    RD.book === BD.book ? (RD.at | 0) : 0));
+  await bdReadChapter(at);
+}
+async function bdReadChapter(i) {
+  const body = document.getElementById('bdReadBody');
+  const ttl = document.getElementById('bdReadTtl');
+  if (!body) return;
+  const cur = local[BD.book];
+  let d = null;
+  try {
+    const r = await fetch('/api/read?book=' + encodeURIComponent(BD.book));
+    d = await r.json();
+  } catch (e) { d = null; }
+  const chs = (d && d.ok && d.data && d.data.chapters) || [];
+  const ch = chs[i];
+  if (!ch) return;
+  ttl.textContent = ((cur && cur.title) || BD.book) + ' · ' + (ch.title || '');
+  let md = '';
+  try {
+    const r = await fetch('/api/read?book=' + encodeURIComponent(BD.book) +
+      '&ch=' + encodeURIComponent(ch.file || ''));
+    const dd = await r.json();
+    md = (dd && dd.ok && dd.md) || '';
+  } catch (e) { md = ''; }
+  if (!md) { body.innerHTML = '<div class="bdempty">这一章没读到正文。</div>'; return; }
+  body.innerHTML = mdRender(md);
+  const nav = document.createElement('div');
+  nav.className = 'bdrdnav';
+  if (i > 0) nav.append(mk('上一章', () => bdReadChapter(i - 1)));
+  if (i < chs.length - 1) nav.append(mk('下一章', () => bdReadChapter(i + 1)));
+  body.append(nav);
+  body.scrollTop = 0;
+}
+function bdReadClose() {
+  const box = document.getElementById('bdRead');
+  if (box) box.hidden = true;
 }
 /** 换纸面：色还是 CSS 打的，画布只换底色。顺手把「黑纸配深墨」这种看不见的组合掰开。 */
 function bdSetPaper(p, quiet) {
@@ -19446,8 +20005,13 @@ function bdClear() {
 async function bdExport(fmt) {
   if (!BD.fc || !BD.id) { whisper('还没有画好的板'); return {ok: false, msg: '还没有画好的板'}; }
   if (BD.timer) await bdSave();
+  // 导出的是「这块板本身」，不是「我现在盯着的那一块」：先把视口复位再导，
+  // 不然 SVG 里的对象会带上一段平移/缩放，导出来的图左上角一大片空白。
+  const keep = BD.fc.viewportTransform.slice();
+  BD.fc.setViewportTransform([1, 0, 0, 1, 0, 0]);
   const data = fmt === 'svg' ? BD.fc.toSVG()
     : BD.fc.toDataURL({format: 'png', multiplier: 2});
+  BD.fc.setViewportTransform(keep);
   const d = await bdPost({act: 'export', id: BD.id, fmt: fmt, data: data});
   if (!d.ok) { bdInfo(d.msg || '图没导出来'); whisper(d.msg || '图没导出来'); return d; }
   if (d.boards) BD.boards = d.boards;
@@ -19509,16 +20073,148 @@ async function bdDoDelete(purge) {
   bdInfo(d.msg || '删掉了');
   if (BD.boards.length) bdPick(BD.boards[0].id);
 }
-/** 窗口变了就改画布尺寸。只改 dimensions：板上画的东西按原坐标留着，
- *  不重排 —— 重排会把用户摆好的位置弄花。 */
-function bdResize() {
+/** 把平移夹回「纸还看得见」的范围内：缩放之后纸的有效尺寸是 BD_PAPER_W×zoom，
+ *  平移过头会把整张纸推出视野，人看见的就是一片灰，还以为是画板空了。
+ *  夹的范围比纸大一圈，允许纸有点边被裁掉，但不允许整张纸消失。 */
+function bdClamp() {
   const fc = BD.fc;
-  if (!fc || !document.getElementById('bdLayer').classList.contains('open')) return;
-  const paper = document.getElementById('bdPaper');
-  const w = Math.max(320, paper.clientWidth - 2), h = Math.max(240, paper.clientHeight - 2);
-  fc.setDimensions({width: w, height: h});
-  fc.backgroundColor = bdPaperBg();
-  fc.renderAll();
+  if (!fc) return;
+  const cut = document.querySelector('.bdcut');
+  const vw = (cut && cut.clientWidth) || window.innerWidth;
+  const vh = (cut && cut.clientHeight) || window.innerHeight;
+  const z = BD.zoom;
+  BD.vx = Math.min(0, Math.max(BD.vx, vw - BD_PAPER_W * z));
+  BD.vy = Math.min(0, Math.max(BD.vy, vh - BD_PAPER_H * z));
+  fc.setViewportTransform([z, 0, 0, z, BD.vx, BD.vy]);
+}
+/** 打开时落在纸的左上角：第一眼看到纸，而不是从某个莫名其妙的位置开始。 */
+function bdSnapHome() {
+  BD.vx = 0; BD.vy = 0;
+  bdClamp();
+}
+/** 三种「左右拖动」都是同一件事：把平移量加上手指走的那一段。
+    鼠标 / 触控板双指都报 pointer 事件（fabric 的 upper-canvas 上），滚轮是另一条。
+    拖动中不重画内容，只改 transform —— fabric 每次 renderAll 会把整张 3200×2200 重绘，
+    拖动时每帧都重绘就会拖出残影；这里用 setViewportTransform（它会触发一次 renderAll），
+    但平移量够小、内容没变，浏览器合成层面只是平移一次已有的位图。 */
+function bdPanBy(dx, dy) {
+  BD.vx += dx; BD.vy += dy;
+  bdClamp();
+}
+/** 纸的可见区域：左边那条书列表/正文浮层会压住左下角，平移时给它们留一句提示。 */
+function bdPanInfo() {
+  if (BD.pan && BD.pan.moved) bdInfo('正在挪画布 · 松手停下来');
+}
+/** 把现在画的东西居中摆到视口里：板上有东西时按它们的总包围盒算，空板就回左上角。
+ *  尺寸也跟着收 —— 一张只画了左上角一小块的板，铺满一屏大半是空白。 */
+function bdFit() {
+  const fc = BD.fc;
+  if (!fc) return;
+  const objs = fc.getObjects();
+  const cut = document.querySelector('.bdcut');
+  const vw = (cut && cut.clientWidth) || window.innerWidth;
+  const vh = (cut && cut.clientHeight) || window.innerHeight;
+  if (!objs.length) { BD.zoom = 1; bdSnapHome(); bdInfo('这块还是空的'); return; }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  objs.forEach(o => {
+    const r = o.getBoundingRect();
+    x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+    x1 = Math.max(x1, r.left + r.width); y1 = Math.max(y1, r.top + r.height);
+  });
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  BD.zoom = Math.max(0.5, Math.min(1, vw / (w + 120), vh / (h + 120)));
+  BD.vx = (vw - w * BD.zoom) / 2 - x0 * BD.zoom;
+  BD.vy = (vh - h * BD.zoom) / 2 - y0 * BD.zoom;
+  bdClamp();
+  bdInfo('按这块画的东西摆正了');
+}
+/** 画布的三种「挪」：鼠标按住拖动、触控板双指、滚轮。
+ *  用捕获阶段先接（fabric 也挂在同一张 canvas 上），判定「这一下是挪画布」就
+ *  stopPropagation，不让 fabric 再当选择/绘制处理 —— 两件事不能都做。
+ *  判定：按住空格、按右键/中键、或者「工具是『选』且这一下没点在任何东西上」。
+ *  后一条是「左右拖动」的主力：选工具下拖空白就是挪画布，拖到对象上还是移动对象。
+ *  触控板双指在 macOS 上报的是 wheel（带 deltaX/deltaY），走下面那条滚轮分支；
+ *  ⌘/Ctrl + 滚轮是缩放（和导图同一手感）。 */
+function bdPanWire() {
+  const cut = document.querySelector('.bdcut');
+  if (!cut || cut.dataset.panw === '1') return;
+  cut.dataset.panw = '1';
+  const isPan = e => {
+    if (e.target.closest && e.target.closest('#bdRead')) return false;
+    if (BD.space || e.button === 1 || e.button === 2) return true;
+    if (e.button !== 0 || BD.tool !== 'select') return false;
+    // 选工具：这一下点到了画上的东西就是「选/移动」，点空白才是挪画布。
+    try { return !BD.fc.findTarget(e); } catch (err) { return true; }
+  };
+  cut.addEventListener('pointerdown', e => {
+    if (!isPan(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    BD.pan = {x: e.clientX, y: e.clientY, vx: BD.vx, vy: BD.vy, moved: false};
+  }, true);
+  window.addEventListener('pointermove', e => {
+    if (!BD.pan) return;
+    const dx = e.clientX - BD.pan.x, dy = e.clientY - BD.pan.y;
+    if (!BD.pan.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+    BD.pan.moved = true;
+    BD.vx = BD.pan.vx + dx; BD.vy = BD.pan.vy + dy;
+    bdClamp();
+    bdPanInfo();
+  });
+  const stop = () => {
+    if (!BD.pan) return;
+    const moved = BD.pan.moved;
+    BD.pan = null;
+    if (moved) bdInfo('挪好了 · 接着画');
+  };
+  window.addEventListener('pointerup', stop);
+  window.addEventListener('pointercancel', stop);
+  // 右键菜单在画布上会挡住「右键拖动」：这一层里禁掉。
+  cut.addEventListener('contextmenu', e => e.preventDefault());
+  // 滚轮：普通滚轮平移（横竖都走），⌘/Ctrl + 滚轮是缩放（触控板捏合）。
+  cut.addEventListener('wheel', e => {
+    if (e.target.closest && e.target.closest('#bdRead')) return;   // 正文自己滚
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      bdZoomAt(BD.zoom * Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
+      return;
+    }
+    e.preventDefault();
+    bdPanBy(-e.deltaX, -e.deltaY);
+  }, {passive: false});
+  // 空格临时「抓手」：按住空格时鼠标变成能挪，松开回去。
+  window.addEventListener('keydown', e => {
+    if (e.code !== 'Space') return;
+    const layer = document.getElementById('bdLayer');
+    if (!layer || !layer.classList.contains('open')) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const ao = BD.fc && BD.fc.getActiveObject();
+    if (ao && ao.isEditing) return;                 // 正在写字，空格就是空格
+    e.preventDefault();                             // 别让空格把画布滚走
+    if (!BD.space) { BD.space = true; document.body.classList.add('bdpanning'); }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code !== 'Space') return;
+    BD.space = false;
+    document.body.classList.remove('bdpanning');
+  });
+}
+/** 缩放：绕手势中心放大缩小，手势底下那一点原地不动（和导图 mmZoomAt 同一算法）。
+ *  画板不给捏合的加减号钮 —— 一条滚轮 + 一个空格够了，工具条上再放四颗更挤。 */
+function bdZoomAt(z, cx, cy) {
+  const fc = BD.fc;
+  if (!fc) return;
+  const cut = document.querySelector('.bdcut');
+  const r = cut ? cut.getBoundingClientRect() : {left: 0, top: 0};
+  const px = cx - r.left, py = cy - r.top;
+  // 当前比例下的纸内坐标 → 新比例下平移量要减掉多少
+  const next = Math.max(0.5, Math.min(2.5, z));
+  if (next === BD.zoom) return;
+  BD.vx = px - (px - BD.vx) * (next / BD.zoom);
+  BD.vy = py - (py - BD.vy) * (next / BD.zoom);
+  BD.zoom = next;
+  bdClamp();
 }
 function bdWire() {
   askWire('bdAsk');
@@ -19531,15 +20227,23 @@ function bdWire() {
     if (b.id === 'bdUndoB') { bdUndo(); return; }
     if (b.id === 'bdRedoB') { bdRedo(); return; }
     if (b.id === 'bdClearB') { bdClear(); return; }
+    if (b.id === 'bdHomeB') { bdSnapHome(); bdInfo('挪回纸的左上角了'); return; }
+    if (b.id === 'bdFitB') { bdFit(); return; }
   });
   document.getElementById('bdSid').addEventListener('click', e => {
-    const row = e.target.closest('[data-b]');
-    if (row) { if (BD.timer) bdSave(); bdPick(row.dataset.b); return; }
+    const sw = e.target.closest('[data-swap]');
+    if (sw) { bdSwitchBook(sw.dataset.swap); return; }
+    if (e.target.closest('#bdSwapB')) { bdSwapAsk(); return; }
+    if (e.target.closest('#bdSwapCancel')) { bdPaintList(); return; }
+    const bk = e.target.closest('[data-b]');
+    if (bk) { if (BD.timer) bdSave(); bdPick(bk.dataset.b); return; }
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'bdNewB') { bdNew(); return; }
     if (b.id === 'bdRenB') { bdRename(); return; }
     if (b.id === 'bdDelB') { bdDelete(); return; }
   });
+  document.getElementById('bdReadBack').onclick = () => { bdReadClose(); bdSwapAsk(); };
+  document.getElementById('bdReadX').onclick = bdReadClose;
   document.getElementById('bdNote').onclick = bdToNote;
   document.getElementById('bdPng').onclick = () => bdExport('png');
   document.getElementById('bdSvg').onclick = () => bdExport('svg');
@@ -19550,7 +20254,7 @@ function bdWire() {
   window.addEventListener('resize', () => {
     if (!document.getElementById('bdLayer').classList.contains('open')) return;
     if (BD.rt) clearTimeout(BD.rt);
-    BD.rt = setTimeout(bdResize, 180);
+    BD.rt = setTimeout(bdClamp, 120);      // 纸的尺寸不变，只把平移夹回可见范围
   });
 }
 async function bdClose() {
