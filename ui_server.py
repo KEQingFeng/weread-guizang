@@ -557,6 +557,35 @@ def _write_bytes(path, raw):
         raise
 
 
+def _write_text(path, text):
+    """文本落盘的唯一出口（写作导出那一份 `.md`）：先写临时件再原子顶替。
+
+    导出的 Markdown 直接落在导出文件夹里，而这个口子由 `ThreadingHTTPServer` 的
+    请求线程直接调（`writer_export` 那条 GET 路上没有任何锁）。旧写法
+    `open(dest, "w")` 一进去就把上一趟那份好导出截断，写一半被杀（关窗 / 断电）
+    就只剩半篇；连点两次导出更糟：两边各按自己的偏移往同一个文件里写，顶成正式
+    导出的是两份内容交织的那一份。临时名带 pid + 随机串互不打架，写完
+    `os.replace` 原子顶替，失败先把临时件收干净再抛 —— 与 `_write_json` /
+    `_write_bytes` 同一把尺子。
+
+    兜 `BaseException` 而不是 `Exception`：Ctrl-C / 停止键走的是
+    `KeyboardInterrupt` / `SystemExit`，它们不继承 `Exception`，只兜 `Exception`
+    会在退出路径上把临时件留在导出文件夹里（`writer._write_text_atomic` 同款）。
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _meta_dict(d):
     """读书目录里的 meta.json，只认「对象」这一种形状；读不开 / 不是对象都回空表。
 
@@ -1554,9 +1583,9 @@ def writer_export(kind, book_id, opts):
     elif kind == "md":
         # 也在导出文件夹里落一份，四颗按钮的文件才在同一个地方 ——
         # 单独走浏览器下载的话，「打开所在文件夹」翻不到它。
+        # 走原子写：连点两次导出 / 写一半被杀，都不该把上一趟那份好的导出截成半篇。
         dest = os.path.join(DOWNLOAD_DIR, "%s.md" % stem)
-        with open(dest, "w", encoding="utf-8") as f:
-            f.write(src.get("text") or "")
+        _write_text(dest, src.get("text") or "")
     else:
         raise RuntimeError("没有这一种导出格式")
     return dest, note
