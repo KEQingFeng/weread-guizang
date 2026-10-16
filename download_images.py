@@ -187,7 +187,10 @@ def collect_tasks(raw_dir, img_dir):
     tasks, skipped, seen = [], 0, set()
     for jf in sorted(glob.glob(os.path.join(raw_dir, "*.json"))):
         try:
-            with open(jf, "r", encoding="utf-8") as fh:
+            # utf-8-sig：raw/*.json 是能手改 / 云同步回写的档，记事本另存会带 BOM；
+            # 裸 `utf-8` 一解不动就只 `skipped += 1`，那张图从此不再重下、界面上也
+            # 看不出为什么少图。与取书引擎那份 raw 读口同一把尺子（`_seen_image_urls`）。
+            with open(jf, "r", encoding="utf-8-sig") as fh:
                 doc = json.load(fh)
         except Exception:
             skipped += 1

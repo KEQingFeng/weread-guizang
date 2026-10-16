@@ -1113,6 +1113,15 @@ run "插图文件名脏值（NUL / 控制符 / 半个代理码点只跳一条，
 # 对照防空转。网络层用假 urlopen 顶掉，端到端那条打本机临时端口 + file:// 指向临时目录里
 # 的假密钥文件，不联网、不碰真实书库。
 run "插图地址 scheme（file:// / data: 不许替用户取回本机文件）" "$PY" tests/check_download_scheme.py
+# 上面两条管的是「地址该不该取」，这一条管同一个文件另一面**读法**：raw/*.json 与
+# 剪藏那份 meta.json 都是用户拿记事本能改、云同步也能回写的 JSON，读口原先写的是裸
+# `utf-8`，Windows 记事本另存带的 BOM 一读就抛。剪藏那处外面罩着 `except: meta = {}`、
+# 紧接着 `meta.update(...)` 整份写回 —— 带 BOM 等于以空账重写，用户改过的字段全丢；
+# 插图那处坏了只 `skipped += 1`，那张图从此不重下。两处都收成同一把尺子（meta 走
+# `book_layout.read_meta` 的 `utf-8-sig`、raw 读口改 `utf-8-sig`），含「裸 utf-8 读带
+# BOM 确实抛」与「旧读法把这份当空账 / 坏记录」的对照防空转。纯函数 + 临时目录沙盒，
+# 假 import_book 顶掉建书那一步，不联网、不开浏览器、不起服务。
+run "剪藏 meta / 插图清单读口认 BOM（带 BOM 不许当空账重写 / 不许当坏记录跳过）" "$PY" tests/check_clip_raw_bom.py
 # 加书架（shelf_add.py）是少数几个真去改微信那边状态的动作，此前也没有测试。这一条
 # 不联网、不开浏览器，钉的是两件离线也验得实的事：书号尺子四个入口必须是同一把
 # （界面 / 本地服务 / MCP 都写 5–20 位，shelf_add.py 原来写 5–12，且 Python 的 \d 连

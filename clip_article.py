@@ -971,12 +971,12 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None
 
     # meta 里补剪藏专属字段：来源链接要能一键回原文，source=clip 让书架分组显示
     mp = os.path.join(info["dir"], "meta.json")
-    meta = {}
-    try:
-        with open(mp, encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        meta = {}
+    # 读口走 book_layout.read_meta（全仓唯一的 meta 读法），不再在这里补第三份：
+    # 它用的是 `utf-8-sig`。原先那句裸 `utf-8` 一撞上记事本另存的 BOM 就整份解不动，
+    # 而外面罩着 `except Exception: meta = {}`，紧接着 `meta.update(...)` 再整份写回
+    # —— 等于**以空账为底重写这份 meta**，用户改过的其它字段一个不剩。与
+    # `#162` / `#175` 收的那几处是同一把尺子（BOM 只该当编码签名剥掉）。
+    meta = book_layout.read_meta(info["dir"])
     meta.update({"source": "clip", "format": "clip", "url": art["url"],
                  "site": art["site"], "date": art["date"], "cover": art["cover"],
                  "words": art["words"],
