@@ -50,6 +50,13 @@ CACHE_FILES = (
     ("avatar.bin", "个人主界面的头像"),
     ("wallpaper.bin", "自定义壁纸"),
     ("notes_index.json", "划线与笔记索引"),
+    # 重建笔记索引之前，`/api/notes_index` 的 rebuild 分支会先
+    # `shutil.copy2(NOTES_IDX, NOTES_IDX + ".prev")`（见 ui_server.py）。它是以
+    # `.prev` 收尾的**上一版正本**，不是写到一半的临时件 —— `_residue_items` 那把
+    # 尺子只认 `<账本>.tmp` 两种形状，够不到它，所以只能在这张表上点名。里面是
+    # 整份划线与笔记索引：少这一条，用户在换机 / 把机器送人之前点的那一下
+    # 「清除本地数据」会把正本收走、却把内容一模一样的 `.prev` 留在盘上。
+    ("notes_index.json.prev", "重建笔记索引前留的上一版（整份划线 / 笔记索引）"),
     ("note_templates.json", "自建的划线笔记模板"),
     ("feed.json", "订阅源与抓下来的条目"),
     ("clips.json", "剪藏下来的文章"),
