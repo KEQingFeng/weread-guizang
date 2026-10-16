@@ -565,7 +565,14 @@ def build_epub(book_dir, dest, title="", author="", cover=None):
                  "media-type=\"application/oebps-package+xml\"/>\n"
                  "  </rootfiles>\n</container>\n")
 
-    tmp = dest + ".part"
+    # 临时名一次一个（进程号 + 随机串）：这一格与 sync / download_images 那些
+    # 「先写 `<目标>.part` 再 os.replace」的写口同一形状，但**不能共用一个固定名**。
+    # `/api/epub` 是在请求线程里直接调的（`ui_server.export_book`），服务又是
+    # ThreadingHTTPServer：同一本书点两下（双击 / 两个标签页）就是两条线程往同一个
+    # `dest` 上落。固定名下两边写的是同一份临时件 —— 先收尾的那个把件搬走，后一个
+    # `os.replace` 当场 FileNotFoundError（界面上是「导出没做成：…」，而书是导出来了的）；
+    # 两条线程交替写还会把这份 EPUB 写成混血。名字一随机，各写各的临时件、各改各的名。
+    tmp = "%s.%d.%s.part" % (dest, os.getpid(), uuid.uuid4().hex[:8])
     try:
         with zipfile.ZipFile(tmp, "w") as z:
             # mimetype 不压缩、放第一个：这是 EPUB 唯一的硬性要求
@@ -680,6 +687,11 @@ def build_pdf(book_dir, dest, title="", author=""):
               ('<div class="bookauthor">%s</div>' % _esc(author)) if author else "",
               "\n".join(parts)))
 
+    # 铬也打到同目录的随机临时件上、成功了再 `os.replace` 改名（与上面 EPUB 同一个
+    # 理由）：`page.pdf(path=dest)` 是直写终稿 —— 铬打到一半失败 / 整趟被强杀，`dest`
+    # 上就留着半份 PDF，而它已经顶掉了上一份完整导出；同一本书两条导出线程本来也会
+    # 同时写同一个 `dest`。改名之后 `dest` 要么是上一份完整的、要么是这一份完整的。
+    tmp = "%s.%d.%s.part" % (dest, os.getpid(), uuid.uuid4().hex[:8])
     tmpdir = tempfile.mkdtemp(prefix="guizang-pdf-")
     try:
         html_path = os.path.join(tmpdir, "book.html")
@@ -691,11 +703,17 @@ def build_pdf(book_dir, dest, title="", author=""):
             try:
                 page = browser.new_page()
                 page.goto(Path(html_path).resolve().as_uri(), timeout=120000)
-                page.pdf(path=dest, format="A4", print_background=True,
+                page.pdf(path=tmp, format="A4", print_background=True,
                          margin={"top": "18mm", "bottom": "18mm",
                                  "left": "16mm", "right": "16mm"})
+                os.replace(tmp, dest)
             finally:
                 browser.close()
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     return dest

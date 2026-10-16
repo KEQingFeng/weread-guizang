@@ -589,6 +589,12 @@ run "导出落盘编码（文本 open 都要 encoding / ASCII 环境下中文照
 # UnicodeDecodeError，另外几章正文也无从导出。现在按字节读、坏字节落成 U+FFFD：坏章照样
 # 进成品、好章一字不差、干净的书一个字符都不动。真打一个 EPUB 验，纯离线。
 run "导出章节读取容错（坏字节不带走整本书 / 不丢章 / 干净书零改动）" "$PY" tests/check_export_tolerant.py
+# 紧挨着上面三条：内容对不对是一回事，**成品落盘那一刀**经不经得起两个写者同时来是另一回事。
+# book_export 的 EPUB 写口原先用固定临时名 `<目标>.part`、PDF 写口干脆 `page.pdf(path=dest)`
+# 直写终稿；而 `/api/epub` / `/api/pdf` 是在请求线程里直接调它的（服务是 ThreadingHTTPServer）——
+# 同一本书点两下，一个改名当场扑空报「导出没做成」，另一个把半份 PDF 顶掉上一份完整导出。
+# 现在两个写口都写同目录的随机临时件、成功了再 os.replace。纯离线，PDF 那半用假铬内核。
+run "整本导出成品落盘（EPUB/PDF 临时件一次一个名 / 并发不扑空 / 失败留旧档）" "$PY" tests/check_book_export_atomic.py
 # 上面那条收的是导出（EPUB / PDF）那一侧；读同一批 chapters/*.md 的还有界面这一侧 ——
 # 阅读页取某一章、合并稿、单本 / 多本打包、剪藏 / 订阅 / 视频的「整篇小结」，原先各自
 # 又 `open(..., encoding="utf-8")` 读一遍：一个另存成 GBK 的章节在导出那边早就只坏几个字，
