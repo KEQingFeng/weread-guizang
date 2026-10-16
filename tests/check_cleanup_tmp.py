@@ -17,10 +17,14 @@
     `cache/config.json.4242.1a2b3c4d.tmp` 还躺在盘上，Key 原样在里头。
 
 这一条钉住
-  · 两种形状的残件（固定名 / pid + 随机串）都进「数据」组清单，试算里 `exist`
-    为真、试算本身不删任何东西；`run("data")` 之后确实没了；
+  · 前两种形状的残件（固定名 `.tmp` / pid + 随机串 `.tmp`）都进「数据」组清单，试算里
+    `exist` 为真、试算本身不删任何东西；`run("data")` 之后确实没了；
+  · **第三种形状：云同步取回留下的 `<账本>.part`**（`sync._write_atomic` 先写
+    `<目标>.part` 再改名）。`_collect` 把 `cache/readstat.json` / `library.json` /
+    `notes_index.json` 也列进同步对，取回途中被强杀就会在 `cache/` 留下这一份；
+    书目录那一头早就是 `.tmp` / `.part` 同一把尺子，这一刀并齐；
   · 清完之后整个数据目录里再也找不到那串 Key（连残件一起 grep 一遍）；
-  · 红线：不认识的 `.tmp`、正经文件、**同名目录**、**符号链接**一概不碰；
+  · 红线：不认识的 `.tmp` / `.part`、正经文件、**同名目录**、**符号链接**一概不碰；
   · 对照：只按旧那份精确名清单删一遍，同一份残件会原样留下 —— 这一刀不是空转。
 
 全程临时沙盒，不碰真实 cache / 书库 / 导出目录。纯标准库，离线。
@@ -58,13 +62,18 @@ KEY = "sk-" + "f" * 32
 R_FIXED = CACHE / "config.json.tmp"
 R_RANDOM = CACHE / "config.json.4242.1a2b3c4d.tmp"
 R_LIB = CACHE / "library.json.999.deadbeef.tmp"
+# 第三种形状：云同步取回写到一半（`sync._write_atomic` 的 `path + ".part"`）。这条
+# 账本在 `_collect` 的同步对里，取回途中被强杀就会在 cache/ 留下这一份。
+R_PART = CACHE / "library.json.part"
 R_ROOT_FIXED = DATA / "runtime.json.tmp"
 R_ROOT_OPML = DATA / "订阅.opml.77.00ff00ff.tmp"
-RESIDUES = (R_FIXED, R_RANDOM, R_LIB, R_ROOT_FIXED, R_ROOT_OPML)
+RESIDUES = (R_FIXED, R_RANDOM, R_LIB, R_PART, R_ROOT_FIXED, R_ROOT_OPML)
 # 一概不许碰的几样。
 DECOY_TMP = CACHE / "别人的东西.tmp"          # 不在白名单里的 .tmp
+DECOY_PART = CACHE / "别人的东西.part"        # 不在白名单里的 .part（白名单仍然管着 .part）
 DECOY_FILE = CACHE / "notes.txt"              # 正经文件
 DECOY_DIR = CACHE / "feed.json.tmp"           # 残件形状被占成了一个目录
+DECOY_PART_DIR = CACHE / "notes_index.json.part"  # 白名单里那本账，但 .part 被占成目录
 DECOY_LINK = CACHE / "anna.json.5.12345678.tmp"   # 残件形状被占成了一个符号链接
 LINK_TARGET = SB / "outside-target.txt"
 
@@ -79,13 +88,17 @@ def seed():
     R_FIXED.write_text('{"agent_key": "%s"' % KEY, encoding="utf-8")
     R_RANDOM.write_text('{"agent_key": "%s"' % KEY, encoding="utf-8")
     R_LIB.write_text('{"books": []', encoding="utf-8")
+    R_PART.write_text('{"books": []', encoding="utf-8")
     R_ROOT_FIXED.write_text('{"port": 8770', encoding="utf-8")
     R_ROOT_OPML.write_text("<opml", encoding="utf-8")
     # 红线这几样。
     DECOY_TMP.write_text("keep", encoding="utf-8")
+    DECOY_PART.write_text("keep", encoding="utf-8")
     DECOY_FILE.write_text("keep", encoding="utf-8")
     DECOY_DIR.mkdir(exist_ok=True)
     (DECOY_DIR / "里面还有个文件.txt").write_text("keep", encoding="utf-8")
+    DECOY_PART_DIR.mkdir(exist_ok=True)
+    (DECOY_PART_DIR / "里面还有个文件.txt").write_text("keep", encoding="utf-8")
     LINK_TARGET.write_text("keep", encoding="utf-8")
     try:
         os.symlink(str(LINK_TARGET), str(DECOY_LINK))
@@ -123,6 +136,12 @@ def main():
     chk("尺子：团成一团的随机段不算（要 pid + 八位小写十六进制）",
         not re_.match("config.json.abc.deadbeef.tmp")
         and not re_.match("config.json.1.DEADBEEF.tmp"))
+    chk("尺子：认云同步取回留下的固定名 config.json.part",
+        bool(re_.match("config.json.part")))
+    chk("尺子：`.part` 也锚死前后（config.part / xconfig.json.part 都不算）",
+        not re_.match("config.part") and not re_.match("xconfig.json.part"))
+    chk("尺子：`.partx` / `.part.tmp` 这类近似名不算",
+        not re_.match("config.json.partx") and not re_.match("config.json.part.tmp"))
 
     # ── 1. 对照：旧那份清单（只按精确名）根本认不到残件 ────────────────
     old_paths = [os.path.join(cl.cache_dir(), n) for n, _ in cl.CACHE_ITEMS]
@@ -131,6 +150,9 @@ def main():
     chk("对照：旧清单里没有任何一个 .tmp 残件",
         not any(p.endswith(".tmp") for p in old_paths),
         [p for p in old_paths if p.endswith(".tmp")])
+    chk("对照：旧清单里也没有任何一个 .part 残件",
+        not any(p.endswith(".part") for p in old_paths),
+        [p for p in old_paths if p.endswith(".part")])
     # 真按旧清单删一遍（就是 run() 干的事：存在的精确路径删掉），残件原样留下。
     for p in old_paths:
         try:
@@ -141,6 +163,8 @@ def main():
     chk("对照：旧清单删完之后，半截 config.json 残件还在盘上",
         R_FIXED.exists() and R_RANDOM.exists() and KEY in R_FIXED.read_text(encoding="utf-8"),
         sorted(str(x) for x in RESIDUES))
+    chk("对照：旧清单删完之后，云同步那份 .part 半截件也还在盘上",
+        R_PART.exists(), str(R_PART))
     # 恢复到「刚装过、出过事故」的样子，接着走真路径。
     seed()
 
@@ -149,22 +173,21 @@ def main():
     p = cl.plan("data")
     items = {i["key"]: i for i in p["groups"][0]["items"]}
     want = {"data-cache-config.json.tmp", "data-cache-config.json.4242.1a2b3c4d.tmp",
-            "data-cache-library.json.999.deadbeef.tmp",
+            "data-cache-library.json.999.deadbeef.tmp", "data-cache-library.json.part",
             "data-root-runtime.json.tmp", "data-root-订阅.opml.77.00ff00ff.tmp"}
-    chk("试算：两种形状的残件都列出来了", want <= set(items), sorted(set(items) - want))
+    chk("试算：三种形状的残件（固定 .tmp / 随机 .tmp / 同步 .part）都列出来了",
+        want <= set(items), sorted(set(items) - want))
     chk("试算：残件那几行 exist 为真、大小大于零",
         all(items[k]["exist"] and items[k]["size"] > 0 for k in want if k in items),
         {k: (items[k]["exist"], items[k]["size"]) for k in want if k in items})
     chk("试算：残件的标签点明它是「写到一半的临时件」",
         all("临时件" in items[k]["label"] for k in want if k in items),
         {k: items[k]["label"] for k in want if k in items})
-    chk("试算：不认识的 .tmp / 正经文件 / 同名目录 / 符号链接都不进清单",
-        {"data-cache-别人的东西.tmp", "data-cache-notes.txt",
-         "data-cache-feed.json.tmp", "data-cache-anna.json.5.12345678.tmp"}
-        & set(items) == set(),
-        sorted({"data-cache-别人的东西.tmp", "data-cache-notes.txt",
-                "data-cache-feed.json.tmp",
-                "data-cache-anna.json.5.12345678.tmp"} & set(items)))
+    decoys = {"data-cache-别人的东西.tmp", "data-cache-别人的东西.part",
+              "data-cache-notes.txt", "data-cache-feed.json.tmp",
+              "data-cache-notes_index.json.part", "data-cache-anna.json.5.12345678.tmp"}
+    chk("试算：不认识的 .tmp / .part、正经文件、同名目录、符号链接都不进清单",
+        decoys & set(items) == set(), sorted(decoys & set(items)))
     chk("试算只看不删（整棵数据目录一个字节没动）", snapshot() == before,
         [k for k in before if k not in snapshot()])
 
@@ -172,16 +195,19 @@ def main():
     r = cl.run("data")
     chk("清数据：没报错、确实删了东西", r["ok"] and r["removed"] and r["freed"] > 0,
         {k: r[k] for k in ("ok", "freed", "errors")})
-    chk("清数据：五种形状的残件全没了", not any(x.exists() for x in RESIDUES),
+    chk("清数据：六种形状的残件全没了（含同步那份 .part）",
+        not any(x.exists() for x in RESIDUES),
         [str(x) for x in RESIDUES if x.exists()])
     chk("清数据：白名单里的正本也没了",
         not (CACHE / "config.json").exists() and not (CACHE / "library.json").exists()
         and not (DATA / "runtime.json").exists())
-    chk("清数据：不认识的 .tmp 与正经文件一个字没动",
+    chk("清数据：不认识的 .tmp / .part 与正经文件一个字没动",
         DECOY_TMP.read_text(encoding="utf-8") == "keep"
+        and DECOY_PART.read_text(encoding="utf-8") == "keep"
         and DECOY_FILE.read_text(encoding="utf-8") == "keep")
-    chk("清数据：同名目录还在、里面的文件也在",
-        DECOY_DIR.is_dir() and (DECOY_DIR / "里面还有个文件.txt").exists())
+    chk("清数据：同名目录还在、里面的文件也在（.tmp 与 .part 两种形状各一个）",
+        DECOY_DIR.is_dir() and (DECOY_DIR / "里面还有个文件.txt").exists()
+        and DECOY_PART_DIR.is_dir() and (DECOY_PART_DIR / "里面还有个文件.txt").exists())
     if have_link():
         chk("清数据：符号链接还在（哪怕名字长得像残件）",
             os.path.islink(str(DECOY_LINK)) and LINK_TARGET.read_text(encoding="utf-8") == "keep")
@@ -207,6 +233,8 @@ def main():
         "for name, label in CACHE_FILES:" in src and "for name, label in ROOT_FILES:" in src)
     chk("接线：只收普通文件（符号链接与同名目录不碰）",
         "os.path.islink(path) or not os.path.isfile(path)" in src)
+    chk("接线：尺子把 `.part` 与 `.tmp` 并进同一条（sync 那一档）",
+        r"\.part" in src and r"\.tmp" in src and "re.escape(name)" in src)
 
     shutil.rmtree(SB, ignore_errors=True)
     bad = [c for c in checks if not c[0]]
