@@ -1152,6 +1152,13 @@ run "书城短 id 的 ASCII 口径（全角 / 阿拉伯-印度数字不算数，
 # 原子替换（写失败不毁旧档、不留 .tmp），外加界面与 MCP 都兜住了「没有秒数」这一档。
 # 全离线、不联网、不开浏览器、不需要 playwright。归静态段，--fast 也得带上。
 run "登录态账本（形状一处真相 / 原子落盘 / 半截档 / 三处读者兜底）" "$PY" tests/check_login.py
+# 上一条把「原子落盘」钉住了，但它喂的失败是 OSError 那一档（`except Exception` 接得住）。
+# 这一条补的是**中止信号**那一半：`KeyboardInterrupt` / `SystemExit` 不继承 Exception，
+# 而这一格的临时件名仍是全仓最后一个固定名 `path + ".tmp"` —— Ctrl-C 落在写完临时件、
+# 还没改名那一句上，旧写法就在 `cache/` 里留一个没人认领的半截 `login_state.json.tmp`。
+# 收残件兜 BaseException、收完原样抛；名字那一半本轮不动（`check_login.py` 把这条名字
+# 形状钉成了源码断言，改它要连那条门禁一起改），另带一条「旧写法确实留件」的对照。
+run "登录态账本中止信号（Ctrl-C / SystemExit 不留 .tmp / 旧写法对照）" "$PY" tests/check_login_abort.py
 # 上一条钉的是浮点那一档的越界（NaN / inf），这一条钉**整数**那一档：`json` 把账本里
 # 一长串数字解成 Python 大整数，`login._seconds` 的 `float(v)` 在它上面抛 OverflowError，
 # `math.isfinite` 还没轮到 —— 异常穿出 normalize_state、被 read_state 那把宽 except 接住，
