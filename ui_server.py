@@ -549,7 +549,10 @@ def _write_bytes(path, raw):
         with open(tmp, "wb") as f:
             f.write(raw)
         os.replace(tmp, path)
-    except Exception:
+    except BaseException:
+        # 中止信号（Ctrl-C / 关窗发的 SIGTERM）也是字节落了一半的时点，与异常同一档：
+        # 先把临时件收干净再往上抛（这一族其余写口从 #157 起统一走 BaseException，
+        # 这里补上，壁纸那条新接进来的路才不用各自再兜一遍）。
         try:
             os.remove(tmp)
         except OSError:
@@ -1702,8 +1705,14 @@ def save_wallpaper(data_url):
         raise RuntimeError(f"这不是有效的图片数据（声明为 {declared}）")
     if len(raw) > WALL_MAX:
         raise RuntimeError("图片太大了（请压到 15MB 以内）")
-    with open(WALL_PATH, "wb") as f:
-        f.write(raw)
+    # 壁纸与封面同一档的二进制落盘：走 `_write_bytes`（先写 pid + 随机名的临时件、
+    # 再 os.replace 原子顶替）。老写法是把 WALL_PATH 直接交给 `open(..., "wb")` 落目标 ——
+    #   · 写到一半被杀 / 盘满：用户自定义的那张壁纸当场被截成半张，而读口只按
+    #     `os.path.isfile` 认「有壁纸」，于是界面上是一张永远打不开的破图；
+    #   · `/api/wallpaper` 挂在多线程服务上，两个标签页同时上传就是两只手往同一个
+    #     文件里写，谁先谁后说不准（随机临时名 + 原子改名之后各写各的）。
+    # `_write_bytes` 顺带把父目录建出来：`cache/` 还没铺好时老写法直接 FileNotFoundError。
+    _write_bytes(WALL_PATH, raw)
     cfg = load_cfg()
     cfg["wall_mime"] = mime
     save_cfg(cfg)
