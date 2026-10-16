@@ -1199,6 +1199,16 @@ run "配置脏字段（内层形状不对不再让 /api/state 整页失联）" "
 # 认不出回 None，do_POST 回 400 并主动断连，绝不带着猜出来的长度往下走。纯函数 + 源码接线
 # + in-process 真 Handler 的裸 HTTP 三面都钉，不联网、不碰真实数据，归静态段。
 run "请求体长度脏值（abc / 负数不再断连或挂住，脏值回 400）" "$PY" tests/check_post_length.py
+# 上一条收的是「长度认不出来」；这一条收同一把尺子的另一半：长度完全合法、只是大得
+# 离谱。`do_POST` 读 body 排在 cross_site / Host 两道门之前（那两道门要读干净 body，
+# keep-alive 才不错位），所以一个网页或一次 rebinding 发一句 `Content-Length: 10G`
+# 就能让服务端照数 read、内存一路涨到 OOM。上限挂在 `_body_len`（`MAX_POST_BODY`，
+# 从 book_import.MAX_BYTES 推），超过与认不出同一条路：回 400 并断连，一个字节不读。
+# 顺带把 Python 3.11+ 给十进制串转 int 设的 4300 位上限也绕开（先比有效位数再转），
+# 五千位的 Content-Length 不再是「200 + 一句英文报错」。
+# 纯函数 + 源码接线 + in-process 真 Handler（超大长度、body 一个字节不发）三面都钉，
+# 另留一条「正好等于上限仍会读、客户端读超时」的对照，防门槛被悄悄压低。归静态段。
+run "请求体长度上限（10G / 五千位的 Content-Length 不再让服务端照数去读）" "$PY" tests/check_post_body_limit.py
 # 上面那三条把「顶层是畸形体」收了口：body 解析出来不是对象就统一当 `{}`。可字段级
 # 还漏着一档 —— `{"books": 123}` / `{"items": 123}` 是合法 JSON，顶层是对象，类型却
 # 不对。`/api/book_state` `/api/delete_many` `/api/flomo` `/api/notes_csv` 这四条没有

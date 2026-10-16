@@ -4879,8 +4879,23 @@ def _qint(raw, default, lo=None, hi=None):
     return n
 
 
+# 单个请求体的上限（字节）。为什么不设「能收多大就收多大」：`Content-Length` 是
+# 对方一句话，服务端照着它 `read(n)` 就是把自己的内存交出去 —— 而这道 read 发生在
+# `cross_site` / Host 两道门**之前**（那两道门要先把 body 读干净，keep-alive 才不错位），
+# 所以一个随手打开的网页、或一次 DNS rebinding，都能用 `Content-Length: 10G` 让
+# 服务端一直读下去、内存一路涨，直到自己 OOM。上限按最大的那条合法请求取：导入一本
+# 书封顶 `book_import.MAX_BYTES`（200MB），前端 base64 之后约 267MB，这里留一倍余量。
+# 超过这个数的与「认不出」走同一条路：`_body_len` 回 None，do_POST 回 400 并断连，
+# 一个字节都不读。理由写在 `tests/check_post_body_limit.py`。
+MAX_POST_BODY = book_import.MAX_BYTES * 2
+# 上限的十进制有效位数。拿它先挡一道再转 int：Python 3.11+ 给「十进制串转 int」设了
+# 4300 位的默认上限，一个几千位的 Content-Length 会让 `int()` 当场 ValueError（被
+# 总兜底接成一句英文报错），而要判的只是「有没有超过上限」—— 位数先比一次就够。
+_MAX_POST_BODY_DIGITS = len(str(MAX_POST_BODY))
+
+
 def _body_len(raw):
-    """POST 的 `Content-Length` 收成「这条请求体该读多少字节」，认不出给 None。
+    """POST 的 `Content-Length` 收成「这条请求体该读多少字节」，认不出或太大给 None。
 
     为什么不跟 `_qint` 一样「脏值回默认」：查询串脏了当没传，最多是少显示几行；
     body 长度脏了是另一回事 —— 读 0 会把还没读的字节留在流里，keep-alive 下被
@@ -4890,6 +4905,12 @@ def _body_len(raw):
     挂在那儿（`Content-Length: -1` 实测如此）。所以这里不设默认值：认不出回 None，
     由 `do_POST` 回 400 并主动断连。宁可这一次请求当面失败，也不带着一份猜出来的
     长度往下走。正常浏览器发的永远是一串非负十进制数字，这条路只在坏客户端时才走。
+
+    最后还有一档是「长度本身合法、只是大得离谱」：没有上限时 `read(n)` 会照着这个
+    数去分配 / 一直读（见 `MAX_POST_BODY` 的注释），所以超过上限与认不出同一条路 ——
+    回 None 让调用方断连，绝不先把这个 body 读进内存再判该不该拒。判上限不靠
+    `int(text)`：先比有效位数（开头的 0 不算数位），位数就超了的连转都不转，
+    几千位的长度因此不会撞上 `int()` 的位数上限。
     """
     if isinstance(raw, (list, tuple, dict, set)):
         return None              # 非标量：同一个头传两遍之类，不当长度用
@@ -4902,7 +4923,13 @@ def _body_len(raw):
     # 认它、`int()` 也认它）一律不算 —— 长度是协议字段，不猜。
     if not (text.isascii() and text.isdigit()):
         return None
-    return int(text)
+    digits = text.lstrip("0") or "0"
+    if len(digits) > _MAX_POST_BODY_DIGITS:
+        return None
+    n = int(digits)
+    if n > MAX_POST_BODY:
+        return None
+    return n
 
 
 def _body_list(raw):
