@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import uuid
 from urllib.parse import urlparse
 from urllib.request import getproxies
 
@@ -407,19 +408,48 @@ def runtime_file(repo):
     return os.path.join(data_dir(repo), "runtime.json")
 
 
+def _tmp_for(path):
+    """这条写口的临时件名：pid + 一小串随机，不再是固定的 `path + ".tmp"`。
+
+    运行时回执这一格有两条写手够得着同一份 `runtime.json`：用户连点两下启动图标、
+    或 `--takeover` 的新实例跟还没退出的旧实例各自绑到一个端口，两次 `write_runtime`
+    撞在同一份回执上。共用固定名时，先收尾的那个 `os.replace` 把临时件整个搬走，
+    后一个轮到自己那一句改名时文件已经不在，抛 `FileNotFoundError`；而这一层把它
+    吞成 `False`，于是那个进程最终绑的端口一个字都没落下，MCP 适配器照着旧回执去敲
+    一个没人应答的口子（用户看到的是「归藏没开着」）。名字一次一个，两条写就互不
+    打扰。口径与 `writer._write_text_atomic` / `ui_server._write_json` 一致。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
 def write_runtime(repo, port, pid=None, version="", code=""):
-    """记下当前端口。写失败不影响服务本身，所以只尽力而为，不抛异常。"""
+    """记下当前端口。写失败不影响服务本身，所以只尽力而为，不抛异常（中止信号除外）。
+
+    中止信号（Ctrl-C / 停止键的 KeyboardInterrupt、SystemExit）照旧往外抛，只把
+    临时件收干净：那是用户要停，不该被这一层吞掉。
+    """
+    dest = runtime_file(repo)
     try:
         os.makedirs(data_dir(repo), exist_ok=True)
-        tmp = runtime_file(repo) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"port": int(port), "pid": int(pid or os.getpid()),
-                       "version": version, "code": code,
-                       "started_at": int(time.time())}, f)
-        os.replace(tmp, runtime_file(repo))   # 先写临时再改名：别让读到半截的 JSON
-        return True
+        tmp = _tmp_for(dest)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"port": int(port), "pid": int(pid or os.getpid()),
+                           "version": version, "code": code,
+                           "started_at": int(time.time())}, f)
+            os.replace(tmp, dest)   # 先写临时再改名：别让读到半截的 JSON
+        except BaseException:
+            # 兜 BaseException 而不是 Exception：Ctrl-C / 停止键走的是 KeyboardInterrupt /
+            # SystemExit，它们不继承 Exception，只兜 Exception 会在退出路径上把临时件留下。
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
     except Exception:
+        # 盘满 / 只读目录这一档不影响服务本身：端口回执照旧缺一份，别把启动带崩。
         return False
+    return True
 
 
 def code_fingerprint(path):
