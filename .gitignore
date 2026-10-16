@@ -10,4 +10,8 @@ output/
 dist/
 # 服务起来后写的端口回执（源码直接跑时落在仓库里）：本机运行状态，不进版本库
 runtime.json
+# 写到一半的临时件：老写法是固定名 `runtime.json.tmp`，现在是 pid + 随机串
+# （`runtime.json.4242.1a2b3c4d.tmp`，见 platform_compat._tmp_for）。两族都排除，
+# 断电 / 强杀留下的半截件不会在 `git status` 里冒充新文件。
 runtime.json.tmp
+runtime.json.*.tmp
