@@ -117,6 +117,14 @@ run "取书续传锚点" "$PY" tests/check_resume.py
 # 这一条把「脏形状当没目录 / 没记录」「好数据一个字不改」与一条「旧读法确实会抛」的
 # 对照一起钉住。纯逻辑 + 临时目录，不联网、不开浏览器，归静态段。
 run "取书目录账本脏形状（脏形状当没目录 / 好数据不改 / 对照）" "$PY" tests/check_export_catalog.py
+# 同一批账本的**编码**那一面：_catalog / _progress / _stuck / raw 都住在书目录里，
+# 用户会拿记事本直接改（`_catalog.json` 的 docstring 自己写着「用户会手工编辑」）。
+# Windows 记事本另存 UTF-8 默认带 BOM，而读口原先写的是裸 utf-8 —— 目录一空，
+# 续传锚点（load_last_catalog_title / resume_catalog_index）全丢，引擎从第一页重来；
+# 界面上「取回多少」的分母同时归零。这一条把「带 BOM 也读得出、且与干净档逐字相同」
+# 「写口不主动种 BOM」「裸 utf-8 确实解不动」的对照一起钉住。要 import 引擎
+# （顶层 import playwright），归静态段。
+run "取书账本读口认 BOM（目录 / 进度 / 钉不住 / raw + 界面清单 + 写口不种 BOM）" "$PY" tests/check_export_ledger_bom.py
 # 目录账本收完了，引擎**自己**的另外三个读口还留着同样的旧读法，而且踩得更靠前：
 #   _progress.json → write_progress 里 data.update 在 try 之外，`[]` / `"书名"` / 数字
 #                    一句 AttributeError 就在取书开头（running=True）或收尾带走整趟任务；
