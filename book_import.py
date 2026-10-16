@@ -747,11 +747,40 @@ def _rewrite_imgs(md, namemap=None, doc_dir=""):
 _clean = book_layout.drop_lone_surrogates
 
 
+def _tmp_name(path):
+    """这条写口自己的临时件名：pid + 一小串随机，不再用固定的 `path + ".tmp"`。
+
+    收进来的每一本书都有一份 `meta.json`，而这份账有两个写侧：`import_book` 先写
+    一份，紧接着调用方（剪藏 / 订阅收成书 / 视频重建）读回来补自己那几个字段再写
+    一遍。今天这两个写侧在同一个请求线程里一前一后，固定名还看不出问题；但名字
+    一次一个之后，两条写哪怕真撞上（将来挪进线程 / 子进程）也不会互相搬走临时件
+    ——「先收尾的那个把件挪走、后来者 `os.replace` 当场 FileNotFoundError」那一种，
+    在这一族别的口上都实测过。与 `ui_server._write_json` / `book_notes._tmp_name`
+    / `flomo_notes._tmp_for` / `writer._write_text_atomic` 同一把尺子：名字格式
+    只有这一处真相。
+
+    真正的现成毛病是**失败路径**：这条写口原先没有随机名，也没有一句清理 ——
+    `json.dump` 写到一半断掉（盘满、编码不进去）就在书目录里留一个 `meta.json.tmp`，
+    它不进任何读口，界面上也看不见。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
 def _write_json(path, obj):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        # 写这一步没走完就退（编码不进去、盘满）或撞上中止信号（SystemExit /
+        # KeyboardInterrupt 不继承 Exception）时，把临时件收干净再抛：收不动也
+        # 不算错，但别在书目录里留一个只有磁盘看得见的垃圾。
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _make_book_dir(dest_root, title, prefix="imp"):
