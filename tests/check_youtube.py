@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
 """油管在内置浏览器里得有一页能看的东西（1.2.1 · 用户报「打开无法显示 / 依旧是哔哩哔哩」）。
 
-根因两段，都不在「取回来」这一步（首页 950KB 照样几秒就回来了）：
+根因三段，都不在「取回来」这一步（首页 950KB 照样几秒就回来了）：
 
   ① youtube.com 是纯客户端应用 —— 回来的 HTML 只有 <ytd-app> 一副空壳，正文全在
      `var ytInitialData = {…}` 那坨 JSON 里，等站点自己的脚本现渲染。
   ② 我们的 iframe 故意不给 allow-same-origin（不让外站读到归藏的 localStorage），
      在浏览器看来就是不透明源：脚本一碰本地存储就抛 SecurityError，那段引导脚本当场
      断在这里 —— 壳也渲染不出来，于是整屏空白。
+  ③ 前两段修完，1.2.2 用户第二次报「依旧打不开」：未登录的首页 / feed 连那坨 JSON 里
+     都不放内容。2026-10-16 实测首页 950KB 里 `videoId` 出现 0 次，正文只有一句
+     「搜索视频，开启 YouTube 之旅」（真浏览器打开也一样，不是我们取漏了）。静态目录
+     照铺，只是铺出来是空的 —— 用户看到的就是「一页什么都没有」。所以空着手时按
+     `YT_LANDINGS` 再换一处有货的落脚点。
 
 放宽 sandbox 是拿用户的界面换一页视频，不做。改成自己读那坨 JSON、铺自己的一页静态
 目录：卡片、频道、时长、缩略图都是油管给的原文，「看列表 → 挑一支 → 把链接送去转笔记」
 三件事全在，缺的只有播放器本身（流式媒体这一层从来也不代理）。
 
-这一套全程离线：喂合成的 ytInitialData / ytInitialPlayerResponse，不起服务也不联网。
+这一套全程离线：喂合成的 ytInitialData / ytInitialPlayerResponse，不起服务也不联网
+（E2 那一组换落脚点的联网那趟，用假 opener 顶上）。
 
-  A is_youtube    —— 只认油管那几台站，别的站一律走原来那条原样重送的路。
-  B _json_after   —— 按配对扫 JSON：字符串里那半个花括号不许把它劈断。
-  C _yt_cards     —— 新旧两代 renderer 都认（videoRenderer / lockupViewModel）。
-  D 不进脏东西     —— id 要形状对、缩略图只认自家图床、文字全转义。
-  E yt_static     —— watch 把主角置顶；认不出卡片也给一页能搜的壳，不留空白。
-  F 「转成笔记」   —— 绝对地址 + data-gz-use，界面接得住（vidUseLink）。
-  G shape         —— 油管这一路换成静态页；非油管不受影响。
-  H 不残留上一页   —— 那层「正在取回」必须是不透明的一整块，隔着它看不见旧页面。
+  A  is_youtube   —— 只认油管那几台站，别的站一律走原来那条原样重送的路。
+  B  _json_after  —— 按配对扫 JSON：字符串里那半个花括号不许把它劈断。
+  C  _yt_cards    —— 新旧两代 renderer 都认（videoRenderer / lockupViewModel）。
+  D  不进脏东西    —— id 要形状对、缩略图只认自家图床、文字全转义。
+  E  yt_static    —— watch 把主角置顶；认不出卡片也给一页能搜的壳，不留空白。
+  E2 换落脚点      —— 空壳页（未登录首页 / feed）再取一处有货的；用户敲了词的不换。
+  F  「转成笔记」  —— 绝对地址 + data-gz-use，界面接得住（vidUseLink）。
+  G  shape        —— 油管这一路换成静态页；非油管不受影响。
+  H  不残留上一页  —— 那层「正在取回」必须是不透明的一整块，隔着它看不见旧页面。
 """
 import json
 import pathlib
@@ -194,6 +201,112 @@ chk("静态页讲清了「为什么是这一页」（不让人以为是坏掉的
     "为什么是这一页" in SHELL and "不透明源" in SHELL)
 chk("认不出卡片时那句「没认出能列的视频」在（不是空网格）",
     "没认出能列的视频" in SHELL, SHELL[-400:])
+
+# ── E2 空壳页换一处有货的落脚点（1.2.2 · 用户第二次报「依旧打不开」）──
+# 根因是第三段：未登录的 youtube.com 首页 / feed 连那坨 JSON 里都不放内容。2026-10-16
+# 实测首页 950KB 里 `videoId` 出现 0 次（正文只有一句「搜索视频，开启 YouTube 之旅」），
+# 真浏览器打开也一样 —— 不是我们取漏了。取回来是成了，用户看到的是一页空的。
+chk("落脚点全是油管自家的页（不许把外站塞进这条路）",
+    len(wb.YT_LANDINGS) >= 2 and all(wb.is_youtube(u) for u in wb.YT_LANDINGS),
+    wb.YT_LANDINGS)
+chk("落脚点里没有那个空壳首页（换过去还是空的就没意义了）",
+    all(u.rstrip("/") not in ("https://www.youtube.com", "https://www.youtube.com/feed/trending")
+        for u in wb.YT_LANDINGS), wb.YT_LANDINGS)
+chk("非油管不换落脚点（回 None，走原来那条路）",
+    wb._yt_fill("https://bilibili.com/") is None)
+chk("带着用户自己敲的搜索词就不换（那是他要的东西）",
+    wb._yt_fill("https://www.youtube.com/results?search_query=python") is None)
+
+# 空搜索照换、真联网那一趟用假 opener 离线钉住：第一个落脚点没货就继续往后找，
+# 都不行时回 None（由 shape() 照旧铺那一页空的，不抛）。
+import email.message
+
+
+class _FakeResp:
+    def __init__(self, text, url):
+        self._t = text.encode("utf-8")
+        self._u = url
+        self.headers = email.message.Message()
+        self.headers["Content-Type"] = "text/html; charset=utf-8"
+    def read(self, n=-1):
+        return self._t[:n] if n and n >= 0 else self._t
+    def geturl(self):
+        return self._u
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def _opener_serving(texts):
+    """照 YT_LANDINGS 的次序依次回那些页面；不够的用最后一份兜（那个落脚点没货）。"""
+    seq = list(texts)
+    asked = []
+
+    def open(req, timeout=None):
+        asked.append(req.full_url)
+        t = seq.pop(0) if len(seq) > 1 else (seq[0] if seq else "")
+        return _FakeResp(t, req.full_url)
+    return open, asked
+
+
+FILLED = page({"z": [card("FILLCARD01", "落脚点里的一支", "甲频道", "2:02", "今天")]})
+_orig_build = wb.urllib.request.build_opener
+for label, urls, seq, expect_none in (
+        ("空搜索也换（我们自己的搜索框敲空了就是这个地址）",
+         ["https://www.youtube.com/results?search_query="], [FILLED], False),
+        ("第一个落脚点空、第二个有货时往后找",
+         ["https://www.youtube.com/"], [page({"empty": "没货"}), FILLED], False),
+        ("落脚点全军覆没时回 None（照旧铺原来那页，不抛）",
+         ["https://www.youtube.com/"], [page({"empty": "没货"})], True)):
+    fake_open, asked = _opener_serving(seq)
+
+    class _Op:
+        def open(self, req, timeout=None):
+            return fake_open(req, timeout)
+    wb.urllib.request.build_opener = lambda *a, **k: _Op()
+    try:
+        got = wb._yt_fill(urls[0])
+    finally:
+        wb.urllib.request.build_opener = _orig_build
+    if expect_none:
+        # 一个一个找下去，全找完才放弃：这一句把「不半途而废」钉住。
+        chk(label, got is None and len(asked) == len(wb.YT_LANDINGS), (asked, got))
+    else:
+        chk(label, isinstance(got, str) and "FILLCARD01" in got, (asked, got))
+
+# watch 页的主角单独读出来（提成 _yt_hero 后，别在这一步退回去）
+HERO = wb._yt_hero(page({}, extra="var ytInitialPlayerResponse = %s;" % PLAYER))
+chk("_yt_hero 从播放器配置里认出主角", isinstance(HERO, dict) and HERO["id"] == "dQw4w9WgXcQ"
+    and HERO["hero"] is True and HERO["length"] == "3:37", HERO)
+chk("播放器配置不在时 _yt_hero 回 None，不抛",
+    wb._yt_hero(page({"z": "只有卡片没有播放器"})) is None)
+chk("yt_static 认得出卡片时照旧不写「换了落脚点」那句",
+    "换了一处有内容的落脚点" not in wb.yt_static(
+        page({"z": [card("HERO123456", "有卡的一支", "甲", "1:00", "今天")]}), RESULTS))
+chk("给了 note 就用它当副标题（换落脚点的那一页要说明为什么换）",
+    "我换过了" in wb.yt_static(page({"z": "空"}), "https://www.youtube.com/", note="我换过了"))
+
+# shape() 这一路：空壳页去换、有卡的页不换（把 _yt_fill 换成假的，离线钉接线）
+_calls = []
+_orig_fill = wb._yt_fill
+wb._yt_fill = lambda u: (_calls.append(u) or "<html><body>FILLED-OK</body></html>")
+try:
+    r_empty = wb.shape(page({"only": "这一页什么都认不出"}).encode("utf-8"),
+                       "text/html", "utf-8", "https://www.youtube.com/")
+    chk("空壳页会去换一处落脚点（接线没断）", _calls == ["https://www.youtube.com/"], _calls)
+    chk("换来的那一页被采用（不是换完还铺原来那页空的）",
+        "FILLED-OK" in r_empty["body"].decode("utf-8"), r_empty["body"][:200])
+    _calls.clear()
+    r_full = wb.shape(page({"z": [card("FULLPAGE01", "有卡的一支", "甲", "1:00", "今天")]}
+                           ).encode("utf-8"), "text/html", "utf-8", RESULTS)
+    chk("有卡的页不去换（别白白多敲一次门）", _calls == [], _calls)
+    _calls.clear()
+    r_other = wb.shape(b"<html><body>hi</body></html>", "text/html", "utf-8",
+                       "https://bilibili.com/video/BV1xx")
+    chk("非油管的 HTML 连 _yt_fill 都不会碰到", _calls == [], _calls)
+finally:
+    wb._yt_fill = _orig_fill
 
 # ── F 「转成笔记」那颗：链接回界面，不是再取一页 ──────────────────
 chk("每张卡都挂了那颗「转成笔记」", "转成笔记" in html and html.count("转成笔记") >= 2)

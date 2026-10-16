@@ -121,7 +121,26 @@ chk("Referer 收口还在：封面仍统一带 no-referrer",
 chk("首字书脊兜底还在：封面全部挂掉也留一个形状（不留破图）",
     "spineHue(" in SRC and "className = 'spine'" in SRC, "生成式封面兜底被拿掉了")
 
-# ── ⑤ 别把加固做回「一律立刻取」——那一屏的量也钉住 ───────────────
+# ── ⑤ 叠卡那一面：画外那 53 张也不算「在画面里」 ──────────────────
+# saway / sgone 只有 opacity:0，布局盒还在、也落在视口里，offsetParent 判不住它 ——
+# 2026-10-16 实测进一次叠卡书架，60 个 /api/cover 一次性全发出去。这一组按叠卡
+# 自己的那条路（paintStackCovers）钉，不拿瀑布那把尺子套它。
+chk("叠卡走自己的点亮口 paintStackCovers（不拿 paintCovers 套）",
+    "function paintStackCovers(" in SRC, SRC[-400:])
+_pa = fn_body("applyStack")
+chk("认画外那两枚标记：saway / sgone 一律不发请求",
+    "saway" in fn_body("paintStackCovers") and "sgone" in fn_body("paintStackCovers"),
+    fn_body("paintStackCovers"))
+chk("点亮只认那两个类（判据只留 applyStack 打的那一处，不另算距离）",
+    fn_body("paintStackCovers").count("contains(") == 2
+    and "viewportTransform" not in fn_body("paintStackCovers"),
+    fn_body("paintStackCovers"))
+chk("接线：摆完位置就把画面那几张点亮（翻一页也从同一处补）",
+    "paintStackCovers" in fn_body("renderShelfStack")
+    and "paintCovers" not in fn_body("renderShelfStack"),
+    fn_body("renderShelfStack")[-300:])
+
+# ── ⑥ 别把加固做回「一律立刻取」——那一屏的量也钉住 ───────────────
 chk("detail 大图与其它屏的封面不受影响：它们本来就要立刻显示",
     "esc(coverSrc(coverUrl))" in SRC, "详情页大图那条路被误伤了")
 

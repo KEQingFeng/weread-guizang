@@ -16,7 +16,10 @@ macOS 是 WKWebView），可外层直接给 iframe 一个外站地址照样是�
      取下一页。拦的是 click 冒泡，所以站点用脚本生成的链接也逃不掉。
      遇到 YouTube 这类「HTML 里根本没有正文、内容全在一坨 JSON 里由站点自己的脚本现渲染」
      的站，改的那一下换成读那坨 JSON、铺一页我们自己的静态目录（`yt_static`）——因为壳里
-     那些脚本在 iframe 的不透明源上跑不动，原样重送只会得一片空白。
+     那些脚本在 iframe 的不透明源上跑不动，原样重送只会得一片空白。它未登录时的首页 /
+     feed 更绝：连那坨 JSON 里都不放内容（2026-10-16 实测：950KB 的首页里 `videoId`
+     出现 0 次，只有一句「搜索视频，开启 YouTube 之旅」）。所以认不出卡片时再换一处
+     有货的落脚点（`YT_LANDINGS`），别把一页空的端给用户。
   3. 送回去。HTML 原样转交（站点自己的脚本照跑），图片 / PDF 这类非网页直接把字节透传，
      让内核自己渲染。
 
@@ -187,6 +190,18 @@ _YT_IMG_HOSTS = ("i.ytimg.com", "s.ytimg.com", "yt3.googleusercontent.com",
                  "yt3.ggpht.com")
 _YT_ID = re.compile(r"^[A-Za-z0-9_\-]{6,20}$")
 _YT_CARDS = 24
+
+# 未登录时 youtube.com 的首页与几个 feed 页在 `ytInitialData` 里一张卡都不铺。2026-10-16
+# 实测：首页 950KB、`videoId` 出现 0 次，正文只有一句「搜索视频，开启 YouTube 之旅」；
+# `/feed/trending`、`/gaming` 同样（真浏览器打开也是一样，不是我们取漏了）。取回来是成了，
+# 可用户看到的是一页空的 —— 报的就是「打不开」。空着手时按这个次序换一处有货的落脚点，
+# 第一个能出卡的就用它。放搜索结果在前：它的内容跟搜索词走，比 feed 那种随 IP 地区变的稳。
+YT_LANDINGS = ("https://www.youtube.com/results?search_query=%E7%83%AD%E9%97%A8",
+               "https://www.youtube.com/music")
+_YT_EMPTY_NOTE = ("这一页要油管自己的脚本才画得出内容，那套脚本在这个沙箱里跑不动。"
+                  "先在上面搜，搜到的结果就能挑。")
+_YT_FILL_NOTE = ("油管的首页 / feed 在未登录时一张卡都不铺（它只留一句「搜索视频，开启 "
+                 "YouTube 之旅」），所以这一页换了一处有内容的落脚点。想找别的，在上面搜。")
 
 
 def is_youtube(url):
@@ -447,36 +462,84 @@ def _yt_len(sec):
     return "%d:%02d" % (m, r)
 
 
-def yt_static(text, url):
+def _yt_hero(text):
+    """watch 那一页的主角不在 ytInitialData 的卡片里，在播放器配置里：单独读出来。
+
+    回一个卡片 dict 或 None。省得用户打开一支视频却只看到「相关」。
+    """
+    player = _json_after(text, "ytInitialPlayerResponse") or {}
+    vd = player.get("videoDetails") or {}
+    hero = str(vd.get("videoId") or "")
+    if not (vd.get("title") and hero and _YT_ID.match(hero)):
+        return None
+    return {"id": hero, "hero": True,
+            "title": str(vd.get("title") or ""),
+            "channel": str(vd.get("author") or ""),
+            "length": _yt_len(vd.get("lengthSeconds")),
+            "when": "",
+            "thumb": _yt_img((vd.get("thumbnail") or {}).get("thumbnails") or [])}
+
+
+def yt_static(text, url, note=None):
     """YouTube 的一条路：认得出卡片就铺静态页，认不出也给它一页能搜的壳。
 
     回 None 表示「这跟 YouTube 无关」，由 `shape()` 走原来那条原样重送的路。
+    `note` 给了就用它当副标题（空壳换了落脚点时由调用方说明为什么换）。
     """
     if not is_youtube(url):
         return None
     data = _json_after(text, "ytInitialData")
     cards = _yt_cards(data) if data else []
-    # watch 那一页的主角不在 ytInitialData 的卡片里，在播放器配置里：单独读出来放最前头，
-    # 省得用户打开一支视频却只看到「相关」。
-    player = _json_after(text, "ytInitialPlayerResponse") or {}
-    vd = player.get("videoDetails") or {}
-    hero = str(vd.get("videoId") or "")
-    if vd.get("title") and _YT_ID.match(hero) and hero:
-        cards.insert(0, {"id": hero, "hero": True,
-                         "title": str(vd.get("title") or ""),
-                         "channel": str(vd.get("author") or ""),
-                         "length": _yt_len(vd.get("lengthSeconds")),
-                         "when": "",
-                         "thumb": _yt_img((vd.get("thumbnail") or {}).get("thumbnails") or [])})
-    note = "从这页挑一支，点「转成笔记」把它送回工作台。"
-    if not cards:
-        note = ("这一页要油管自己的脚本才画得出内容，那套脚本在这个沙箱里跑不动。"
-                "先在上面搜，搜到的结果就能挑。")
+    hero = _yt_hero(text)
+    if hero:
+        cards.insert(0, hero)
+    if note is None:
+        note = "从这页挑一支，点「转成笔记」把它送回工作台。"
+        if not cards:
+            note = _YT_EMPTY_NOTE
     return _yt_page(cards, note)
 
 
+def _yt_fill(url):
+    """空壳页（未登录首页 / feed）换一处有货的落脚点；回 None 表示这次也没找到。
+
+    `url` 里带着用户敲的搜索词时不换 —— 那是他要的东西，换掉等于替他改主意。
+    换到的那一页再走一遍 `yt_static`，认得出卡片才用它。
+
+    空搜索（`?search_query=`）算换：那一页跟首页一样没内容，我们自己的搜索框敲空了
+    提交出来的也是这个地址。
+    """
+    if not is_youtube(url):
+        return None
+    try:
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    except ValueError:
+        query = {}
+    if (query.get("search_query") or [""])[0].strip():
+        return None
+    for landing in YT_LANDINGS:
+        try:
+            req = urllib.request.Request(landing, headers={
+                "User-Agent": UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+            })
+            with urllib.request.build_opener(_RedirectGuard).open(req, timeout=TIMEOUT) as r:
+                blob = r.read(MAX_BYTES + 1)
+                if len(blob) > MAX_BYTES:
+                    continue
+                text = blob.decode(clip_article.safe_charset(r.headers.get_content_charset()),
+                                   errors="replace")
+                final = r.geturl()
+        except Exception:
+            continue
+        if _yt_cards(_json_after(text, "ytInitialData") or {}):
+            return yt_static(text, final, note=_YT_FILL_NOTE)
+    return None
+
+
 def shape(blob, ctype, charset, final_url):
-    """把取回来的字节收成 {ok, url, ctype, body}。纯函数，测起来不用连网。
+    """把取回来的字节收成 {ok, url, ctype, body}。除了油管那一条空壳兜底，全程不联网。
 
     服务端声明的字符集同样不可信：用的是 `clip_article.safe_charset`，
     认不出的编码名退回 utf-8，而不是让一个手滑的 `charset=…` 把这一屏打成 500。
@@ -486,6 +549,10 @@ def shape(blob, ctype, charset, final_url):
         text = blob.decode(clip_article.safe_charset(charset), errors="replace")
         # YouTube 那一站原样重送是一屏空白（见上面那段注释），先给它换成本机自己铺的静态页。
         static = yt_static(text, final_url)
+        # 未登录的首页 / feed 连那坨 JSON 里都不放内容 —— 那一页是空的。空着手时再换一处
+        # 有货的落脚点，别把一页空的端给用户（用户报的「打不开」就是这一页）。
+        if static is not None and "class=\"card" not in static:
+            static = _yt_fill(final_url) or static
         page = prepare(static if static else text, final_url)
         return {"ok": True, "url": final_url,
                 "ctype": "text/html; charset=utf-8", "body": page.encode("utf-8")}
