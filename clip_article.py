@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 import book_import
 import book_layout
@@ -911,6 +912,36 @@ def _front_matter(art):
     return "%s\n> 原文：[%s](%s)\n" % (line, shown, url)
 
 
+def _write_json_atomic(path, obj):
+    """剪藏那份 `meta.json` 的落盘口：临时件一次一个名字，写完一次性原子顶替。
+
+    这一份 meta 是「页面提取结果 + 剪藏专属字段」，落盘也是 `ensure_ascii=False`：
+    地址 / 站名 / 标题里落单的半个代理码点照样写不进去。正文那一半已经在
+    `import_book` 里过过刀了，这里补上同一把尺，免得两个落盘口各防一半。
+
+    临时名带 pid + 一小串随机，与 `book_import._tmp_name` / `flomo_notes._write_text_atomic`
+    / `writer._write_text_atomic` 同一把尺子：这份 meta 的两个写侧（`import_book`
+    先写一份、这里读回来补剪藏字段再写一遍）今天在同一线程里一前一后，固定名还
+    看不出问题；名字一次一个之后，两条写哪怕真撞上也不会互相搬走临时件。现成的
+    毛病在失败路径：原先是裸 `open(tmp, "w")` + `os.replace`，写一半断掉就在书目录
+    里留一个 `meta.json.tmp`，没有一句清理。
+    """
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(book_layout.drop_lone_surrogates(obj), f,
+                      ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        # 中止信号（SystemExit / KeyboardInterrupt）不继承 Exception，只兜
+        # Exception 会在退出路径上留下临时件；收不动也不算错。
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None):
     """剪一篇 → 书库里的一本「文章」。返回 book_import 那套 info（含 id、章数、字数）。
 
@@ -954,13 +985,8 @@ def save_clip(out_dir, url, title="", author="", cover_dir=None, extract_fn=None
                  # 变 8153 字，用户只会以为程序在瞎报数。
                  "chars": art["words"],
                  "clipped_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    tmp = mp + ".tmp"
-    # 这一份 meta 是「页面提取结果 + 剪藏专属字段」，落盘也是 ensure_ascii=False：
-    # 地址 / 站名 / 标题里落单的半个代理码点照样写不进去。正文那一半已经在
-    # import_book 里过过刀了，这里补上同一把尺，免得两个落盘口各防一半。
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(book_layout.drop_lone_surrogates(meta), f, ensure_ascii=False, indent=2)
-    os.replace(tmp, mp)
+    # 落盘走这一族共用的原子写口：临时件一次一个名字、失败先收残件再抛。
+    _write_json_atomic(mp, meta)
     info.update({"url": art["url"], "site": art["site"], "date": art["date"],
                  "words": art["words"], "chars": art["words"],
                  "cover": art["cover"], "source": "clip"})
