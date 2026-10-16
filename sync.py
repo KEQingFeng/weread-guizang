@@ -22,6 +22,7 @@ import base64
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -472,6 +473,22 @@ def _collect(cache_dir, books_dir, what):
     return pairs
 
 
+# 同进程里两只手同时取同一个文件时，共用那把固定临时件的闸。
+#
+# 为什么够得着：`/api/sync/now` 由 `ThreadingHTTPServer` 的请求线程直接处理，
+# 两个窗口 / 两个标签页各点一次「立即同步」就是两只手（界面那一次只锁住自己那颗
+# 按钮，锁不住另一扇窗）。临时件名是固定的 `<目标>.part`，两个写者会打开同一个
+# 件：先收尾的那个 `os.replace` 把它搬去目标，后一个当场 FileNotFoundError ——
+# 界面看到「失败 1」，其实那份文件已经好好取回来了；更坏的是两只手都还开着这个
+# 件时，后到的写入会落在已经改名的目标上，把刚取回的那份写成两份内容的混血。
+#
+# 临时件名为什么仍是固定的 `<目标>.part`、不换成那一族 pid + 随机串：`cleanup`
+# 那一刀（`_residue_re`）正是按 `<账本>.part` 这个形状认同步留下的半截账，
+# 改名会让「清除本地数据」当场瞎掉。所以这里收的是另一半 —— 用一把锁把
+# 「写临时件 + 改名」串起来，名字与残件形状一个字不动。
+_ATOMIC_LOCK = threading.Lock()
+
+
 def _write_atomic(path, blob):
     """取回来的字节先写同目录 .part，写完再一次性改名到目标位置。
 
@@ -480,21 +497,26 @@ def _write_atomic(path, blob):
     长度不对却「存在」的文件；下一次同步的规则是「本地有就上传」，于是这个半截件
     被传回云端，把好的那份盖掉 —— 一次断线变成永久损坏。中间文件先落在目标旁边，
     改名是同一文件系统上的原子操作：要么旧内容完整、要么新内容完整，没有第三种。
+
+    `_ATOMIC_LOCK` 罩住的是「写临时件 + 改名」这一小段：临时件名是固定的，两个
+    写者同时进来会互相搬走对方的件（见上面那段注释）。锁只串行化落盘，同步的
+    其余部分（取远端字节、上传）照旧并发。
     """
     d = os.path.dirname(path)
     if d:
         os.makedirs(d, exist_ok=True)
     tmp = path + ".part"
-    try:
-        with open(tmp, "wb") as f:
-            f.write(blob)
-        os.replace(tmp, path)
-    except BaseException:
+    with _ATOMIC_LOCK:
         try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+            with open(tmp, "wb") as f:
+                f.write(blob)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
 def _remote_dir(path):
