@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 
 import platform_compat
@@ -245,16 +246,86 @@ def _load():
     return _normalize(data)
 
 
+def _tmp_name(path):
+    """同目录临时件，一次一个名字（进程号 + 一小串随机）。
+
+    这一格的三处落盘原先都共用 `<目标> + ".tmp"`：账本 `feed.json`、导出的
+    `订阅.opml`、订阅收成书时那份 `meta.json`。三处够不够得着并发并不一样，
+    按当场数过的写（数法与结论见《交接说明》§1 第十六轮）：
+
+      · 账本**同进程够不着、跨进程够得着**。那把 `RLock` 罩住的不止刷新：全仓 19 处
+        `_save(data)` 有 18 处落在 `@_locked` 的函数里（标已读 / 收藏 / 打标签、
+        删订阅、建分组、改设置都在内），第 19 处就在 `_write` 自己的 `with _LOCK`
+        里 —— 「读整份 → 改一笔 → 写整份」在同进程里是被这把锁串着的。够得着的是
+        另一档：`feed.py` 有自己的 `__main__`（`python3 feed.py --refresh`），终端里
+        手动刷一次时，两个进程各锁各的 `RLock`、写的是同一个 `<数据目录>/feed.json`。
+      · `write_opml` **够得着**：默认落 `<数据目录>/订阅.opml`，且这一句不在任何锁里，
+        而服务是 `ThreadingHTTPServer`（`ui_server.py:6825`）、`act == "opml_write"`
+        在请求线程里直接调它（`ui_server.py:4326`）—— 连点两次导出就是两只手同时
+        往同一个临时件名上落。
+      · `to_shelf` 那份 `meta.json` **够不着**：`book_import._make_book_dir`
+        （`book_import.py:757`）每次带一段 `uuid4().hex[:8]`，每收成一本书开的是新书
+        目录，另一个写口 `book_import._write_json` 写的也是这一本自己的目录，两只手
+        落不到同一个件上。
+
+    固定名的代价有两种，都不体面：先收尾的那个把共用的件整个搬走，后一个轮到自己
+    那句 `os.replace` 已经扑空、当场 `FileNotFoundError`（界面喊「存不下」，可前一笔
+    其实已经落盘）；更坏的一种是两只手同时在同一个件上写，后来者一打开就把它截断，
+    各按自己的偏移往下落，顶成正式文件的那一份内容交织、谁也解不动。
+
+    三处都收进来，是为了这一族只留一把尺子、残件只有一种形状（清残稿那一刀按
+    `.tmp` 尾巴收，随机名与固定名都认得）—— 账本那一处靠跨进程、OPML 那一处是真
+    crash，`to_shelf` 这一处不是为了修现成的 crash。口径与 `book_notes._tmp_name` /
+    `anna_state._atomic_write` 一致。
+    """
+    return "%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """把写了一半的临时件收掉；收不动（已被别人搬走 / 权限）也不算错。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def _write_json(path, obj):
+    """整份 JSON 的原子落盘：先写同目录临时件，写完再一次性改名顶替。
+
+    失败（内容里有写不进 utf-8 的东西、磁盘满、用户中途停）时把临时件收干净再抛，
+    旧档在整个过程里始终是完整的 —— 读口只认正式那一份，不会读到半截。
+    兜的是 `BaseException`：中止信号（KeyboardInterrupt / SystemExit）不继承
+    `Exception`，只兜 `Exception` 会在退出路径上留下残件。
+    """
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)          # 原子替换：中途崩了也不会留下半截文件
+    except BaseException:
+        _discard(tmp)
+        raise
+
+
+def _write_text(path, text):
+    """纯文本的原子落盘，与 `_write_json` 同一把尺子（OPML 导出走这里）。"""
+    tmp = _tmp_name(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        _discard(tmp)
+        raise
+
+
 def _save(data):
     # 最后一道闸：调用方给什么进来都保证 json.dump 不会因为落单的半个代理码点抛。
     # _load 已经洗过一遍，但「抓完外站直接并进内存再落盘」那一趟的数据没经过 _load，
     # 这里兜住，别让一次坏输入把整份账本挡在盘外（并留下半截 .tmp）。
     data = _drop_surrogates(data)
     os.makedirs(os.path.dirname(STORE) or ".", exist_ok=True)
-    tmp = STORE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, STORE)             # 原子替换：中途崩了也不会留下半截文件
+    _write_json(STORE, data)
 
 
 # 整份读 → 改内存 → 整份写，这条链不是原子的。后台刷新抓一轮要几十秒，这期间
@@ -2169,10 +2240,7 @@ def write_opml(path=None, title="归藏订阅"):
     """把 OPML 落到一个文件（默认 <数据目录>/订阅.opml），返回路径。"""
     p = os.path.expanduser(path or os.path.join(DATA_DIR, "订阅.opml"))
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(export_opml(title=title))
-    os.replace(tmp, p)
+    _write_text(p, export_opml(title=title))
     return p
 
 
@@ -2331,10 +2399,10 @@ def to_shelf(entry_id, out_dir):
                  "date": e.get("published", ""), "words": words, "chars": words,
                  "feed_id": fid, "feed_title": feed.get("title", ""),
                  "clipped_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    tmp = mp + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, mp)
+    # 与账本同一个原子写口。这一份 meta.json 其实够不着并发（每收成一本书开的是
+    # 新书目录，`book_import._write_json` 写的也是这一本自己的目录），收进来是为了
+    # 这一族只留一把尺子、残件只有一种形状 —— 理由写在 `_tmp_name` 的注释里。
+    _write_json(mp, meta)
 
     bid = info.get("id", "")
 
