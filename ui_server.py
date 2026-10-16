@@ -3403,15 +3403,19 @@ def write_meta(book_id, title, author, done):
 RESIDUE_DIRS = ("chapters", "raw", "images")
 # _stuck.json 必须跟着清：那是「这一项连着两轮钉不住」的记账，章节都删光重取之后
 # 它还留着，新一轮就会跳过几章自己根本没读过的 —— 恰好又是「每次都缺同几章」。
-# 三份账本都由 export_precise._dump_json 先写 `<名>.tmp` 再改名（原子落盘），所以在
+# 三份账本都由 export_precise._dump_json 先写同目录临时件、再改名（原子落盘），所以在
 # 改名之前进程被强杀（停止键 / 关窗口）会留下一个 `.tmp` 半截件：它不属于任何读口，
-# 又不会被别的清理碰到，只能在这里跟着原文一起收掉，不然它会永远占着书目录。
+# 又不会被别的清理碰到，只能在这里跟着原文一起收掉，不然它会永远占着书目录。名单里
+# 这三个固定名只够收旧版本留下的残件 —— 这一族的临时名现在一次一个名字
+# （`<名>.<pid>.<随机串>.tmp`，见 export_precise._tmp_name），随机名那一族由下面的
+# drop_stray_tmps 按 `.tmp` 尾巴统一收走。
 RESIDUE_FILES = ("_catalog.json", "_catalog.json.tmp",
                  "_progress.json", "_progress.json.tmp",
                  "_stuck.json", "_stuck.json.tmp")
 # 临时件名字现在分两族：老的是固定名（`meta.json.tmp`），新的是 pid + 一小串随机
 # （`meta.json.4242.1a2b3c4d.tmp`，见 ui_server._write_json / book_notes._tmp_name /
-# mindmap / video_note / ai_sum —— 同一份账两个写手同时进来不再互相截断）。随机名那一族
+# mindmap / video_note / ai_sum / export_precise._tmp_name —— 同一份账两个写手同时进来
+# 不再互相截断）。随机名那一族
 # 一个固定名字点不到：正常路径由各自的 `except BaseException` 收干净，可断电 / SIGKILL
 # 那一档只有磁盘看得见 —— 它不进任何读口、也不在 RESIDUE_FILES 名单里，界面上删不掉，
 # 攒着就是吃盘洞（一本导图或 _ai 几 MB）。书目录里没有任何正经产物以 `.tmp` 结尾，
@@ -3451,12 +3455,17 @@ def drop_stray_md(book_id, title=""):
     名字按 `os.path.realpath` 再核一遍归属 —— 书名是用户可控的字符串，
     带 `../` 的那种不能拼成「一路删到书库外面」。
 
-    同一趟还要收 `<书名>.md.tmp`：1.2.1 之后整本合并稿走
-    `export_precise._atomic_write_text`（先把整份拼进内存、写成 `<书名>.md.tmp`，
-    再一次改名过去）。恰好在改名那一步之前被强杀（停止键 / 关窗口 / 断电），
-    盘上就只剩一个 `<书名>.md.tmp` —— 它不以 `.md` 结尾，`RESIDUE_DIRS` /
-    `RESIDUE_FILES` 都不认它，界面上看不见也点不掉，只能跟着这本书一起收走。
-    半个代理码点 / 只读目录这类删不动的情况照旧吞掉：清理失败不该把删书那一步带崩。
+    同一趟还要收合并稿的临时件：1.2.1 之后整本合并稿走
+    `export_precise._atomic_write_text`（先把整份拼进内存、写成临时件，再一次改名
+    成 `<书名>.md`）。恰好在改名那一步之前被强杀（停止键 / 关窗口 / 断电），盘上就
+    只剩那个临时件 —— 它不以 `.md` 结尾，`RESIDUE_DIRS` / `RESIDUE_FILES` 都不认它，
+    界面上看不见也点不掉，只能跟着这本书一起收走。
+    临时件的名字有两族：老固定名 `<书名>.md.tmp`，以及现在这版 `<书名>.md.<pid>.
+    <随机串>.tmp`（见 `export_precise._tmp_name`）。固定名一个名字就点得到，随机名
+    那一族只能在**这一层目录**里按形状收：以这本的 `<名>.md.` 开头、以 `.tmp` 结尾。
+    收窄到「这本自己的前缀」是故意的 —— 库根那一层住着所有书，别家的合并稿残件一个
+    都不许误伤。半个代理码点 / 只读目录这类删不动的情况照旧吞掉：清理失败不该把删书
+    那一步带崩。
     """
     root = os.path.realpath(OUT_DIR)
     places = [os.path.join(root, book_layout.DIR_OF[book_module(book_id)]), root]
@@ -3466,10 +3475,25 @@ def drop_stray_md(book_id, title=""):
         for nm in names:
             if not nm:
                 continue
-            p = os.path.join(place, re.sub(r'[<>:"/\\|?*]', "_", nm) + ".md")
-            for target in (p, p + ".tmp"):
+            base = re.sub(r'[<>:"/\\|?*]', "_", nm) + ".md"
+            p = os.path.join(place, base)
+            # 候选 = `<名>.md` 与固定名 `<名>.md.tmp`，外加这一层目录里同形状的随机名
+            # （`<名>.md.<pid>.<随机串>.tmp`，见 export_precise._tmp_name）。`listdir`
+            # 只在这一层，不跟链接、不下子目录；读不出来（目录没了 / 权限）当没有残件。
+            cands = {p, p + ".tmp"}
+            try:
+                for n in os.listdir(place):
+                    if n.startswith(base + ".") and n.endswith(".tmp"):
+                        cands.add(os.path.join(place, n))
+            except OSError:
+                pass
+            for target in cands:
+                # 只删普通文件：符号链接（哪怕名字对得上）与同名目录一概不碰 ——
+                # 前者会把删除落到链接指向的地方，后者可能装着用户自己的东西。
+                if os.path.islink(target) or not os.path.isfile(target):
+                    continue
                 real = os.path.realpath(target)
-                if not (real.startswith(root + os.sep) and os.path.isfile(real)):
+                if not real.startswith(root + os.sep):
                     continue
                 try:
                     os.remove(real)
