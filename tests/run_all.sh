@@ -577,6 +577,14 @@ run "成品图片文件名（带引号 / & / < 不把 EPUB 打坏、也不从 PD
 # zipfile.writestr 在 encode 那一步就 UnicodeEncodeError。这里真打一个 EPUB，
 # 用 ElementTree 逐份解析，并留一条「旧写法确实解不动」的对照免得空转。纯离线。
 run "导出元数据 XML 字符（控制符 / 半个代理码点不打坏 EPUB，正常字一个不改）" "$PY" tests/check_export_xml_chars.py
+# 上面那条钉的是手写清单里点到的那几种（C0 / DEL / 落单代理码点）。可 XML 1.0 的
+# Char 产生式排除的是一整个集合 —— 在 BMP 里除代理码点之外只额外排掉 U+FFFE /
+# U+FFFF 这两个非字符，而它们恰恰是手写清单最容易漏的（`json` 的 "\uffff" 是合法
+# 转义，云同步写回的 meta.json / 从别处粘来的书名都带得进来）。旧尺子不管它们，
+# `zipfile.writestr` 按 EF BF BF 正常编出去，于是 content.opf / nav.xhtml 不是合法
+# XML、阅读器整本拒收，而导出报成功。这一条按产生式的补集实跑：非法的洗掉、合法
+# 的（C1 / U+FFFD / emoji）一个字不改，并留一条「旧清单确实漏 U+FFFF」的对照。
+run "导出 XML Char 产生式（U+FFFE / U+FFFF 不打坏 EPUB，合法字符一个不改）" "$PY" tests/check_export_xml_ruler.py
 # 跟上面那条并排：那条管「进成品的内容能不能逃出去」，这条管「成品本身是什么字节」。
 # export_precise 写出去的章节 md / raw json / 合并稿原来不写 encoding，靠系统默认编码 ——
 # macOS 恰好是 UTF-8 所以一直没露馅，Windows 的 GBK 代码页上就变成写 GBK、读 UTF-8，
