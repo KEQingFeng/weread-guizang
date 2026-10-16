@@ -15,7 +15,11 @@ import signal
 import statistics
 import sys
 import time
+import uuid
 from collections import deque
+# pid 直接取函数本体，不走模块属性：门禁里会拿一个只有 replace / remove 的替身顶掉
+# `export_precise.os`（模拟改名失败），临时名不该因此连 pid 都拿不到。
+from os import getpid
 
 from playwright.async_api import async_playwright
 
@@ -90,6 +94,33 @@ class PageStalled(Exception):
     """页面在超时内没有响应，判定渲染进程卡死。"""
 
 
+def _tmp_name(path):
+    """这条写口自己的临时件名：pid + 一小串随机，不再用固定的 `path + ".tmp"`。
+
+    引擎是后端这个多线程服务的子进程，能往同一份账本 / 正文落盘的入口不止一处
+    （进度快照、目录、钉住记录、meta；章节、raw 页记录、整本合并稿）。固定名让先
+    `os.replace` 的那个把临时件整个搬走，后一个改名当场 `FileNotFoundError` ——
+    内容其实写成了，报出去的却是「没写进去」，旁边还留一个没人认领的 `.tmp`；两处
+    同时往同一个件里写更坏：后来者一打开就把它截断，两边各按自己的偏移往下写，顶成
+    正式档的是一份内容交织的账。临时名各写各的之后，两条写互不打扰，落地的永远是
+    其中一份完整的。
+
+    临时件与目标文件同目录，`os.replace` 才在同一个文件系统上（也就是原子的）。
+
+    与 `board._tmp_for` / `book_notes._tmp_name` / `flomo_notes._tmp_name` 同一把
+    尺子：`<目标>.<pid>.<8 位随机>.tmp`。
+    """
+    return "%s.%d.%s.tmp" % (path, getpid(), uuid.uuid4().hex[:8])
+
+
+def _discard(tmp):
+    """没走到改名那一步的临时件收掉。收不动也不算错 —— 真正的异常由调用方接着抛。"""
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
 def _dump_json(path, obj, indent=None):
     """账本落盘唯一入口：先写同目录 .tmp，写完再一次性改名。
 
@@ -107,18 +138,18 @@ def _dump_json(path, obj, indent=None):
     形如 U+D83D 的落单代理转义，合法 JSON、`json.load` 照收），而 `ensure_ascii=False`
     写 utf-8 碰到它就当场 UnicodeEncodeError —— 整趟取书（几十分钟）因为一个
     坏字符中止在最后一步。它是坏输入不是内容，摘掉那一个码点比让整本书白取强。
+
+    临时名一次一个名字（`_tmp_name`）：同一份账被两处同时写时，固定的 `<名>.tmp`
+    只会让后收尾的那个当场扑空、还留一个没人认领的残件。
     """
-    tmp = path + ".tmp"
+    tmp = _tmp_name(path)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(book_layout.drop_lone_surrogates(obj), f,
                       ensure_ascii=False, indent=indent)
         os.replace(tmp, path)
     except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        _discard(tmp)
         raise
 
 
@@ -139,17 +170,17 @@ def _atomic_write_text(path, text):
 
     `BaseException`：中止信号走的是 `SystemExit` / `KeyboardInterrupt` 这一类，
     它们不继承 `Exception`，只兜 `Exception` 会在退出路径上留下 .tmp。
+
+    临时名一次一个名字（`_tmp_name`）：整本合并稿写在书库根 / 模块文件夹里，那是
+    所有书共用的一层，固定名更撞不起。
     """
-    tmp = path + ".tmp"
+    tmp = _tmp_name(path)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
     except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        _discard(tmp)
         raise
 
 
