@@ -6,7 +6,9 @@
   卸载组件   —— 为了让这软件跑起来而装的东西：虚拟环境（依赖在里面）、
                 自己下的那份 ffmpeg、取书用的 Chromium。
   清除数据   —— 它自己攒下来的东西：登录态、书架清单、设置、阅读时长、
-                笔记索引、订阅条目、剪藏、封面、下载中间件、临时音频。
+                笔记索引、订阅条目、剪藏、封面、下载中间件、临时音频，
+                以及各本账写到一半留下的 `.tmp` 临时件（半截 `config.json`
+                里就带着接口 Key）。
 
 软件本体（那个 .app）不归这里管 —— 用户自己拖进废纸篓。**书也一概不动**：
 书在「文档/归藏」里，是用户的东西，不是这软件的缓存。
@@ -18,6 +20,7 @@
 这个模块只用标准库（外加平台差异模块），导入时不碰网络。
 """
 import os
+import re
 import shutil
 import sys
 
@@ -59,6 +62,64 @@ ROOT_FILES = (
     ("feed.json", "订阅源与抓下来的条目"),
     ("订阅.opml", "导出的订阅清单"),
 )
+
+
+def _residue_re(name):
+    """账本 name 写到一半留下的临时件名：固定 `<name>.tmp` 或 `<name>.<pid>.<随机>.tmp`。
+
+    前者是 login / platform_compat / feed 那几处旧的写法，后者是
+    `ui_server._write_json` / `anna_state` / `book_notes` 这一族现版的尺子
+    （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。名字从
+    账本名派生、前后都锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
+    """
+    return re.compile(r"^%s(?:\.tmp|\.\d+\.[0-9a-f]{8}\.tmp)$" % re.escape(name))
+
+
+def _residue_in(directory, name):
+    """directory 里属于账本 name 的 `.tmp` 残件；只认普通文件。
+
+    同名目录、符号链接（哪怕以 `.tmp` 收尾）一概不碰 —— 与清残稿那一刀
+    （`ui_server.drop_stray_tmps`）同一条护栏。目录不存在就当没有。
+    """
+    try:
+        entries = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    want = _residue_re(name)
+    out = []
+    for entry in entries:
+        if not want.match(entry):
+            continue
+        path = os.path.join(directory, entry)
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        out.append(path)
+    return out
+
+
+def _residue_items():
+    """白名单账本留下的 `.tmp` 残件，按同样那两张表逐名去找。
+
+    为什么要单列这一刀：`run()` 是按**精确路径**删的，而这些残件的名字不定
+    （带进程号与随机串）、数量不定，一个都认不到。而它们不是空的 ——
+    `cache/config.json` 的半截件里就是用户的接口 Key，`library.json` 那份是
+    他整个书架。用户点「清除本地数据」（换机、把机器送人之前最常点的那一下）
+    本该把它们一起带走；少收这一刀，残件就留在盘上，而且谁都收不走：
+    `drop_stray_tmps` 只扫书目录，够不到 `cache/` 与数据根。
+
+    边界仍然按白名单来：只有上面那两张表里点过名的账本，才去收它的 `.tmp`
+    兄弟；不认识的 `.tmp` 一律不动（用户真往里放了别的东西，那是他的东西）。
+    """
+    out = []
+    for name, label in CACHE_FILES:
+        for path in _residue_in(cache_dir(), name):
+            out.append(("data-cache-" + os.path.basename(path),
+                        label + "（写到一半的临时件）", path))
+    for name, label in ROOT_FILES:
+        for path in _residue_in(data_dir(), name):
+            out.append(("data-root-" + os.path.basename(path),
+                        label + "（写到一半的临时件）", path))
+    return out
 
 
 def data_dir():
@@ -137,6 +198,8 @@ def _data_items():
         out.append(("data-cache-" + name, label, os.path.join(cache_dir(), name)))
     for name, label in ROOT_FILES:
         out.append(("data-root-" + name, label, os.path.join(data_dir(), name)))
+    # 各本账写到一半留下的临时件也归「清除本地数据」管（见 _residue_items）。
+    out.extend(_residue_items())
     return out
 
 
