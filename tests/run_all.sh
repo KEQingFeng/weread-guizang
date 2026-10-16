@@ -426,6 +426,14 @@ run "画板存盘收尾（坏字符 / 不留 .tmp / purge 清 .prev）" "$PY" te
 # 「没存进去」可画已经落了一半。临时名改成 pid + 随机串（与 ui_server 的三条写口同一
 # 口径），delete_board 也按这个形状把残件一并收走。纯逻辑 + 临时目录，不联网、不起服务。
 run "画板落盘并发原子性（同一块板两个写者不扑空 / 不留 .tmp / 残件收得掉）" "$PY" tests/check_board_atomic.py
+# 上一批管的是「写崩了收得干净」与「两个写者不撞名」，这一条管落盘失败那半步：`_write_json`
+# 先 `os.replace(path, path + ".prev")` 再把新稿顶上去，第二步失败（磁盘满 / 只读 / Windows
+# 上目标被钳住）时 `<id>.json` 原先整个消失 —— `_board_files` 只认 `<id>.json`，于是列表里
+# 看不见、board_counts 数成 0，用户画了半天的那张点进去就没了，而它其实躺在 `.prev` 里。
+# 笔记（#157）与导图（#169）两格早补上了「把旧档搬回来」这半件，画板是画出来的东西里最重
+# 的一档（画布上限 6 MB）却没跟上；同一处只兜 Exception 时中止信号还会留一个随机名 `.tmp`。
+# 注入一次进程内的 os.replace 桩造这两步失败，纯函数 + 临时沙盒，不联网、不开浏览器。
+run "画板失败路径收尾（新稿顶不上把旧档搬回来 / 中止信号不留 .tmp）" "$PY" tests/check_board_prev_restore.py
 # 导图这一格：`save_map` 有两个调用侧（界面的 /api/mindmap 与 AI 画图那条任务线），
 # 后端又是 ThreadingHTTPServer，同一本书被两处同时存时，固定的 `path + ".tmp"` 会让
 # 先收尾的那个把临时件搬走、后一个 os.replace 当场 FileNotFoundError（界面「保存失败」
