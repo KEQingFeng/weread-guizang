@@ -706,6 +706,15 @@ run "转写云端化（引擎挑选 / 配置存取 / 地址补齐 / 接线）" "
 # 没选就退回 downloads」，重名加序号绝不覆盖，外加「后端只有一条写盘路、前端勾选才放行」
 # 的接线。纯函数 + 源码走查，不联网。归静态段。
 run "划线笔记导出 CSV（字节格式 / 落盘位置 / 重名不覆盖 / 接线）" "$PY" tests/check_notes_csv.py
+# 上一条量的是 CSV 的字节与落点，这一条量**写**的那一下。`/api/notes_csv` 原先
+# `open(dest, "wb")` 直接往目标文件里写：盘满 / 进程被杀发生在写完之前，`dest` 就是一份
+# 写了一半的清单（它是新名字、没有旧档可毁，所以症状不是覆盖，是**静默少几条** —— 用户
+# 拿它去 flomo 导入，缺的划线不报错）；同一本连点两次导出时，两处 `unique_dest` 都还没
+# 落盘，会挑中同一个名字。现在写这一步收进 `notes_csv_export` 并走 `_write_bytes`（同目录
+# 临时件 + `os.replace`，与封面同一个二进制落盘口）。门禁用 spy 看「先临时件再改名」、
+# 让 `os.replace` 抛 ENOSPC 验「目标位置一个字节不留」，并留一面「老的直写确实留下半份」
+# 的对照。纯临时沙盒 + 源码走查，不起服务、不联网，归静态段。
+run "划线笔记导出 CSV 原子落盘（先临时件再改名 / 失败不留半份 / 接线）" "$PY" tests/check_notes_csv_atomic.py
 # 账本里的数字收口原先只写 `except (TypeError, ValueError)`，漏了 `OverflowError`。而
 # `json` 认 `Infinity` / `-Infinity` / `NaN`，也认 `1e400`（inf）与一长串数字（大整数）——
 # 这些都是合法 JSON，会落进本机账本：一条 `"ts": Infinity` 就让便签 `load()` 整份抛，
