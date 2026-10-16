@@ -46,6 +46,19 @@ MAX_COORD = 20000.0           # 拖过的坐标只收这个范围内的数，否
 # 这里只会摘到落单的那个。与 board.py / person.py 同一口径。
 SURROGATE = re.compile("[\ud800-\udfff]")
 
+# XML 1.0 的 Char 产生式收不下的字符，一并在文字入口摘掉：
+#     Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+# 「存一份图片」导出的正是一段 SVG（`/api/mindmap?mode=svg` 把它原样交给前端下载），
+# 而节点文字 / 备注 / 标题 / 连线标签从手改的 mindmap.json、粘贴的正文与 AI 画图三条
+# 路进来 —— `json` 的 "\u0001" / "\uFFFF" 转义读得回来，一路穿过 normalize 落进 <text>，
+# 用户拿到的 `.svg` 打开是「不是合法 XML」，这边却回 ok:true。落单的半个代理码点
+# SURROGATE 已经管了（写不进 utf-8 那一族），这一把补的是另外两族：C0 控制符与 DEL、
+# 以及 U+FFFE / U+FFFF 这两个 BMP 非字符（手写清单最容易漏的就是它们）。判据按产生式
+# 的补集写、不再逐个点名 —— 点漏一个就是同一场事故。与 book_export 里管 EPUB 那份
+# `_XML_ILLEGAL` 同一套尺子，改一处要两处一起改。
+_XML_ILLEGAL = re.compile(
+    "[^\t\n\r\x20-\x7e\x80-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
 # 四种形态：名字是给路由用的键，中文名是给人看的
 FORMS = (("tree", "括号图"), ("radial", "辐射图"),
          ("fishbone", "鱼骨图"), ("concept", "概念图"))
@@ -242,17 +255,18 @@ def _rough_size(raw, limit=MAX_NODES * 4):
 
 def _clip(v, n):
     s = "" if v is None else str(v)
-    return SURROGATE.sub("", s.replace("\r\n", "\n").strip())[:n]
+    return _XML_ILLEGAL.sub("", s.replace("\r\n", "\n").strip())[:n]
 
 
 def _trunc(v, n, state):
     """带计数的裁剪：裁了就报，静默吞掉等于骗用户（他会以为备注还在）。
 
-    落单的半个代理码点先摘掉再量长度与裁剪：它是写不进 utf-8 的坏输入，留着它整张图
-    都存不下去（见 SURROGATE 那段）。真字符不受影响。
+    落单的半个代理码点与 XML 收不下的字符先摘掉再量长度与裁剪：前者是写不进 utf-8
+    的坏输入（见 SURROGATE 那段），后者落进导出的 SVG 就是非法 XML（见 _XML_ILLEGAL
+    那段）。两者都是坏输入不是内容，真字符不受影响。
     """
     s = "" if v is None else str(v)
-    s = SURROGATE.sub("", s.replace("\r\n", "\n").strip())
+    s = _XML_ILLEGAL.sub("", s.replace("\r\n", "\n").strip())
     if len(s) > n:
         state["dropped"] += 1
     return s[:n]
