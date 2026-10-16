@@ -661,6 +661,16 @@ run "写作脏账本兜底（脏字段不翻车 / 存得进 / 裸字符串不拆
 # 离线的写法是在 writer_export() 这一层下探针（那条 HTTP 路前面有 chromium_ready()
 # 前置拦，门禁里到不了 scale 这一段），不起浏览器、不碰真实书库。
 run "写作导出参数（脏 scale 当没传 / 越界夹住 / 一处接线）" "$PY" tests/check_writer_export_args.py
+# 上一条管「脏字段折不成数」，这一条管「导出的那份 .md 别把上一份好稿截掉」。
+# `writer_export(kind="md")` 是四颗导出按钮里唯一不经浏览器的一条：它把正文原文抄一份
+# 到导出文件夹。旧写法 `open(dest, "w")` 一进去就把目标清成 0 字节，写一半被杀只剩半篇
+# （上一趟那份完整导出已经没了）；而这条 GET 挂在 ThreadingHTTPServer 上、没有任何锁，
+# 连点两次导出就是两个请求线程往同一个 dest 上落 —— 各按自己的偏移写，顶成正式文件的
+# 是一份内容交织的稿子。这一条把 md 那一档钉上 `_write_text`（pid + 随机串的临时件 +
+# os.replace + BaseException 收残件，与 _write_json / _write_bytes 同一把尺子），并带
+# 三面对照：直接覆盖写写一半真会截掉旧档、写崩旧档逐字节不动、固定名共用临时件时
+# 两只手至少一只 FileNotFoundError。全程探针顶掉 writer_source / os.replace，离线。
+run "写作导出 Markdown 原子落盘（写一半不毁旧档 / 并发不交织 / 失败收干净）" "$PY" tests/check_writer_export_atomic.py
 # 上一条管「脏字段折不成数」，这一条管「脏字符写不进 utf-8」。写作这一格的正文按
 # utf-8 写、meta.json 与 _books.json 按 ensure_ascii=False 写，而浏览器把 JS 字符串
 # 拦腰截断时会留下落单的半个代理码点（json.loads 收得下 "\ud83d"）：老代码在
