@@ -10,6 +10,12 @@
 一张裂图就此钉死到用户手动去删。所以除了原子改名，这里还顺着文件头认一眼
 是不是真图片，老版本留下的坏文件也能重下。
 
+同一条判据也用在**落盘那一刻**：过线不等于是一张图，站点 404 / WAF 拦截 / 登录
+超时回的 HTML、API 回的 JSON 错误包都过得了 1KB 这条线。只看长度就改名，会把
+它们当成「下好了的插图」：这一张回 ok（进度虚报），`images/` 里一份不是图片的
+文件跟着 EPUB 与书库同步出去。落盘前先看回包自称的 `Content-Type`、再看文件头
+（见 `content_type_of` / `head_is_image`），两边都认不出就当没下到，走重试。
+
 地址也要过一道闸：`url` 是从网页扒下来的，默认 opener 连 `file:///etc/passwd`
 都会读回来写进 images/（之后还会跟着书库同步出去）。跳转那道闸只管跳转目标，
 管不了「一开始喂进来的就是 file://」，所以取之前先按 clip_article 那一份 scheme
@@ -46,6 +52,26 @@ def head_is_image(head):
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return True
     return any(head.startswith(sig) for sig in _MAGIC)
+
+
+def content_type_of(resp):
+    """回包自称的内容类型（小写、去掉 `; charset=…` 那段）。
+
+    三种结果，各有各的去处：
+      · 字符串（可能是空串）—— 真实的 HTTP 回包，`headers` 是
+        `http.client.HTTPMessage`，一定有 `.get`；空串表示这次真的没带 Content-Type；
+      · `None` —— 这个回包连可读的 headers 接口都没有（极简回包 / 门禁里的假
+        urlopen）。无从判断类型，调用方退回改之前只看长度的口径，不误伤。
+    """
+    try:
+        get = resp.headers.get
+    except Exception:
+        return None
+    try:
+        v = get("Content-Type")
+    except Exception:
+        return ""
+    return str(v or "").split(";")[0].strip().lower()
 
 
 def force_ipv4():
@@ -111,6 +137,15 @@ def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
 
     非原子写的代价不是白下一张，是留下一个坏文件：下一轮只看大小就把它当成品，
     此后再也不重下。先写 fpath.part 再 os.replace 之后，fpath 存在即完整。
+
+    「完整」还差一道：过线（min_bytes）不等于是一张图。站点 404 / WAF 拦截 / 登录
+    超时回的那几页 HTML、API 回的 JSON 错误包，都轻松几百字节。原先只看长度就
+    os.replace 成正式插图、这一张还回 "ok" —— 进度把失败报成成功，`images/` 里
+    多一份不是图片的文件，跟着 EPUB 打包与书库同步一起出去，要等下一轮
+    `is_complete` 认文件头才被当成坏文件重下。落盘前用两把尺子量一眼 ——
+    `Content-Type` 与文件头（`content_type_of` / `head_is_image`），都认不出就当
+    这次没下到（走重试：拦截页多半是暂时的）；回包没有可读的 headers 接口时
+    无从判断，退回只看长度的口径。
     """
     if is_complete(fpath):
         return "skip"
@@ -128,14 +163,23 @@ def download_one(url, fpath, retries=3, min_bytes=MIN_BYTES):
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 raw = resp.read()
-            if len(raw) >= min_bytes:
+                ctype = content_type_of(resp)
+            if len(raw) < min_bytes:
+                last = "fail:empty"
+            elif head_is_image(raw[:12]) or ctype is None:
+                # 文件头对得上就收；回包没有可读的 Content-Type（极简 / 非标准回包）
+                # 时退回改之前的口径，不误判。
                 with open(tmp, "wb") as fh:
                     fh.write(raw)
                     fh.flush()
                     os.fsync(fh.fileno())
                 os.replace(tmp, fpath)
                 return "ok"
-            last = "fail:empty"
+            else:
+                # 对方说了自己是什么（text/html 的 404 / WAF 页、application/json 的
+                # 错误包，或自称 image/* 而文件头对不上的拦截页），文件头也认不出：
+                # 不落盘、不算 ok，走重试。与 is_complete 同一把尺子。
+                last = "fail:not-image"
         except Exception as e:
             last = f"fail:{e}"
         finally:

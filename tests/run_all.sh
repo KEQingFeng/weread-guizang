@@ -1118,6 +1118,14 @@ run "插图文件名脏值（NUL / 控制符 / 半个代理码点只跳一条，
 # 对照防空转。网络层用假 urlopen 顶掉，端到端那条打本机临时端口 + file:// 指向临时目录里
 # 的假密钥文件，不联网、不碰真实书库。
 run "插图地址 scheme（file:// / data: 不许替用户取回本机文件）" "$PY" tests/check_download_scheme.py
+# 地址与文件名都收完了，取回来的**内容**还没人看：download_one 原先只看长度够不够
+# min_bytes 就 os.replace 成正式插图、回 ok。可 raw/*.json 里的 url 是外部数据，回的
+# 可能是 404 / WAF 拦截的一页 HTML 或一段 JSON 错误包 —— 都过得了 1KB 那条线，于是
+# 「进度说下好了，images/ 里躺着一页 HTML」，还要等下一轮 is_complete 认文件头才发现。
+# head_is_image / is_complete 本来就有这把尺子，缺的只是落盘那一刻没问。这一条钉住
+# 「过线但不是图 → fail:not-image、不落盘、不留 .part」「拦截页是暂时的，重试仍能救回」，
+# 含「老写法对 HTML 确实回 ok 并写成插图」的对照防空转。全离线，假 urlopen 顶掉网络。
+run "插图内容（过线的 HTML / JSON 错误页不许当插图落盘）" "$PY" tests/check_download_content.py
 # 加书架（shelf_add.py）是少数几个真去改微信那边状态的动作，此前也没有测试。这一条
 # 不联网、不开浏览器，钉的是两件离线也验得实的事：书号尺子四个入口必须是同一把
 # （界面 / 本地服务 / MCP 都写 5–20 位，shelf_add.py 原来写 5–12，且 Python 的 \d 连
