@@ -25,6 +25,10 @@
   · 中止信号（KeyboardInterrupt 这条 `BaseException` 路径）也把临时件收干净再抛；
   · 多线程并写同一个口不抛、最后落地的账本一定解得动、不留残件；
   · 剪藏那份 meta 照旧摘掉落单的半个代理码点（保证没有为原子写丢掉旧收口）；
+  · 剪藏那一处的**临时名形状**也钉住（F7：一只 `builtins.open` 间谍记下真被打开的
+    临时件名，H3 顺着函数体点名固定名）—— 光看「不留残件 / 旧档不动」不够：单线程
+    写一份新档时固定名同样过得了全部实行为，变异验过（把 `_write_json_atomic` 写回
+    `tmp = path + ".tmp"`，F2–F6 与端到端全绿，只有这两条能红）。
   · 端到端：`import_book` 与 `save_clip` 真落一本书，整本目录无 `.tmp`、剪藏字段在；
   · 对照：固定临时名在同一交错下确实会 `FileNotFoundError` —— 门禁不空转。
 
@@ -32,9 +36,11 @@
 `--fast` 静态段。
 """
 import atexit
+import builtins
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -166,6 +172,31 @@ with mock.patch.object(C.os, "replace", side_effect=KeyboardInterrupt):
 chk("F6 剪藏 meta 中止路径也收干净", aborted2 and tmp_left(CDIR) == [],
     (aborted2, tmp_left(CDIR)))
 
+# F7 · 名字形状：装一只 `builtins.open` 的间谍，把「写模式下以 `.tmp` 收尾」的名字记下来。
+# 前面 F2–F6 加端到端都只看「落没落地、留没留残件」—— 单线程写一份新档时固定名
+# 也全绿，所以那一档钉不住名字。与 `check_feed_atomic` 的 I2 同一手法（间谍记账本
+# 自己那次写开的是哪个名），改回固定名这一条当场红。
+c_seen = []
+c_real_open = builtins.open
+
+
+def c_spy(file, *args, **kw):
+    mode = args[0] if args else kw.get("mode", "r")
+    if isinstance(file, str) and "w" in mode and file.endswith(".tmp"):
+        c_seen.append(os.path.basename(file))
+    return c_real_open(file, *args, **kw)
+
+
+builtins.open = c_spy
+try:
+    C._write_json_atomic(CM, {"v": 11})
+    C._write_json_atomic(CM, {"v": 12})
+finally:
+    builtins.open = c_real_open
+chk("F7 剪藏那份 meta 的临时件带进程号与随机串、两次不撞",
+    len(c_seen) == 2 and len(set(c_seen)) == 2
+    and all((".%d." % os.getpid()) in n for n in c_seen), c_seen)
+
 # ── G. 端到端：真收一本书 / 真剪一篇文章 ─────────────────────────────
 i1 = B.import_book(os.path.join(SB, "imported"), "b.md",
                    "# 第一章\n\n正文内容。\n".encode("utf-8"), title="导入书")
@@ -192,17 +223,24 @@ chk("G4 剪藏入库：章节目录与正文都在",
     and any(n.endswith(".md") for n in os.listdir(os.path.join(info["dir"], "chapters"))))
 
 # ── H. 源码：两个写口都换成了独名 + BaseException 收残件 ────────────
+# 固定名按**形状**点名（`tmp = <任意> + ".tmp"`），不按字面量：写口里的变量名会换
+# （`path` / `mp` / `dest`），只查 `'tmp = path + ".tmp"'` 的那一种，改回固定名时
+# 只要换个变量名就能溜过去 —— 变异验过这条（clip_article 写回 `tmp = path + ".tmp"`，
+# 原来那句字面量查的是 `mp`，一个都不红）。
+FIXED_TMP = re.compile(r'tmp\s*=\s*[^=\n]+\+\s*"\.tmp"')
 BSRC = io.open(os.path.join(REPO, "book_import.py"), encoding="utf-8").read()
 seg = BSRC[BSRC.find("def _write_json"):BSRC.find("def _make_book_dir")]
-chk('H1 book_import：不再有固定名 `tmp = path + ".tmp"`',
-    'tmp = path + ".tmp"' not in BSRC)
+chk("H1 book_import：`_write_json` 里再没有 `tmp = … + \".tmp\"` 这种固定名赋值",
+    not FIXED_TMP.search(seg), FIXED_TMP.search(seg) and FIXED_TMP.search(seg).group(0))
 chk("H2 book_import：_write_json 走 _tmp_name + BaseException 收残件",
     "def _tmp_name(path)" in BSRC and "tmp = _tmp_name(path)" in seg
     and "except BaseException" in seg, seg[:200])
 CSRC = io.open(os.path.join(REPO, "clip_article.py"), encoding="utf-8").read()
 cseg = CSRC[CSRC.find("def _write_json_atomic"):CSRC.find("def save_clip")]
-chk('H3 clip_article：不再有固定名 `tmp = mp + ".tmp"`',
-    'tmp = mp + ".tmp"' not in CSRC)
+chk("H3 clip_article：`_write_json_atomic` 里再没有固定名赋值，名字从 pid + 随机串来",
+    not FIXED_TMP.search(cseg) and "os.getpid()" in cseg
+    and "uuid.uuid4().hex[:8]" in cseg, FIXED_TMP.search(cseg)
+    and FIXED_TMP.search(cseg).group(0))
 chk("H4 clip_article：save_clip 的 meta 走 _write_json_atomic",
     "_write_json_atomic(mp, meta)" in CSRC and "except BaseException" in cseg, cseg[:200])
 
