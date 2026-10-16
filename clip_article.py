@@ -97,6 +97,25 @@ def _ip_blocked(ip):
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
+def _idna_host(h):
+    """把主机名按 `socket.getaddrinfo` 那一步先归一一次（认不出回空串）。
+
+    CPython 的 `getaddrinfo` 收到非 ASCII 主机名时会先走 `str.encode("idna")`：
+    那一步做的是 RFC 3491 的 nameprep（NFKC + 大小写折叠 + 映射），把相容字符折回
+    基本字符 —— 上标 `²`（U+00B2）折成 `2`、阳性序数 `º`（U+00BA）折成 `o`、表意
+    句号 `。`（U+3002）折成 `.`。于是 `1²7.0.0.1` 真正连的是 `127.0.0.1`、
+    `lºcalhost` 连的是 `localhost`，可字面量上它们既不是一个 IP、也匹配不上
+    `127.` / `localhost` 前缀。
+
+    归一不出来（超长标签、空标签、带 `%` 的 zone id 等）回空串：那种形状
+    `getaddrinfo` 一样认不出，调用方照原样判即可。这一步只做映射，不联网。
+    """
+    try:
+        return str(h).encode("idna").decode("ascii").strip().lower().rstrip(".")
+    except Exception:
+        return ""
+
+
 def host_blocked(host):
     """这个主机名是不是本机 / 内网地址（拒绝替用户去敲）。
 
@@ -113,6 +132,13 @@ def host_blocked(host):
     从这个口整批漏过去（剪藏取页、内置浏览器、平台解析、首图与封面兜底全走这里）。
     与 urllib 一样只解一次：`%2531…` 解出来仍是 `%31…`，DNS 认不出，不构成通路。
 
+    IDNA 归一（`_idna_host`）是同一个「看的是一串、连的是另一串」的第二档，而且这
+    一档真的够得着：相容字符折出来的主机名是**latin-1 能编码**的，`urllib` 那道
+    Host 头的编码不会拦它（`¹²⁷` 那种 latin-1 编不出的才会被拦下来），于是
+    `http://1²7.0.0.1:8770/api/state` 从这个口进来、socket 连的确是 127.0.0.1 ——
+    实测本机假服务真被敲到、回包还被当成正文收下。按字面判与按 getaddrinfo 判必须
+    是同一把尺子，所以这里把原样与本名都过一遍。
+
     解编码放在方括号剥离之前：`%5B::1%5D` 先变成 `[::1]`，后面那一步才认得出。
     """
     h = urllib.parse.unquote(str(host or ""))
@@ -122,24 +148,31 @@ def host_blocked(host):
     h = h.rstrip(".")
     if not h:
         return True
-    if BLOCKED_HOSTS.match(h):
-        return True
-    h = h.split("%", 1)[0]          # IPv6 的 zone id（fe80::1%eth0）不算地址本体
-    try:
-        ip = ipaddress.ip_address(h)
-    except ValueError:
-        ip = None
-    if ip is not None:
-        mapped = ip.ipv4_mapped if ip.version == 6 else None
-        return _ip_blocked(mapped if mapped is not None else ip)
-    legacy = _legacy_ipv4(h)
-    if legacy is not None:
-        try:
-            return _ip_blocked(ipaddress.ip_address(legacy))
-        except ValueError:
-            # 理论上到不了（_legacy_ipv4 只回 0 .. 2**32-1 的整数）。留着是给这条路钉个
-            # 契约：认不出的东西一律当拒，绝不让 host_blocked 自己把异常冒给调用方。
+    # 原样与本名都判：映射后的那一份是 socket 真正会连的名字，原样那份保证既有
+    # 名字判据（`127.` / `localhost` 前缀）一条都不放宽。
+    mapped = _idna_host(h)
+    for cand in ((h, mapped) if mapped and mapped != h else (h,)):
+        if BLOCKED_HOSTS.match(cand):
             return True
+        name = cand.split("%", 1)[0]    # IPv6 的 zone id（fe80::1%eth0）不算地址本体
+        try:
+            ip = ipaddress.ip_address(name)
+        except ValueError:
+            ip = None
+        if ip is not None:
+            mapped4 = ip.ipv4_mapped if ip.version == 6 else None
+            if _ip_blocked(mapped4 if mapped4 is not None else ip):
+                return True
+            continue
+        legacy = _legacy_ipv4(name)
+        if legacy is not None:
+            try:
+                if _ip_blocked(ipaddress.ip_address(legacy)):
+                    return True
+            except ValueError:
+                # 理论上到不了（_legacy_ipv4 只回 0 .. 2**32-1 的整数）。留着是给这条路
+                # 钉个契约：认不出的东西一律当拒，绝不让 host_blocked 自己把异常冒给调用方。
+                return True
     return False
 
 
