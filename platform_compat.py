@@ -13,6 +13,7 @@
 import hashlib
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -394,6 +395,73 @@ def kill_stray_browsers(profile_dir, wait=1.0):
         pass
     if wait:
         time.sleep(wait)
+
+
+# ───────────────── 拼进文件名的那些字 ─────────────────
+
+# Windows 上这些是保留设备名：不管大小写、也不管带不带扩展名（`CON.md` / `aux.apkg`
+# 都算），create / rename 一律失败，或干脆落到那个设备上。判的是「第一个点之前」那一段。
+_WIN_RESERVED = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + ["COM%d" % i for i in range(1, 10)]
+    + ["LPT%d" % i for i in range(1, 10)]
+)
+# 落单的半个代理码点：JSON 存得下、utf-8 编不出，拼进路径时 `open()` 抛 UnicodeEncodeError。
+_FN_SURROGATE = re.compile("[\ud800-\udfff]")
+# 路径分隔符 / Windows 非法字符 + C0 控制区与 DEL。它们不是「内容」：`/` 会把名字劈成
+# 两层路径，换行会让列表与日志错行，其余几个在 Windows 上直接写不出来。
+_FN_BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+
+
+def _fit_utf8(s, limit):
+    """按 UTF-8 字节数截断，且不切在半个字中间。limit<=0 给空串。"""
+    if limit <= 0:
+        return ""
+    raw = s.encode("utf-8")
+    if len(raw) <= limit:
+        return s
+    raw = raw[:limit]
+    while raw:
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raw = raw[:-1]
+    return ""
+
+
+def safe_file_stem(name, fallback="未命名", max_bytes=180):
+    """把书名 / 标题洗成能直接当文件名的一串字（不含扩展名，扩展名由调用方拼）。
+
+    这不是「改书名」，是「拼路径前先洗一道」。三件事各对应一种盘上看见过的坏结果：
+
+      · **字节数** —— 目录项上限 255 字节，中文一个字三字节。按字符数看着不长，
+        落盘那一下却 `ENAMETOOLONG`：整本书都取完了，最后一秒写合并稿才失败，用户
+        只看到「导出失败」。这里按字节截，不切在半个字中间；默认留 180 字节，给
+        `.md` 与 `_tmp_name` 的 `.<pid>.<随机串>.tmp` 尾巴留足余量（合起来远小于 255）。
+      · **非法 / 控制字符** —— Windows 的 `<>:"/\\|?*` 与控制字符一律换 `_`；`/` 尤其
+        不能留，它会把一个文件名劈成两层。
+      · **保留设备名** —— `CON` / `PRN` / `AUX` / `NUL` / `COM1-9` / `LPT1-9` 在
+        Windows 上写不出来；前面加一个 `_` 就绕开了。
+      · **结尾的点与空格** —— Windows 会静默吃掉它们，写下去的和读回来的对不上名，
+        清理那一侧按原名就再也找不到这份文件。
+
+    落单的半个代理码点先摘掉。正常标题（含中文、空格、中间的点）一个字不改。
+    """
+    def scrub(v):
+        v = _FN_SURROGATE.sub("", str(v if v is not None else ""))
+        v = _FN_BAD.sub("_", v)
+        return v.strip(" .")
+
+    stem = scrub(name)
+    if not stem:
+        stem = scrub(fallback) or "未命名"
+    if stem.split(".", 1)[0].strip().upper() in _WIN_RESERVED:
+        stem = "_" + stem
+    stem = _fit_utf8(stem, max_bytes).rstrip(" .")
+    if stem:
+        return stem
+    tail = scrub(fallback) or "未命名"
+    return _fit_utf8(tail, max(1, min(max_bytes, 16))) or "未命名"
 
 
 def runtime_file(repo):
