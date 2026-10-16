@@ -7,8 +7,9 @@
                 自己下的那份 ffmpeg、取书用的 Chromium。
   清除数据   —— 它自己攒下来的东西：登录态、书架清单、设置、阅读时长、
                 笔记索引、订阅条目、剪藏、封面、下载中间件、临时音频，
-                以及各本账写到一半留下的 `.tmp` 临时件（半截 `config.json`
-                里就带着接口 Key）。
+                以及各本账写到一半留下的 `.tmp` / `.part` 临时件（半截
+                `config.json` 里就带着接口 Key，半截 `readstat.json` 是
+                同步取回断在改名之前留下的）。
 
 软件本体（那个 .app）不归这里管 —— 用户自己拖进废纸篓。**书也一概不动**：
 书在「文档/归藏」里，是用户的东西，不是这软件的缓存。
@@ -65,21 +66,31 @@ ROOT_FILES = (
 
 
 def _residue_re(name):
-    """账本 name 写到一半留下的临时件名：固定 `<name>.tmp` 或 `<name>.<pid>.<随机>.tmp`。
+    """账本 name 写到一半留下的临时件名：`<name>.tmp` / `<name>.<pid>.<随机>.tmp` / `<name>.part`。
 
-    前者是 login 那一处至今还在写的固定名（`feed` / `platform_compat` 在第十七轮之前也还是这一
-    档，改名之前留下的残件同样长得这样），后者是
-    `ui_server._write_json` / `anna_state` / `book_notes` 这一族现版的尺子
-    （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。名字从
-    账本名派生、前后都锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
+    前两种：固定 `<name>.tmp` 是 login 那一处至今还在写的固定名（`feed` /
+    `platform_compat` 在第十七轮之前也还是这一档，改名之前留下的残件同样长得这样），
+    `<name>.<pid>.<随机>.tmp` 是 `ui_server._write_json` / `anna_state` /
+    `book_notes` 这一族现版的尺子
+    （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。
+
+    第三种 `<name>.part` 是**同步取回**那一处的落盘形状（`sync._write_atomic`
+    先写 `path + ".part"` 再改名）：`sync._collect` 会把 `cache/` 里的
+    `readstat.json` / `library.json` / `notes_index.json` 也列进同步对，同步中途被
+    强杀（断网、断电、活动监视器里杀进程）就在 `cache/` 留下一份半截账，而这一刀
+    原先只认 `.tmp` 两族、`drop_stray_tmps` 又只扫书目录 —— 两处都够不到它，用户点
+    「清除本地数据」也带不走。书目录那一头（`ui_server.drop_stray_tmps`）早已是
+    `.tmp` / `.part` 同一把尺子，这里对齐。
+
+    名字从账本名派生、前后都锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
     """
-    return re.compile(r"^%s(?:\.tmp|\.\d+\.[0-9a-f]{8}\.tmp)$" % re.escape(name))
+    return re.compile(r"^%s(?:\.tmp|\.part|\.\d+\.[0-9a-f]{8}\.tmp)$" % re.escape(name))
 
 
 def _residue_in(directory, name):
-    """directory 里属于账本 name 的 `.tmp` 残件；只认普通文件。
+    """directory 里属于账本 name 的 `.tmp` / `.part` 残件；只认普通文件。
 
-    同名目录、符号链接（哪怕以 `.tmp` 收尾）一概不碰 —— 与清残稿那一刀
+    同名目录、符号链接（哪怕以 `.tmp` / `.part` 收尾）一概不碰 —— 与清残稿那一刀
     （`ui_server.drop_stray_tmps`）同一条护栏。目录不存在就当没有。
     """
     try:
@@ -99,17 +110,17 @@ def _residue_in(directory, name):
 
 
 def _residue_items():
-    """白名单账本留下的 `.tmp` 残件，按同样那两张表逐名去找。
+    """白名单账本留下的 `.tmp` / `.part` 残件，按同样那两张表逐名去找。
 
     为什么要单列这一刀：`run()` 是按**精确路径**删的，而这些残件的名字不定
-    （带进程号与随机串）、数量不定，一个都认不到。而它们不是空的 ——
-    `cache/config.json` 的半截件里就是用户的接口 Key，`library.json` 那份是
-    他整个书架。用户点「清除本地数据」（换机、把机器送人之前最常点的那一下）
-    本该把它们一起带走；少收这一刀，残件就留在盘上，而且谁都收不走：
-    `drop_stray_tmps` 只扫书目录，够不到 `cache/` 与数据根。
+    （带进程号与随机串、或同步那一处的 `.part` 尾巴）、数量不定，一个都认不到。
+    而它们不是空的 —— `cache/config.json` 的半截件里就是用户的接口 Key，
+    `library.json` 那份是他整个书架。用户点「清除本地数据」（换机、把机器送人
+    之前最常点的那一下）本该把它们一起带走；少收这一刀，残件就留在盘上，而且
+    谁都收不走：`drop_stray_tmps` 只扫书目录，够不到 `cache/` 与数据根。
 
-    边界仍然按白名单来：只有上面那两张表里点过名的账本，才去收它的 `.tmp`
-    兄弟；不认识的 `.tmp` 一律不动（用户真往里放了别的东西，那是他的东西）。
+    边界仍然按白名单来：只有上面那两张表里点过名的账本，才去收它的 `.tmp` /
+    `.part` 兄弟；不认识的临时件一律不动（用户真往里放了别的东西，那是他的东西）。
     """
     out = []
     for name, label in CACHE_FILES:
