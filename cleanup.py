@@ -67,7 +67,8 @@ ROOT_FILES = (
 def _residue_re(name):
     """账本 name 写到一半留下的临时件名：固定 `<name>.tmp` 或 `<name>.<pid>.<随机>.tmp`。
 
-    前者是 login / platform_compat / feed 那几处旧的写法，后者是
+    前者是 login 那一处至今还在写的固定名（`feed` / `platform_compat` 在第十七轮之前也还是这一
+    档，改名之前留下的残件同样长得这样），后者是
     `ui_server._write_json` / `anna_state` / `book_notes` 这一族现版的尺子
     （`"%s.%d.%s.tmp" % (path, os.getpid(), uuid.uuid4().hex[:8])`）。名字从
     账本名派生、前后都锚死，所以认到的永远只是白名单里那些账本的兄弟文件。
