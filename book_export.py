@@ -372,12 +372,20 @@ def read_chapter_file(path):
     在这边是「整本书导不出来」，病根一模一样，尺子也只该有一把，所以抽到这里：
     导出与读写章节的地方都走这个函数。
 
+    编码那一半用 `utf-8-sig`：章节 / 写作稿也是「用户能直接用记事本改的文本」，
+    Windows 记事本「另存为 UTF-8」会在最前面多塞三字节 BOM。裸 `utf-8` 解出来的
+    开头是一个 U+FEFF，它跟着正文一路往下走 —— `writer.outline` / `title_from` 按
+    `^#` 认标题，行首顶着 BOM 的第一行 `# 标题` 当场认不出来（大纲是空的、标题退回
+    「未题名」），字数也把这三字节算进去；导出 EPUB / PDF 时那个不可见字符同样留在
+    正文里。`utf-8-sig` 只在开头出现 BOM 时摘掉它，正文中间的同名码点一个字不动，
+    与 `book_layout.read_meta` / 各本账读口是同一条口径（写口照旧 `utf-8`，不种 BOM）。
+
     认不出的字节只换成替代符，正文其余部分照旧（正常 UTF-8 一个字都不动）；
     文件读不到（不存在 / 权限 / 同名目录）才回 None，由调用方决定怎么落。
     """
     try:
         with open(path, "rb") as f:
-            return f.read().decode("utf-8", errors="replace")
+            return f.read().decode("utf-8-sig", errors="replace")
     except OSError:
         return None
 
